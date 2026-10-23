@@ -5,7 +5,7 @@
 #   bash run-node.sh --fresh  wipe the data dir and rebuild genesis first
 #
 # The node binary is bin/rnode, committed at the repo root, so a checkout of
-# quantum-os alone is enough to bring a chain up -- no rchain-rust checkout, no
+# quantum-os alone is enough to bring a chain up -- no rholo checkout, no
 # PATH symlink. Set RNODE=/path/to/rnode to run a different build against the
 # same genesis, which is how a candidate rnode gets tested before it replaces
 # bin/rnode.
@@ -40,7 +40,7 @@
 # wallet.txt funds the keys in pk.txt, and genesis seeds those balances into the
 # node's native vault state, so a deploy from either key is pre-charged and
 # executes. Both `/rholang eval` and `/rholang deploy` reach the qucalc
-# powerbox — verified against rchain-rust dev f3f4759e9.
+# powerbox — verified against rholo dev f3f4759e9.
 set -euo pipefail
 cd "$(dirname "$0")"
 

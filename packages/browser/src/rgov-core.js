@@ -943,7 +943,7 @@ export const installIssueProgram = () => installFor(ISSUE_RHO, "Issue");
 /**
  * What `rho:registry:lookup` answers with, normalised.
  *
- * MEASURED, not assumed: on rchain-rust a lookup of an `insertArbitrary` value
+ * MEASURED, not assumed: on rholo a lookup of an `insertArbitrary` value
  * answers **the bare value** — `rec.keys().toList()` gives `["admin","read","self"]`
  * and matching it against `(_, caps)` reports "not a tuple". `locker.js` unwraps
  * a `(_, caps)` tuple, which is the Scala shape; a call site written that way
@@ -1136,7 +1136,7 @@ export function selftest() {
     ok(`${name}: every contract takes at least two parameters`,
        [...src.matchAll(/contract\s+\w+\(([^)]*)\)/g)]
          .every((m) => m[1].split(",").filter((x) => x.trim()).length >= 2),
-       "a one-binder persistent receive in a nested new runs away — rchain-rust#19");
+       "a one-binder persistent receive in a nested new runs away — rholo#19");
     ok(`${name}: readers consume and restore, never peek`, !/<<-/.test(src),
        "a peek is how rgov bound an arbitrary one of two live directories");
     ok(`${name}: publishes exactly one state cell`,
@@ -1286,7 +1286,7 @@ export function selftest() {
      "a bundle taken from a map is not callable in place — locker.js hit this");
   ok("write: accepts either shape lookup may answer with",
      /match record \{ \(_, c\) => \{ capsCh!\(c\) \} c => \{ capsCh!\(c\) \} \}/.test(w),
-     "rchain-rust answers the bare value; the Scala shape is a (_, caps) tuple");
+     "rholo answers the bare value; the Scala shape is a (_, caps) tuple");
 
   const r = ratingsOfProgram(URI, "g1");
   ok("read: is well-formed", balanced(r));

@@ -348,6 +348,6 @@ The Lemmas panel gives both peers a shared, navigable vocabulary of proved claim
 
 The ZFA filter — `full_zeno_prune` — is the same operation that selects physical reality from the space of all possible logical histories.
 
-**[Open a room and try it →](https://rchain-community.github.io/quantum-os/)**
+**[Open a room and try it →](https://rhovision-org.github.io/quantum-os/)**
 
-See [AI.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/AI.md) for the theoretical background on ZFA Blanket Fusion and the Neuro-Symbolic architecture.
+See [AI.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/AI.md) for the theoretical background on ZFA Blanket Fusion and the Neuro-Symbolic architecture.

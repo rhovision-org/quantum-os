@@ -682,7 +682,7 @@ export async function readName(cfg: NodeConfig, name: string): Promise<string[]>
  * the difference — it carries `errored` per deploy — and this is the only way to
  * tell the two apart from outside rnode.
  *
- * `systemDeployError` carries the reducer's first error since rchain-rust#15 —
+ * `systemDeployError` carries the reducer's first error since rholo#15 —
  * before that it was always empty, and "it errored, and cost this much" was the
  * whole of what a deployer could learn. Treat it as optional: an rnode older than
  * that fix reports nothing there.

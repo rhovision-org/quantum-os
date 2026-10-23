@@ -26,8 +26,8 @@
   const REQUIRED_FIELDS = ['title', 'purpose', 'authorizedAction', 'owner', 'evidenceLead', 'reviewer',
     'network', 'contracts', 'electorate', 'approvalReference', 'scope', 'expectedResult', 'evidencePlan', 'dataAudience'];
   const SOURCES = {
-    proposal: 'https://github.com/rchain-community/quantum-os/issues/242',
-    guide: 'https://github.com/rchain-community/rhogov/blob/main/docs/user-guide.md',
+    proposal: 'https://github.com/rhovision-org/quantum-os/issues/242',
+    guide: 'https://github.com/rhovision-org/rhogov/blob/main/docs/user-guide.md',
     eies: 'https://digitalcommons.njit.edu/ccccreports/28/'
   };
   const clone = function (value) { return JSON.parse(JSON.stringify(value)); };

@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["QLF Contributors"]
 license = "MIT"
-repository = "https://github.com/rchain-community/quantum-os"
+repository = "https://github.com/rhovision-org/quantum-os"
 
 [profile.release]
 opt-level = "s"   # size-optimized for WASM

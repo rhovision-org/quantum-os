@@ -269,4 +269,4 @@ The trust ceiling is the dyncap ceiling: TOFU at first contact, race conditions 
 - [PromissoryNoteDemo.md](PromissoryNoteDemo.md) — note declaration / grant / pass / redeem primitives
 - [SECURITY.md § Dynamic capabilities](SECURITY.md#dynamic-capabilities-dyncap--hash-only-identity-layer) — what dyncap closes and where it doesn't go
 
-**[Open a room and try it →](https://rchain-community.github.io/quantum-os/)**
+**[Open a room and try it →](https://rhovision-org.github.io/quantum-os/)**

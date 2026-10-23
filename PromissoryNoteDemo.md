@@ -328,6 +328,6 @@ The pass and redeem were direct-to-peer over DTLS — invisible to third parties
 - [SyllogismDemo.md](SyllogismDemo.md) — collaborative logic over the same primitives
 - [DiningPhilosophersDemo.md](DiningPhilosophersDemo.md) — atomic resource acquisition via `/pass`
 - **Original design source: [Patrick Mockridge's DarkWow promissory note contract](https://codeberg.org/PatrickM123/darkwow/src/branch/linear-master/doc/src/contract/promissory_note.md)**
-- [Quantum Logical Framework `rho_process_always_zfa`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean) — the Lean theorem that the conservation algebra inherits
+- [Quantum Logical Framework `rho_process_always_zfa`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean) — the Lean theorem that the conservation algebra inherits
 
-**[Open a room and try it →](https://rchain-community.github.io/quantum-os/)**
+**[Open a room and try it →](https://rhovision-org.github.io/quantum-os/)**

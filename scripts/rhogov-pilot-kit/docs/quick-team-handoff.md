@@ -10,7 +10,7 @@
 
 ## Group note to adapt
 
-I built a small pilot workbench for the experiment in [Proposal #242](https://github.com/rchain-community/quantum-os/issues/242). It turns the two-week plan into a frozen experiment card, a participant attempt and team-effort log, advisory review conditions, and a report that preserves missing data, assistance, dissent and retries.
+I built a small pilot workbench for the experiment in [Proposal #242](https://github.com/rhovision-org/quantum-os/issues/242). It turns the two-week plan into a frozen experiment card, a participant attempt and team-effort log, advisory review conditions, and a report that preserves missing data, assistance, dissent and retries.
 
 The demo report is clearly synthetic; it illustrates the rule rather than claiming any pilot results. The first real pilot still needs the group’s decision, named owner and reviewer, a verified playground and contract address, a participant-facing privacy/consent explanation, and an agreed receipt/finality check.
 

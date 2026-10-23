@@ -85,7 +85,7 @@ while IFS= read -r name; do
   [ -z "$name" ] && continue
   echo "$name" | grep -qE "$SELF_RE" && continue
   grep -Fxq "$name" "$GREETED" && continue
-  MSG="👋 Hi $name — I'm the QLF Claude CLI. I watch the room and work the quantum-os / quantum-logical-framework repos (proofs, docs, the census tools). Ask me anything, or say what you're exploring. About this room: https://github.com/rchain-community/quantum-os/blob/main/MyRoom.md"
+  MSG="👋 Hi $name — I'm the QLF Claude CLI. I watch the room and work the quantum-os / quantum-logical-framework repos (proofs, docs, the census tools). Ask me anything, or say what you're exploring. About this room: https://github.com/rhovision-org/quantum-os/blob/main/MyRoom.md"
   timeout 45 node qos-cli.mjs --room "$ROOM" --name "$NAME" --message "$MSG" --wait 12000 --linger 4000 >/dev/null 2>&1
   echo "$name" >> "$GREETED"
   GREET_DONE="$GREET_DONE $name"

@@ -4,7 +4,7 @@
 > `+commands` built on it — what a room writes for itself. The second is the
 > `%` capability library that ships with the app and expands inside a
 > `/rholang` program. Tracked in
-> [#65](https://github.com/rchain-community/quantum-os/issues/65).
+> [#65](https://github.com/rhovision-org/quantum-os/issues/65).
 >
 > **This is the design & history.** For a hands‑on guide that assumes no rholang,
 > see **[MacRhoLang.md](MacRhoLang.md)**.
@@ -440,9 +440,9 @@ and **blockchain** is what happens when the stakeholders are not one group.
 
 | | |
 |---|---|
-| [#73](https://github.com/rchain-community/quantum-os/issues/73) | A deploy's answer goes to the deployer's registry slot, which only that key can write to. **done** |
-| [#74](https://github.com/rchain-community/quantum-os/issues/74) | Install the locker and wire `/rholang register`. Needs a signed deploy; gates everything below |
-| [#75](https://github.com/rchain-community/quantum-os/issues/75) | Bind a `$name` to a capability in the locker, so it outlives the room |
+| [#73](https://github.com/rhovision-org/quantum-os/issues/73) | A deploy's answer goes to the deployer's registry slot, which only that key can write to. **done** |
+| [#74](https://github.com/rhovision-org/quantum-os/issues/74) | Install the locker and wire `/rholang register`. Needs a signed deploy; gates everything below |
+| [#75](https://github.com/rhovision-org/quantum-os/issues/75) | Bind a `$name` to a capability in the locker, so it outlives the room |
 
 Also open, and not yet an issue: **offline**. Resolving a name through the
 locker needs an rnode read. What happens with no rnode reachable, and is a
@@ -452,9 +452,9 @@ resolved name cached? A cache that goes stale silently is worse than a miss.
 
 | | |
 |---|---|
-| [#76](https://github.com/rchain-community/quantum-os/issues/76) | Identity credentials: issue, hold, verify. A credential is a relationship, not a property |
-| [#77](https://github.com/rchain-community/quantum-os/issues/77) | Inbox: a caretaker facet per correspondent, and ignore |
-| [#78](https://github.com/rchain-community/quantum-os/issues/78) | Channels that outlive the room: publish and subscribe |
+| [#76](https://github.com/rhovision-org/quantum-os/issues/76) | Identity credentials: issue, hold, verify. A credential is a relationship, not a property |
+| [#77](https://github.com/rhovision-org/quantum-os/issues/77) | Inbox: a caretaker facet per correspondent, and ignore |
+| [#78](https://github.com/rhovision-org/quantum-os/issues/78) | Channels that outlive the room: publish and subscribe |
 
 **Bearer semantics** sits under this heading and stays open by choice. A granted
 facet is held by whoever it reached and there is no un-granting one; a caretaker
@@ -465,7 +465,7 @@ indirection into its own contract.
 
 | | |
 |---|---|
-| [#79](https://github.com/rchain-community/quantum-os/issues/79) | A federated tier: when a group agreed, rather than when somebody published |
+| [#79](https://github.com/rhovision-org/quantum-os/issues/79) | A federated tier: when a group agreed, rather than when somebody published |
 
 **Versioning** is the question that decides its shape: does a group consent to a
 *name* or to a *definition*? A name means later edits ride in on a decision
@@ -520,7 +520,7 @@ the chain-side library and everything in the tiers above.
 
 ### Used anywhere
 
-[#81](https://github.com/rchain-community/quantum-os/issues/81). INTERACT was
+[#81](https://github.com/rhovision-org/quantum-os/issues/81). INTERACT was
 called an interface language and was a general-purpose one. The
 distinction was never real: a language that can answer a prompt conditionally,
 hold state, and call anything the system exposes is a programming language that
@@ -563,8 +563,8 @@ specified before a second place can implement them.
 
 | | |
 |---|---|
-| [rchain-rust#19](https://github.com/rchain-community/rchain-rust/issues/19) | A one-binder persistent receive in a nested `new` does not terminate. Every contract here takes two parameters because of it |
-| [rchain-rust#18](https://github.com/rchain-community/rchain-rust/issues/18) | A cancelled exploratory deploy retains ~10 MB per request |
+| [rholo#19](https://github.com/rhovision-org/rholo/issues/19) | A one-binder persistent receive in a nested `new` does not terminate. Every contract here takes two parameters because of it |
+| [rholo#18](https://github.com/rhovision-org/rholo/issues/18) | A cancelled exploratory deploy retains ~10 MB per request |
 
 ## Checking the macros against rnode
 
@@ -723,7 +723,7 @@ across deploys.
 | `%delegate(to)` | a self-signed delegation |
 
 These four take rholang maps, so they are program-form only. Composed, they are
-[`liquid_democracy.rho`](https://github.com/rchain-community/rchain-rust/blob/dev/qucalc/examples/liquid_democracy.rho):
+[`liquid_democracy.rho`](https://github.com/rhovision-org/rholo/blob/dev/qucalc/examples/liquid_democracy.rho):
 
 ```
 /rholang eval
@@ -750,7 +750,7 @@ Voting *is* the per-issue override.
 | `%transfer(amount, to)` | `rho:rchain:revVault` |
 
 `issuer` / `note` / `redeem` are the on-chain form of the room's own `/note`
-lifecycle, mirroring [`promissory_note.rho`](https://github.com/rchain-community/rchain-rust/blob/dev/qucalc/examples/promissory_note.rho).
+lifecycle, mirroring [`promissory_note.rho`](https://github.com/rhovision-org/rholo/blob/dev/qucalc/examples/promissory_note.rho).
 The difference is what backs conservation: in-room it is ZFA twist balance, on-chain
 it is the RChain purse machinery.
 
@@ -850,7 +850,7 @@ transfer means the value you approved is not the value you signed.
 
 - [**EIES_Legacy.md**](EIES_Legacy.md) — where this comes from: Interact, `+mypriv`,
   and why user programming is the point rather than a feature
-- [**#65**](https://github.com/rchain-community/quantum-os/issues/65) — the
+- [**#65**](https://github.com/rhovision-org/quantum-os/issues/65) — the
   discussion behind every decision here, including the ones still open
 - [**MacRhoLang / @RHO-bot**](https://docs.google.com/document/d/1mTUQwWV9zW5INaJekf-hrZoukWh8Gt8ggFwIxREp1vk/edit) —
   the direct predecessor: `$` sites, `define:`/`echo:`/`find:`, and command-form
@@ -859,6 +859,6 @@ transfer means the value you approved is not the value you signed.
 - [`packages/browser/src/macro-lang.js`](packages/browser/src/macro-lang.js) — the `$` language
 - [`packages/browser/src/rholang-macros.js`](packages/browser/src/rholang-macros.js) — the `%` registry, one source for both halves
 - [`packages/browser/src/macro-lang.js`](packages/browser/src/macro-lang.js) — the `$` language
-- [QuCalc extensions](https://github.com/rchain-community/rchain-rust/blob/dev/docs/src/qucalc/extensions.md) — the system processes these macros call
+- [QuCalc extensions](https://github.com/rhovision-org/rholo/blob/dev/docs/src/qucalc/extensions.md) — the system processes these macros call
 - [`Governance.md`](Governance.md) — the in-room liquid democracy the `rho:gov:*` macros mirror
 - [`SECURITY.md`](SECURITY.md) — threat model
