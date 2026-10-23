@@ -271,4 +271,4 @@ See [**MultisigDemo.md**](MultisigDemo.md) for a 2-of-2 walkthrough using `/dync
 - [MultisigDemo.md](MultisigDemo.md) — 2-of-2 cosignature using `/dyncap` + `/rdv`
 - [SECURITY.md § Rendezvous and no consensus](SECURITY.md#the-shared-root-no-consensus) — what best-effort atomicity buys and where consensus is needed
 
-**[Open a room and try it →](https://rchain-community.github.io/quantum-os/)**
+**[Open a room and try it →](https://rhovision-org.github.io/quantum-os/)**

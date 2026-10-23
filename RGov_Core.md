@@ -195,7 +195,7 @@ contract doGrantRead(_id, @tag, ret) = {
 ```
 
 (The `@_unused` first parameter is the ≥2-params rule from `locker.js` — a one-binder persistent
-receive in a nested `new` was rchain-rust#19. That is **closed and verified fixed**, but the shape
+receive in a nested `new` was rholo#19. That is **closed and verified fixed**, but the shape
 costs nothing and the whole corpus is written this way.)
 
 `peek` is deliberately **not** a public verb. Peek-vs-consume is a security distinction here, not an
@@ -225,8 +225,8 @@ groups: { <groupId>: {
 | `self` | `rate(deployerId, groupId, rateeAddr, level, ret)` | own row only; stored **raw** |
 | `self` | `censure(deployerId, groupId, targetAddr, on, ret)` | own row only |
 | `admin` | `invite(deployerId, groupId, addr, ret)` | the **push** path — returns a one-shot `acceptOne` cap for the inbox |
-| `admin` | `uninvite(deployerId, groupId, addr, ret)` | withdraw an invitation not yet taken up — the mirror of `invite`, as `uncensure` mirrors `censure` ([#246](https://github.com/rchain-community/quantum-os/issues/246)) |
-| `admin` | `setRole(deployerId, groupId, addr, role, ret)` | refuses to demote the **last admin** — a group with none can never invite or promote again ([rhogov#75](https://github.com/rchain-community/rhogov/issues/75)) |
+| `admin` | `uninvite(deployerId, groupId, addr, ret)` | withdraw an invitation not yet taken up — the mirror of `invite`, as `uncensure` mirrors `censure` ([#246](https://github.com/rhovision-org/quantum-os/issues/246)) |
+| `admin` | `setRole(deployerId, groupId, addr, role, ret)` | refuses to demote the **last admin** — a group with none can never invite or promote again ([rhogov#75](https://github.com/rhovision-org/rhogov/issues/75)) |
 | `self` | `leave(deployerId, groupId, ret)` | the last admin cannot leave while other members remain; the last member always can |
 | `read` | `ratingsOf(groupId, ret)` | → `trustLevels` arg 1 |
 | `read` | `adminsOf(groupId, ret)` | → `trustLevels` arg 2 |
@@ -263,7 +263,7 @@ issues: { <issueId>: {
 | `self` | `open(deployerId, groupId, issueId, title, mode, options, groupRead, ret)` | idempotent |
 | `self` | `addOption(deployerId, issueId, optionId, ret)` | while `open` |
 | `self` | `cast(deployerId, issueId, choices, ret)` | membership checked through `groupRead`; latest ballot per voter wins |
-| `self` | `propose(deployerId, issueId, result, ret)` | **opener only** — record the computed tally under the opener's name ([#245](https://github.com/rchain-community/quantum-os/issues/245)) |
+| `self` | `propose(deployerId, issueId, result, ret)` | **opener only** — record the computed tally under the opener's name ([#245](https://github.com/rhovision-org/quantum-os/issues/245)) |
 | `admin` | `enroll(deployerId, issueId, addr, ret)` | returns a `castOne` cap bound to (issue, voter) — for the inbox |
 | `admin` | `lock` / `close(deployerId, issueId, ret)` | freeze options / freeze ballots |
 | `read` | `ballotsOf(issueId, ret)` | → `tally` arg 1 |
@@ -314,7 +314,7 @@ nowhere. So a deployed contract cannot be registered under a name by its install
 ### `Directory` is a factory, not a directory
 
 The `Directory` entry in the genesis map is `bundle+{*directory}`, and
-[`Directory.rho`](https://github.com/rchain-community/rchain-rust/blob/dev/casper/src/genesis/resources/rgov/Directory.rho)
+[`Directory.rho`](https://github.com/rhovision-org/rholo/blob/dev/casper/src/genesis/resources/rgov/Directory.rho)
 opens a fresh `new mapCh, read, write, grant in { mapCh!({}) … }` on **every call**. So calling it
 mints a brand-new empty directory with its own `{read, write, grant}`.
 
@@ -443,9 +443,9 @@ The audit that produced this: `scripts/localnet/rgov-check.mjs` (two tiers, live
 `rnodeapi.rhobot.net`) and `scripts/localnet/macro-check.mjs` (14 ok, 0 failed, 6 skipped — all four
 `rho:gov:*` natives confirmed with `gov.ts`-shaped arguments). The genesis decision — genesis carries
 the directory and its admission policy, nothing else of rgov — is posted upstream as
-[rchain-rust#71](https://github.com/rchain-community/rchain-rust/issues/71). The node behaviours
+[rholo#71](https://github.com/rhovision-org/rholo/issues/71). The node behaviours
 this design steers around are laws 38 and 40 in
-[`porting-a-client.md`](https://github.com/rchain-community/rchain-rust/blob/dev/docs/src/developer/porting-a-client.md):
+[`porting-a-client.md`](https://github.com/rhovision-org/rholo/blob/dev/docs/src/developer/porting-a-client.md):
 a `for` that matches no datum reports no error, and a call at the wrong arity does nothing.
 
 Off-chain semantics: [Governance.md](Governance.md) · [`gov.ts`](packages/browser/src/gov.ts).

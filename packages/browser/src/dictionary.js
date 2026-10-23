@@ -337,7 +337,7 @@ export function installProgram() {
 // Call sites
 // ---------------------------------------------------------------------------
 
-/** rchain-rust answers a lookup with the bare value; the Scala shape is a tuple. */
+/** rholo answers a lookup with the bare value; the Scala shape is a tuple. */
 const UNWRAP = `match record { (_, c) => { capsCh!(c) } c => { capsCh!(c) } }`;
 
 /** A `publish` or `root` call: a signed deploy carrying the caller's identity. */

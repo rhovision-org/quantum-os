@@ -7,7 +7,7 @@
 **Generated (UTC):** 2026-10-05T10:00:00.000Z
 **Mode:** demo
 **Status:** Review recorded
-**Proposal:** https://github.com/rchain-community/quantum-os/issues/242
+**Proposal:** https://github.com/rhovision-org/quantum-os/issues/242
 **Agreed start:** 2026-10-01T09:00:00.000Z
 **Scheduled review:** 2026-10-15T09:00:00.000Z
 
@@ -102,8 +102,8 @@ The target is assessable at this checkpoint. A shortfall means the criterion is 
 **Dissent and remaining concern:** Identity setup, faucet availability, voter eligibility or unclear instructions may block participation.
 **Evidence and observation plan:** Use P01–P10. Time starts when the invitation opens, including setup and eligibility waits. Record every attempt, assistance, withdrawals and unknowns. Check ballot evidence; retain missing and disputed observations. Assess the earliest opened attempt per participant.
 **Raw log audience and retention:** DEMO synthetic data only. No real participant details.
-**Invitation:** https://github.com/rchain-community/rhogov/blob/main/docs/user-guide.md
-**Decision:** https://github.com/rchain-community/quantum-os/issues/242
+**Invitation:** https://github.com/rhovision-org/rhogov/blob/main/docs/user-guide.md
+**Decision:** https://github.com/rhovision-org/quantum-os/issues/242
 
 Baseline assessment stays fixed: 7/10, 5 minutes, 3 participants per named blocker, 10 hours, 14 days.
 
@@ -133,6 +133,6 @@ Source basis: the published abstract and NJIT repository record, not the full re
 
 ## References
 
-- Published proposal: https://github.com/rchain-community/quantum-os/issues/242
-- RhoGov guide: https://github.com/rchain-community/rhogov/blob/main/docs/user-guide.md
+- Published proposal: https://github.com/rhovision-org/quantum-os/issues/242
+- RhoGov guide: https://github.com/rhovision-org/rhogov/blob/main/docs/user-guide.md
 - EIES2 (1992) repository record: https://digitalcommons.njit.edu/ccccreports/28/

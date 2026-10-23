@@ -1,12 +1,12 @@
 # Testnet
 
-The testnet's documentation lives upstream in `rchain-rust` now, where the operators and the node
+The testnet's documentation lives upstream in `rholo` now, where the operators and the node
 contributors are:
 
-- **[The public testnet — `testnet.rhobot.net`](https://github.com/rchain-community/rchain-rust/blob/dev/docs/src/node/testnet.md)**
+- **[The public testnet — `testnet.rhobot.net`](https://github.com/rhovision-org/rholo/blob/dev/docs/src/node/testnet.md)**
   — the live net: hosts, genesis, funded wallets, using it from r-wallet, the verified validator-onboarding
   path, and the incident log (K1–K7).
-- [Running a public testnet of your own](https://github.com/rchain-community/rchain-rust/blob/dev/docs/src/node/running-a-public-testnet.md)
+- [Running a public testnet of your own](https://github.com/rhovision-org/rholo/blob/dev/docs/src/node/running-a-public-testnet.md)
   — the generalised procedure, if you want to stand up another one.
 
 Nothing in this repo needs maintaining for the testnet beyond pointing an agent at it — the agents take a

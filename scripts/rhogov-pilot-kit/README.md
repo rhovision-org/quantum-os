@@ -1,6 +1,6 @@
 # RhoGov Pilot Kit
 
-An evidence-led, local-first workbench for the two-week pilot proposed in [RhoGov — Decisions That Learn (#242)](https://github.com/rchain-community/quantum-os/issues/242).
+An evidence-led, local-first workbench for the two-week pilot proposed in [RhoGov — Decisions That Learn (#242)](https://github.com/rhovision-org/quantum-os/issues/242).
 
 **Make a decision together, try it within clear limits, and keep a say in what happens next.**
 
@@ -70,6 +70,6 @@ The app sends no participant record to a server. Hosting provides the static app
 
 ## References
 
-- [Proposal #242: RhoGov — Decisions That Learn](https://github.com/rchain-community/quantum-os/issues/242)
-- [RhoGov user guide](https://github.com/rchain-community/rhogov/blob/main/docs/user-guide.md)
+- [Proposal #242: RhoGov — Decisions That Learn](https://github.com/rhovision-org/quantum-os/issues/242)
+- [RhoGov user guide](https://github.com/rhovision-org/rhogov/blob/main/docs/user-guide.md)
 - Whitescarver, Czech, Reddy, Rana and Turoff, [EIES 2 (1992)](https://digitalcommons.njit.edu/ccccreports/28/)

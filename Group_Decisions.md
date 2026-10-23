@@ -219,4 +219,4 @@ as well, so an always-on peer won't resurrect a removed lemma.
 ## See also
 
 - **[QuantumOS README](README.md)** — the runtime these decision processes run on: rooms, peers, capability tokens, slash commands, and the ZFA substrate.
-- **[Quantum Logical Framework (QLF) README](https://github.com/rchain-community/quantum-logical-framework/blob/main/README.md)** — the physics/formalism repo: ZFA closure, the machine-verified Lean proofs, and the collective-intelligence theory ([`Room_Best_Practices.md`](Room_Best_Practices.md)) behind reaching good group closure.
+- **[Quantum Logical Framework (QLF) README](https://github.com/rhovision-org/quantum-logical-framework/blob/main/README.md)** — the physics/formalism repo: ZFA closure, the machine-verified Lean proofs, and the collective-intelligence theory ([`Room_Best_Practices.md`](Room_Best_Practices.md)) behind reaching good group closure.

@@ -32,7 +32,7 @@
 /**
  * The locker contract. Deployed once; its uri is then the address everyone uses.
  *
- * Verified against rnode (rchain-rust `dev` at 0a2141be1) by exploratory deploy:
+ * Verified against rnode (rholo `dev` at 0a2141be1) by exploratory deploy:
  * register is idempotent and reports `already`, setSelf and addCred land in the
  * right compartments, bind/resolve are isolated per identity (resolving another
  * identity's name returns Nil), and a granted facet writes exactly one key.
@@ -57,7 +57,7 @@
  *
  *   1. Every contract takes at least two parameters. A one-binder persistent
  *      receive inside a nested `new` does not terminate — it re-fires until the
- *      reduction budget stops it (rchain-rust#19). These contracts live in a
+ *      reduction budget stops it (rholo#19). These contracts live in a
  *      `new` that the deploy wrapper nests inside another, so the shape applies
  *      here. Nothing needs a one-parameter verb, so nothing is written as one.
  *   2. Readers CONSUME AND RESTORE (`for (@r <- cell) { cell!(r) | … }`). Peek
@@ -162,7 +162,7 @@ const q = (s) => JSON.stringify(String(s));
 /**
  * What `rho:registry:lookup` answers with, normalised.
  *
- * MEASURED, not assumed. On rchain-rust a lookup of an `insertArbitrary` value
+ * MEASURED, not assumed. On rholo a lookup of an `insertArbitrary` value
  * answers **the bare value**: `rec.keys().toList()` gives the facet names and
  * matching it against `(_, caps)` reports "not a tuple". The Scala node's shape
  * was the `(uri, value)` tuple this file used to unwrap — which meant every
@@ -180,7 +180,7 @@ const UNWRAP_LOOKUP = `match record { (_, c) => { capsCh!(c) } c => { capsCh!(c)
  * Every call is its own deploy, and that is not a limitation to route around —
  * `deployerId` exists only inside a deploy, so a locker operation IS a deploy.
  * Which is as well: a facet reached through `rho:registry:lookup` answers the
- * first call in a program and nothing after it (rchain-rust#21), so batching
+ * first call in a program and nothing after it (rholo#21), so batching
  * verbs into one program would not work even if the identity allowed it.
  * The program resolves the locker, takes the one facet it needs, and calls it
  * with the identity rnode issued for this deploy and no other.
@@ -299,7 +299,7 @@ export function selftest() {
   ok("every contract takes at least two parameters",
      [...LOCKER_RHO.matchAll(/contract\s+\w+\(([^)]*)\)/g)]
        .every((m) => m[1].split(",").filter((x) => x.trim()).length >= 2),
-     "a one-binder persistent receive in a nested new runs away — rchain-rust#19");
+     "a one-binder persistent receive in a nested new runs away — rholo#19");
   ok("readers consume and restore", !/<<-/.test(LOCKER_RHO));
 
   const reg = registerProgram(URI, "1111alice");

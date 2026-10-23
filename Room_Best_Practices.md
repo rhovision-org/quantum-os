@@ -7,7 +7,7 @@ How a [QuantumOS](README.md) room reaches a **good** decision — not just *a* d
 must pass before it counts.
 
 The grounding principle comes from QLF
-([**SEX.md**](https://github.com/rchain-community/quantum-logical-framework/blob/main/SEX.md) — the
+([**SEX.md**](https://github.com/rhovision-org/quantum-logical-framework/blob/main/SEX.md) — the
 proton/neutron sex model, issue #53): **a higher-order closure formed by *complementary* parts
 achieves what identical copies cannot.** Identical closures are Pauli-blocked from a shared state
 (`pauli_exclusion`); a
@@ -92,7 +92,7 @@ procedural). The point is **complementary coverage**, not a fixed cast.
    complementary *checking* role (rule 2), not a rival lead — exactly what the QuantumOS agents do by
    electing a single lead per duty. (In the QLF *model* this is the "social diproton" — two identical
    closures that can't bind,
-   [`SEX.md`](https://github.com/rchain-community/quantum-logical-framework/blob/main/SEX.md) §3 — but the
+   [`SEX.md`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/SEX.md) §3 — but the
    operational point holds in plain terms.)
 7. **Use diversity of role, perspective, and model type as a closure-strengthening mechanism**, not
    an obstacle to manage away.
@@ -213,7 +213,7 @@ form.
 
 ## References & related
 
-- [**SEX.md**](https://github.com/rchain-community/quantum-logical-framework/blob/main/SEX.md) (QLF, issue #53) — the proton/neutron sex model (`proton_neutron_demo.py`): the closure-through-complementarity principle and its physics anchor (the deuteron — `pn` binds where `pp`/`nn` are Pauli-blocked, and the bond stabilizes the otherwise-decaying neutron).
+- [**SEX.md**](https://github.com/rhovision-org/quantum-logical-framework/blob/main/SEX.md) (QLF, issue #53) — the proton/neutron sex model (`proton_neutron_demo.py`): the closure-through-complementarity principle and its physics anchor (the deuteron — `pn` binds where `pp`/`nn` are Pauli-blocked, and the bond stabilizes the otherwise-decaying neutron).
 - A. W. Woolley et al., *Evidence for a Collective Intelligence Factor*, **Science 330** (2010) 686.
 - J. Whitescarver, [*Collective Intelligence Best Practices*](https://docs.google.com/presentation/d/1qFK10rFcCiBO72aeSFIfII0e1TeIXDKgZqwVlP-wREk/edit) — governance-forum lightning talk (orig. RChain Governance Forum, 2018-02-17); the EIES-legacy findings and CI best practices above, and the RGOV liquid-trust model in [`Governance.md`](Governance.md). See also [collectiveintelligencecollaboratory.com](https://www.collectiveintelligencecollaboratory.com/).
 - Turoff & Hiltz (NJIT EIES) — computer-mediated collective intelligence: *"a group developing better solutions than the best individual in it."*

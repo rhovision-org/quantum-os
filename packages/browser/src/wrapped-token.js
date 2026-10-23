@@ -27,7 +27,7 @@
 // series (notes.ts termsHash8) — non-fungible across issuers.
 //
 // Modeled on locker.js / rholang-exchange.js: every contract takes ≥2 params
-// (rchain-rust#19), state cells are consumed-and-restored, no quoted names.
+// (rholo#19), state cells are consumed-and-restored, no quoted names.
 //
 //   node packages/browser/src/wrapped-token.js --selftest
 

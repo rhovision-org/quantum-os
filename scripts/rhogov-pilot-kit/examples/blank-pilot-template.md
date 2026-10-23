@@ -1,6 +1,6 @@
 # RhoGov Pilot — Blank experiment template
 
-Linked proposal: https://github.com/rchain-community/quantum-os/issues/242
+Linked proposal: https://github.com/rhovision-org/quantum-os/issues/242
 
 ## Action and agreement
 
@@ -34,7 +34,7 @@ Linked proposal: https://github.com/rchain-community/quantum-os/issues/242
 
 **Raw log audience and retention:** [fill by team agreement]
 
-**Decision / proposal link:** https://github.com/rchain-community/quantum-os/issues/242
+**Decision / proposal link:** https://github.com/rhovision-org/quantum-os/issues/242
 
 **Participant invitation:** [fill by team agreement]
 
