@@ -56,10 +56,31 @@ export const DEFAULT_CONFIG: NodeConfig = {
   // learn on. `/rholang rnode <url>` points at either, or at your own — e.g.
   // http://127.0.0.1:40403 for a localnet.
   url: "https://rnodeapi.rhobot.net",
-  shard: "root",
+  // No default: the shard a deploy must name is whatever `/api/status` reports, because the
+  // chain owns that name (`/root`, `/testnet`, `/playground`, …) and a deploy whose `shardId`
+  // differs is refused by the node. `shardIdFor` below is the one place that decides.
+  shard: "",
   phloLimit: 500_000,
   phloPrice: 1,
 };
+
+/**
+ * The shard id a deploy must carry.
+ *
+ * The node is the source of truth: `/api/status` reports the full id (`/testnet`, `/playground`,
+ * `/root`), and a deploy naming anything else is refused outright by the node's own shard check.
+ * `cfg.shard` is only a fallback for a node that does not report one, and an empty answer is an
+ * error rather than a guess — sending a bare `root` is exactly the failure this replaces.
+ */
+function shardIdFor(status: { shardId?: string }, cfg: NodeConfig): string {
+  const shardId = status.shardId || cfg.shard;
+  if (!shardId) {
+    throw new Error(
+      "the node reported no shardId, so a deploy cannot be built; point /rholang at a node that answers /api/status",
+    );
+  }
+  return shardId;
+}
 
 export function loadConfig(): NodeConfig {
   try {
@@ -821,7 +842,7 @@ export async function deployTerm(cfg: NodeConfig, term: string): Promise<DeployO
     // "/" on shardId between builds), and a stale cfg.shard otherwise gets a
     // deploy refused outright ("shardId 'root' is not a member of this
     // node's shards: [/root]") — the same fallback deployToNode already uses.
-    shardId: status.shardId || cfg.shard,
+    shardId: shardIdFor(status, cfg),
   };
   const { deployer, signature } = signDeployData(data, cfg.key);
   const reply = await postJson(cfg, "/api/deploy", {
@@ -872,7 +893,7 @@ export async function deployToNode(
     phloPrice: cfg.phloPrice,
     phloLimit: cfg.phloLimit,
     validAfterBlockNumber: Math.max(0, (status.latestBlockNumber ?? 0) - 1),
-    shardId: status.shardId || cfg.shard,
+    shardId: shardIdFor(status, cfg),
   };
   const { deployer, signature } = signDeployData(data, baseCfg.key);
   const reply = await postJson(cfg, "/api/deploy", { data, deployer, signature, sigAlgorithm: "secp256k1" });
