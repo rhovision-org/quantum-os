@@ -192,7 +192,197 @@ const FACETS = `{"read": bundle+{*readFacet}, "self": bundle+{*selfFacet}, "admi
 // `peek` is not a public verb: a non-consuming read of a vault of capabilities
 // is the strictly more dangerous operation, so it is the one that costs a cap.
 
-const INBOX_VERBS = `contract doSelf(@me, @verb, @args, ret) = {
+/** One history page answers at most this many entries, so one call's phlo is bounded. */
+export const HISTORY_PAGE = 50;
+/** Each owner's history keeps this many entries, newest; the oldest is dropped past it. */
+export const HISTORY_KEEP = 500;
+
+const INBOX_VERBS = `// --- history helpers (quantum-os#241) ---------------------------------------
+  //
+  // Each owner's history is its OWN cell, @(*hist, owner), consumed and restored
+  // like state — so one person's long history never makes anybody else's send or
+  // receive cost more. histKnown records whose cells exist (a receive on a cell
+  // nobody has written would wait forever).
+  //
+  //   history : {"seq": n, "order": [seq, …] (oldest first),
+  //              "entries": {seq: {"seq", "from", "type", "title", "msg"}},
+  //              "byFrom": {addr: [seq, …]}, "byType": {type: [seq, …]}}
+  //
+  // CAPABILITIES ARE NOT KEPT. An entry's "msg" holds only the message's string,
+  // integer and boolean fields: a capability is delivered exactly once, by
+  // receive/take, and history is a record of what was said, not a second copy
+  // of the authority. The newest ${HISTORY_KEEP} entries are kept.
+  histKnown!({}) |
+
+  contract histOf(@me, ret) = {
+    for (@k <- histKnown) {
+      match k.contains(me) {
+        true  => { histKnown!(k) | for (@h <- @(*hist, me)) { ret!(h) } }
+        false => { histKnown!(k.set(me, true)) | ret!({"seq": 0, "order": [], "entries": {}, "byFrom": {}, "byType": {}}) }
+      }
+    }
+  } |
+
+  // pairs: [(type, [msg, …]), …] as a locker's msgs.toList() gives them.
+  contract histAppend(@me, @pairs, ret) = {
+    new got, done in {
+      histOf!(me, *got) |
+      for (@h <- got) {
+        appendPairs!(h, pairs, *done) |
+        for (@h2 <- done) { @(*hist, me)!(h2) | ret!(h2.get("seq")) }
+      }
+    }
+  } |
+  contract appendPairs(@h, @pairs, ret) = {
+    match pairs {
+      [] => { ret!(h) }
+      [(_, msgs) ...rest] => { new d in { appendMsgs!(h, msgs, *d) | for (@h2 <- d) { appendPairs!(h2, rest, *ret) } } }
+    }
+  } |
+  contract appendMsgs(@h, @msgs, ret) = {
+    match msgs {
+      [] => { ret!(h) }
+      [m ...rest] => {
+        new clean, d in {
+          strip!(m.toList(), {}, *clean) |
+          for (@c <- clean) {
+            let @n <- h.get("seq") + 1 in {
+              let @from <- c.getOrElse("from", "") in {
+                let @ty <- c.getOrElse("type", "") in {
+                  let @h1 <- h.set("seq", n).set("order", h.get("order") ++ [n])
+                      .set("entries", h.get("entries").set(n, {"seq": n, "from": from, "type": ty, "title": c.getOrElse("subject", ""), "msg": c}))
+                      .set("byFrom", h.get("byFrom").set(from, h.get("byFrom").getOrElse(from, []) ++ [n]))
+                      .set("byType", h.get("byType").set(ty, h.get("byType").getOrElse(ty, []) ++ [n])) in {
+                    match h1.get("order").length() > ${HISTORY_KEEP} {
+                      true  => { dropSeqs!(h1, [h1.get("order").nth(0)], *d) }
+                      false => { d!(h1) }
+                    } |
+                    for (@h2 <- d) { appendMsgs!(h2, rest, *ret) }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  } |
+  // Keep a message's plain fields; leave out anything else (a name, a capability).
+  contract strip(@kvs, @acc, ret) = {
+    match kvs {
+      [] => { ret!(acc) }
+      [(k, v) ...rest] => {
+        match v {
+          String => { strip!(rest, acc.set(k, v), *ret) }
+          Int    => { strip!(rest, acc.set(k, v), *ret) }
+          Bool   => { strip!(rest, acc.set(k, v), *ret) }
+          _      => { strip!(rest, acc, *ret) }
+        }
+      }
+    }
+  } |
+  contract rev(@xs, @acc, ret) = {
+    match xs {
+      [] => { ret!(acc) }
+      [x ...rest] => { rev!(rest, [x] ++ acc, *ret) }
+    }
+  } |
+  contract without(@xs, @x, @acc, ret) = {
+    match xs {
+      [] => { ret!(acc) }
+      [y ...rest] => { match y == x { true => { without!(rest, x, acc, *ret) } false => { without!(rest, x, acc ++ [y], *ret) } } }
+    }
+  } |
+  contract dropSeqs(@h, @seqs, ret) = {
+    match seqs {
+      [] => { ret!(h) }
+      [k ...rest] => { new d in { dropOne!(h, k, *d) | for (@h2 <- d) { dropSeqs!(h2, rest, *ret) } } }
+    }
+  } |
+  contract dropOne(@h, @k, ret) = {
+    match h.get("entries").getOrElse(k, Nil) {
+      Nil => { ret!(h) }
+      e => {
+        new o, f, t in {
+          without!(h.get("order"), k, [], *o) |
+          without!(h.get("byFrom").getOrElse(e.get("from"), []), k, [], *f) |
+          without!(h.get("byType").getOrElse(e.get("type"), []), k, [], *t) |
+          for (@o2 <- o; @f2 <- f; @t2 <- t) {
+            ret!(h.set("order", o2).set("entries", h.get("entries").delete(k))
+                  .set("byFrom", h.get("byFrom").set(e.get("from"), f2))
+                  .set("byType", h.get("byType").set(e.get("type"), t2)))
+          }
+        }
+      }
+    }
+  } |
+  // desc: seqs newest first. ctx: [cursor, query, entries, limit]. Answers
+  // [page, nextCursor]; the next page is the entries below nextCursor.
+  contract walk(@desc, @ctx, @acc, ret) = {
+    match desc {
+      [] => { ret!([acc, Nil]) }
+      [k ...rest] => {
+        match acc.length() >= ctx.nth(3) {
+          true  => { ret!([acc, acc.nth(acc.length() - 1).get("seq")]) }
+          false => {
+            new keep, hit in {
+              match ctx.nth(0) { Nil => { keep!(true) } c => { keep!(k < c) } } |
+              for (@yes <- keep) {
+                match yes {
+                  false => { walk!(rest, ctx, acc, *ret) }
+                  true  => {
+                    entryHits!(ctx.nth(2).get(k), ctx.nth(1), *hit) |
+                    for (@m <- hit) {
+                      match m {
+                        true  => { walk!(rest, ctx, acc ++ [ctx.nth(2).get(k)], *ret) }
+                        false => { walk!(rest, ctx, acc, *ret) }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  } |
+  contract entryHits(@e, @query, ret) = {
+    new a, b in {
+      match query.getOrElse("type", Nil) { Nil => { a!(true) } ty => { a!(e.get("type") == ty) } } |
+      match query.getOrElse("from", Nil) { Nil => { b!(true) } who => { b!(e.get("from") == who) } } |
+      for (@x <- a; @y <- b) {
+        match x and y {
+          false => { ret!(false) }
+          true  => {
+            match query.getOrElse("title", Nil) {
+              Nil => { ret!(true) }
+              ""  => { ret!(true) }
+              t   => { hasSub!(e.get("title"), [t, 0], *ret) }
+            }
+          }
+        }
+      }
+    }
+  } |
+  // Case-sensitive substring: the reducer has slice and length, nothing more.
+  contract hasSub(@str, @at, ret) = {
+    let @sub <- at.nth(0) in {
+      let @i <- at.nth(1) in {
+        match i + sub.length() > str.length() {
+          true  => { ret!(false) }
+          false => {
+            match str.slice(i, i + sub.length()) == sub {
+              true  => { ret!(true) }
+              false => { hasSub!(str, [sub, i + 1], *ret) }
+            }
+          }
+        }
+      }
+    }
+  } |
+
+  contract doSelf(@me, @verb, @args, ret) = {
     for (@s <- state) {
       match [verb, args] {
         ["newLocker", [tag, policy]] => {
@@ -258,7 +448,10 @@ const INBOX_VERBS = `contract doSelf(@me, @verb, @args, ret) = {
             Nil => { state!(s) | ret!(("gov-error", "no such locker", tag)) }
             box => {
               state!(s.set(me, s.get(me).set(tag, box.set("msgs", {})))) |
-              ret!(("received", box.getOrElse("msgs", {})))
+              new kept in {
+                histAppend!(me, box.getOrElse("msgs", {}).toList(), *kept) |
+                for (_ <- kept) { ret!(("received", box.getOrElse("msgs", {}))) }
+              }
             }
           }
         }
@@ -269,7 +462,10 @@ const INBOX_VERBS = `contract doSelf(@me, @verb, @args, ret) = {
             Nil => { state!(s) | ret!(("gov-error", "no such locker", tag)) }
             box => {
               state!(s.set(me, s.get(me).set(tag, box.set("msgs", box.get("msgs").delete(type))))) |
-              ret!(("took", type, box.getOrElse("msgs", {}).getOrElse(type, [])))
+              new kept in {
+                histAppend!(me, [(type, box.getOrElse("msgs", {}).getOrElse(type, []))], *kept) |
+                for (_ <- kept) { ret!(("took", type, box.getOrElse("msgs", {}).getOrElse(type, []))) }
+              }
             }
           }
         }
@@ -338,6 +534,77 @@ const INBOX_VERBS = `contract doSelf(@me, @verb, @args, ret) = {
           }
         }
 
+        // HISTORY (quantum-os#241). What receive/take handed over, kept for the
+        // owner to search and page. Answered on the self facet only: reading it is
+        // a signed deploy by the owner, so nobody else's key can ask for it. (The
+        // bodies are in chain state, unencrypted, either way: the facet decides
+        // who the CONTRACT answers, not what a node operator can see.)
+        //
+        //   history(query, cursor, limit) -> ("history", [entry, …], nextCursor | Nil)
+        //
+        // query: any of {"from": addr, "type": ty, "title": text}; title is a
+        // case-sensitive substring of the message's "subject". Newest first;
+        // cursor is a seq (Nil for the newest page) and the next page is the
+        // entries below it. limit is capped at HISTORY_PAGE.
+        ["history", [query, cursor, limit]] => {
+          state!(s) |
+          new got, lim, srcCh, down, page in {
+            histOf!(me, *got) |
+            match limit > ${HISTORY_PAGE} {
+              true  => { lim!(${HISTORY_PAGE}) }
+              false => { match limit < 1 { true => { lim!(1) } false => { lim!(limit) } } }
+            } |
+            for (@h <- got; @n <- lim) {
+              @(*hist, me)!(h) |
+              // A sender or type filter starts from its index, so finding one
+              // sender's messages does not scan everybody else's.
+              match [query.getOrElse("from", Nil), query.getOrElse("type", Nil)] {
+                [Nil, Nil] => { srcCh!(h.get("order")) }
+                [Nil, ty]  => { srcCh!(h.get("byType").getOrElse(ty, [])) }
+                [who, _]   => { srcCh!(h.get("byFrom").getOrElse(who, [])) }
+              } |
+              for (@src <- srcCh) {
+                rev!(src, [], *down) |
+                for (@desc <- down) {
+                  walk!(desc, [cursor, query, h.get("entries"), n], [], *page) |
+                  for (@r <- page) { ret!(("history", r.nth(0), r.nth(1))) }
+                }
+              }
+            }
+          }
+        }
+
+        // Delete entries by seq. Unknown seqs are ignored, so a retry is harmless.
+        ["forget", [seqs]] => {
+          state!(s) |
+          new got, done in {
+            histOf!(me, *got) |
+            for (@h <- got) {
+              dropSeqs!(h, seqs, *done) |
+              for (@h2 <- done) { @(*hist, me)!(h2) | ret!(("forgot", h.get("order").length() - h2.get("order").length())) }
+            }
+          }
+        }
+
+        // Migration of history, the same way as lockers: your own, in one term
+        // (migrateLockersProgram), refused onto a non-empty history.
+        ["exportHistory", []] => {
+          state!(s) |
+          new got in { histOf!(me, *got) | for (@h <- got) { @(*hist, me)!(h) | ret!(("history-export", h)) } }
+        }
+        ["importHistory", [h2]] => {
+          state!(s) |
+          new got in {
+            histOf!(me, *got) |
+            for (@h <- got) {
+              match h.get("order").length() == 0 {
+                true  => { @(*hist, me)!(h2) | ret!(("history-imported", h2.get("order").length())) }
+                false => { @(*hist, me)!(h) | ret!(("gov-error", "already has history", me)) }
+              }
+            }
+          }
+        }
+
         _ => { state!(s) | ret!(("gov-error", "bad verb or arity", verb)) }
       }
     }
@@ -358,7 +625,9 @@ const INBOX_VERBS = `contract doSelf(@me, @verb, @args, ret) = {
     }
   } |`;
 
-export const INBOX_RHO = preamble("Inbox/3", { vault: true }).replace("HELPERS\n", "").replace("VERBS", INBOX_VERBS);
+const INBOX_HELPERS = `histKnown, hist, histOf, histAppend, appendPairs, appendMsgs, strip, rev, without, dropSeqs, dropOne, walk, entryHits, hasSub,`;
+
+export const INBOX_RHO = preamble("Inbox/4", { vault: true }).replace("HELPERS", INBOX_HELPERS).replace("VERBS", INBOX_VERBS);
 
 // ---------------------------------------------------------------------------
 // 2. Group — the state the natives read
@@ -1065,7 +1334,7 @@ export const issuesOfProgram  = (uri, gid) => readProgram(uri, "issuesOf", [q(gi
  */
 export function migrateLockersProgram(oldUri, newUri) {
   return `new lookup(\`rho:registry:lookup\`), deployerId(\`rho:rchain:deployerId\`),
-    deployId(\`rho:rchain:deployId\`), oldCh, newCh, oldCaps, newCaps, r1, r2 in {
+    deployId(\`rho:rchain:deployId\`), oldCh, newCh, oldCaps, newCaps, r1, r2, r3, r4 in {
   lookup!(\`${oldUri}\`, *oldCh) | lookup!(\`${newUri}\`, *newCh) |
   for (@oldRec <- oldCh; @newRec <- newCh) {
     match oldRec { (_, c) => { oldCaps!(c) } c => { oldCaps!(c) } } |
@@ -1078,7 +1347,25 @@ export function migrateLockersProgram(oldUri, newUri) {
             match ex {
               ("export", lockers) => {
                 @newSelf!(*deployerId, "import", [lockers], *r2) |
-                for (@res <- r2) { return!(res) | deployId!(res) }
+                for (@res <- r2) {
+                  match res {
+                    // History follows the lockers (quantum-os#241), in the same term.
+                    ("imported", _) => {
+                      @oldSelf!(*deployerId, "exportHistory", [], *r3) |
+                      for (@hx <- r3) {
+                        match hx {
+                          ("history-export", h) => {
+                            @newSelf!(*deployerId, "importHistory", [h], *r4) |
+                            for (@hr <- r4) { return!((res, hr)) | deployId!((res, hr)) }
+                          }
+                          // An Inbox from before history has nothing to move.
+                          _ => { return!((res, hx)) | deployId!((res, hx)) }
+                        }
+                      }
+                    }
+                    _ => { return!(res) | deployId!(res) }
+                  }
+                }
               }
               _ => { return!(("gov-error", "export failed", ex)) | deployId!(("gov-error", "export failed", ex)) }
             }
@@ -1092,6 +1379,13 @@ export function migrateLockersProgram(oldUri, newUri) {
 }
 
 export const exportLockersProgram = (uri) => writeProgram(uri, "self", "export", []);
+
+/** A rholang map literal from a JS object of strings. */
+const qMap = (o) => `{${Object.entries(o).filter(([, v]) => v != null && v !== "").map(([k, v]) => `${q(k)}: ${q(v)}`).join(", ")}}`;
+/** Your own history, newest first: query is any of {from, type, title}; cursor a seq from the previous page, or null. */
+export const historyProgram = (uri, query = {}, cursor = null, limit = HISTORY_PAGE) =>
+  writeProgram(uri, "self", "history", [qMap(query), cursor == null ? "Nil" : String(Number(cursor)), String(Number(limit))]);
+export const forgetHistoryProgram = (uri, seqs) => writeProgram(uri, "self", "forget", [`[${seqs.map((n) => String(Number(n))).join(", ")}]`]);
 
 // --- migration -------------------------------------------------------------
 export const dumpProgram = (uri) => writeProgram(uri, "admin", "dump", [], { asAdmin: true });
@@ -1197,6 +1491,20 @@ export function selftest() {
      "read must answer tags, types and counts — never contents");
   ok("Inbox: bodies are reachable only through a granted per-locker cap",
      /contract readOne\(/.test(INBOX_RHO) && /"granted", "read"/.test(INBOX_RHO));
+  // History (quantum-os#241): owner-only, capability-free, per-owner, bounded.
+  ok("Inbox: history is a self verb, not a read verb",
+     /\["history", \[query, cursor, limit\]\]/.test(INBOX_RHO.split("contract doRead")[0]) &&
+     !/"history"/.test(INBOX_RHO.split("contract doRead")[1] ?? ""));
+  ok("Inbox: receive and take both keep history", (INBOX_RHO.match(/histAppend!\(me,/g) || []).length === 2);
+  ok("Inbox: history keeps only plain fields, never a capability",
+     /String => \{ strip!/.test(INBOX_RHO) && /_      => \{ strip!\(rest, acc, \*ret\) \}/.test(INBOX_RHO));
+  ok("Inbox: each owner's history is its own cell", /@\(\*hist, me\)!\(h/.test(INBOX_RHO));
+  ok("Inbox: a history page and a history are bounded",
+     INBOX_RHO.includes(`lim!(${HISTORY_PAGE})`) && INBOX_RHO.includes(`length() > ${HISTORY_KEEP}`));
+  ok("Inbox: importHistory refuses to merge", /"gov-error", "already has history"/.test(INBOX_RHO));
+  ok("Inbox: migration carries history", /"exportHistory"/.test(migrateLockersProgram("rho:id:a", "rho:id:b")));
+  ok("Inbox: historyProgram builds the call", /"history", \[\{"from": "x"\}, Nil, 50\]/.test(historyProgram("rho:id:a", { from: "x" })),
+     historyProgram("rho:id:a", { from: "x" }).slice(-200));
   ok("Inbox: peek is not a public verb", !/"peek"/.test(INBOX_RHO),
      "a non-consuming read of a vault of capabilities is the dangerous one");
   ok("Inbox: a locker indexes by type rather than scanning",
