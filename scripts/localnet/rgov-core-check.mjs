@@ -258,6 +258,37 @@ await write("inbox: bob receives the cap and USES it", bob,
 await read("inbox: the cap wrote into the invite-only locker", C.countInProgram(INBOX, A, "private", "secret"),
   (v) => v[0] === 1);
 
+// ── Inbox history (quantum-os#241) ───────────────────────────────────────────
+// A Nil cursor comes back as a missing third element, so test `next == null`.
+const hist = (v) => { const r = v?.find((x) => Array.isArray(x) && x[0] === "history"); return r ? { entries: r[1], next: r[2] } : null; };
+await write("history: alice's receive and take were kept, newest first", alice, C.historyProgram(INBOX),
+  (v) => { const h = hist(v); return h && h.entries.length === 2 && h.entries[0].msg.body === "one" && h.entries[1].msg.body === "hello" && h.next == null; });
+await write("history: a capability is NOT kept (bob's cap message has no body)", bob, C.historyProgram(INBOX),
+  (v) => { const h = hist(v); return h && h.entries.length === 1 && h.entries[0].type === "cap" && !("body" in h.entries[0].msg); });
+await write("history: nobody else's history is answered (bob sees only his own)", bob, C.historyProgram(INBOX, { from: B }),
+  (v) => { const h = hist(v); return h && h.entries.length === 0; });
+for (const [i, subject] of ["Budget draft", "Agenda", "Budget final"].entries())
+  await write(`history: bob sends alice "${subject}"`, bob,
+    C.sendProgram(INBOX, A, "inbox", `{"type": "message", "subject": ${JSON.stringify(subject)}, "body": "n${i}"}`),
+    (v) => JSON.stringify(v).includes("sent"));
+await write("history: alice receives them", alice, C.receiveProgram(INBOX, "inbox"), (v) => JSON.stringify(v).includes("received"));
+const p1 = hist(await write("history: page 1 of 2 (limit 3)", alice, C.historyProgram(INBOX, {}, null, 3),
+  (v) => { const h = hist(v); return h && h.entries.length === 3 && h.next != null; }));
+await write("history: page 2 continues below the cursor", alice, C.historyProgram(INBOX, {}, p1?.next, 3),
+  (v) => { const h = hist(v); return h && h.entries.length === 3 && h.next == null && h.entries.every((e) => e.seq < p1.next); });
+await write("history: by title (substring)", alice, C.historyProgram(INBOX, { title: "Budget" }),
+  (v) => { const h = hist(v); return h && h.entries.map((e) => e.title).join("|") === "Budget final|Budget draft"; });
+await write("history: by type", alice, C.historyProgram(INBOX, { type: "message" }),
+  (v) => hist(v)?.entries.length === 3);
+await write("history: by sender", alice, C.historyProgram(INBOX, { from: B }),
+  (v) => hist(v)?.entries.length === 6);
+await write("history: by sender AND title", alice, C.historyProgram(INBOX, { from: B, title: "Agenda" }),
+  (v) => hist(v)?.entries.length === 1);
+await write("history: forget removes an entry", alice, C.forgetHistoryProgram(INBOX, [1, 999]),
+  (v) => JSON.stringify(v).includes('["forgot",1]') || JSON.stringify(v).includes("forgot"));
+await write("history: …and it's gone from every index", alice, C.historyProgram(INBOX, { from: B }),
+  (v) => { const h = hist(v); return h && h.entries.length === 5 && !h.entries.some((e) => e.seq === 1); });
+
 // Requirement 5, the push half: a first message to somebody who has never acted
 // must not bounce. Carol has done nothing at all on this contract.
 const carolA = revAddressOf(keyOf("carol"));
@@ -414,6 +445,8 @@ if (INBOX2) {
 
   await write("alice migrates her lockers to the new Inbox", alice,
     C.migrateLockersProgram(INBOX, INBOX2), (v) => JSON.stringify(v).includes("imported"));
+  await write("alice's history moved with her lockers", alice, C.historyProgram(INBOX2),
+    (v) => hist(v)?.entries.length === 5);
   await read("the capability arrived at the new contract",
     C.countInProgram(INBOX2, A, "inbox", "cap"), (v) => v[0] === 1);
   await write("importing twice is refused", alice,

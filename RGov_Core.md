@@ -164,6 +164,36 @@ msg  : { "from": <addr>, "type": <str>, "subtype": <str>, "at": <int>, "body": <
 | `read` | `countIn(addr, tag, type, ret)` | counts only |
 | `admin` | `version` only | **no whole-contract dump**: it returned message bodies |
 | `self` | `export()` · `import(lockers)` | migration, per identity, in one term |
+| `self` | `history(query, cursor, limit)` | **Inbox/4.** What `receive`/`take` handed over, newest first, paged (≤ 50 per call); `query` is any of `{from, type, title}` |
+| `self` | `forget(seqs)` | **Inbox/4.** Delete history entries |
+| `self` | `exportHistory()` · `importHistory(h)` | **Inbox/4.** History migrates with the lockers, in the same term (`migrateLockersProgram`) |
+
+### History (Inbox/4, quantum-os#241)
+
+`receive` and `take` still hand messages over and empty the locker, so a capability is still
+delivered once. They also append each message to the owner's **history**, so a person's record of
+what they were sent follows their key to any device instead of living in one browser.
+
+- **Who can read it: the owner, by signed deploy.** `history` is on the `self` facet, so the
+  contract answers only the caller's own history, and each page is one signed deploy (a fee and a
+  block). It is not on the `read` facet. That decides what the **contract** answers, not what a node
+  operator can see: bodies sit in chain state unencrypted, as they always have until collected.
+- **Capabilities are not kept.** An entry keeps the message's string, integer and boolean fields
+  and drops anything else, so history is a record of what was said, not a second copy of the
+  authority.
+- **Cost does not leak between people.** Each owner's history is its own cell, `@(*hist, owner)`,
+  consumed and restored, so one person's long history never makes anybody else's send or receive
+  cost more. Filters by sender and by type start from per-owner indexes (`byFrom`, `byType`), so
+  finding one sender's messages does not scan the rest. A title filter is a case-sensitive substring
+  of the message's `subject`, scanned over the candidates.
+- **Bounded.** A page answers at most 50 entries; each owner keeps the newest 500, and `forget`
+  deletes entries. A cursor is a `seq`: the next page is the entries below it, and a `Nil` cursor
+  (absent from the decoded tuple) means there is no next page.
+
+```
+history : { "seq": n, "order": [seq, …], "entries": { seq: {"seq", "from", "type", "title", "msg"} },
+            "byFrom": { addr: [seq, …] }, "byType": { type: [seq, …] } }
+```
 
 **The public `read` facet never returns a message body.** Metadata is public; contents require a
 per-locker cap. That is requirement 2 (reporting without write authority) and requirement 4 (blast
