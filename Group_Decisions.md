@@ -218,5 +218,6 @@ as well, so an always-on peer won't resurrect a removed lemma.
 
 ## See also
 
+- **[RhoGov process orchestration](https://github.com/rhovision-org/rhogov/blob/main/docs/process-orchestration.md)** — how these decision processes become reusable components of on-chain councils for rholo governance: instruments, combiners, trust gates that move a decision's phases on by themselves, and process templates.
 - **[QuantumOS README](README.md)** — the runtime these decision processes run on: rooms, peers, capability tokens, slash commands, and the ZFA substrate.
 - **[Quantum Logical Framework (QLF) README](https://github.com/rchain-community/quantum-logical-framework/blob/main/README.md)** — the physics/formalism repo: ZFA closure, the machine-verified Lean proofs, and the collective-intelligence theory ([`Room_Best_Practices.md`](Room_Best_Practices.md)) behind reaching good group closure.
