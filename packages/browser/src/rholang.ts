@@ -41,6 +41,8 @@ export interface NodeConfig {
   key?: string;
   /** The locker's uri. Whoever installed it derived this from their own key. */
   locker?: string;
+  /** The Channel contract's uri (rgov-core.js §4) — where `/channel chain` publishes. */
+  channels?: string;
   /** Next nonce for this key's registry slot. insertSigned refuses a stale one. */
   resultNonce?: number;
 }
@@ -570,7 +572,20 @@ export interface EvalResult {
 export function renderExpr(e: unknown): string {
   if (e === null || e === undefined) return "Nil";
   if (typeof e !== "object") return String(e);
-  const o = e as Record<string, unknown>;
+  let o = e as Record<string, unknown>;
+  // MEASURED: a deploy's own status (`/api/v1/deploy-status`) on rholo
+  // bc80abb wraps every payload one level deeper than explore-deploy does,
+  // `{"ExprList": {"data": [...]}}` rather than `{"ExprList": [...]}`. Read
+  // without this, the `.map` below threw, and every answer read back through
+  // `deployAnswer` was lost without a word. Both shapes are accepted.
+  {
+    const keys = Object.keys(o);
+    const inner = keys.length === 1 ? o[keys[0]] : undefined;
+    if (inner && typeof inner === "object" && !Array.isArray(inner)
+        && Object.keys(inner).length === 1 && "data" in (inner as object)) {
+      o = { [keys[0]]: (inner as { data: unknown }).data };
+    }
+  }
   if ("ExprInt" in o) return String(o.ExprInt);
   // Several values on one name arrive as a par, which is rholang's own `|` —
   // so it is written the way it would be written in the program.
@@ -588,7 +603,9 @@ export function renderExpr(e: unknown): string {
   if ("ExprSet" in o) return `Set(${(o.ExprSet as unknown[]).map(renderExpr).join(", ")})`;
   // A map arrives as a list of [key, value] pairs, not as an object.
   if ("ExprMap" in o) {
-    const entries = (o.ExprMap as [string, unknown][]) ?? [];
+    // Pairs from explore-deploy; a plain object from deploy-status.
+    const m = o.ExprMap;
+    const entries = (Array.isArray(m) ? m : Object.entries((m ?? {}) as Record<string, unknown>)) as [string, unknown][];
     return `{${entries.map(([k, v]) => `${JSON.stringify(k)}: ${renderExpr(v)}`).join(", ")}}`;
   }
   // An expression this build names differently: render what is inside rather

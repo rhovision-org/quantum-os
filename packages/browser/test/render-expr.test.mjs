@@ -32,6 +32,16 @@ check("a par reads as rholang's own |",
 check("an empty par is Nil", renderExpr({ ExprPar: [] }), "Nil");
 
 check("an int", renderExpr({ ExprInt: 42 }), "42");
+// deploy-status wraps each payload in {data: …} (rholo bc80abb), and a map is
+// an object there rather than pairs. Real shape, from a Channel install.
+check("deploy-status: a wrapped list",
+  renderExpr({ ExprList: { data: [{ ExprString: { data: "installed" } }, { ExprUri: { data: "rho:id:abc" } }] } }),
+  '["installed", rho:id:abc]');
+check("deploy-status: a wrapped map is an object",
+  renderExpr({ ExprMap: { data: { seq: { ExprInt: { data: 2 } }, text: { ExprString: { data: "hi" } } } } }),
+  '{"seq": 2, "text": "hi"}');
+check("deploy-status: a wrapped tuple with Nil",
+  renderExpr({ ExprTuple: { data: [{ ExprString: { data: "posts" } }, { ExprPar: { data: [] } }] } }), '("posts", Nil)');
 check("a string keeps its quotes", renderExpr({ ExprString: "hi" }), '"hi"');
 check("a bool", renderExpr({ ExprBool: true }), "true");
 check("a list", renderExpr({ ExprList: [{ ExprInt: 1 }, { ExprInt: 2 }] }), "[1, 2]");

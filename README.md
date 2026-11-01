@@ -215,7 +215,7 @@ is the room's persistence layer, not a server. Full docs: **[scripts/qos-cli/REA
 | Markov-blanket isolation | ✓ rooms are independent ZFA processes; no cross-room signaling, sync, or consensus; bridge peers are application-level only |
 | Bridge primitive | ✓ `/share <selector> to <room>` — explicit bridge of lemma/chat/note into another joined tab |
 | Counter-offer rounds | ✓ `/rdv counter <id> <giveCur> <giveN> <getCur> <getN>` — round-trip negotiation in an in-flight rendezvous |
-| Tagged messaging | ✓ `/channel listen/send` — name-tagged broadcast with per-receiver subscription filter |
+| Tagged messaging | ✓ `/channel listen/send` — name-tagged broadcast with per-receiver subscription filter; `/channel chain` — channels on chain that outlive the room ([#78](https://github.com/rhovision-org/quantum-os/issues/78)) |
 | Sequential command chain | ✓ `/script cmd1; cmd2; …` — batch dispatch on one line |
 | Cross-peer persistence | ✓ `/persist @lemma to <peer>` — agreed replication of public state with explicit accept/reject |
 | RhoQu macro language | ✓ `/rhoqu` — `process` / `new` / `\|` parallel / `if` / `on channel` / `for` transpile to dispatcher commands; handlers persist per-room |
@@ -238,7 +238,7 @@ issue, and a design document says so in its first lines:
 | Cross-shard CapTP: revocable proxies, promise pipelining (Layer 2; Layer 1 in draft) | [CapabilityTransport.md](CapabilityTransport.md) | [#173](https://github.com/rhovision-org/quantum-os/issues/173) · [#107](https://github.com/rhovision-org/quantum-os/issues/107) |
 | Group-process protocols as verified ρ-processes | [RhoQuCalc_Macros.md](RhoQuCalc_Macros.md) (design spec + case studies) | — |
 | A group as an identity, consent-gated memory, trust-gated library | — | [#103](https://github.com/rhovision-org/quantum-os/issues/103) · [#106](https://github.com/rhovision-org/quantum-os/issues/106) · [#105](https://github.com/rhovision-org/quantum-os/issues/105) |
-| rnodes as room members, chain-backed channels and records | — | [#138](https://github.com/rhovision-org/quantum-os/issues/138) · [#78](https://github.com/rhovision-org/quantum-os/issues/78) · [#96](https://github.com/rhovision-org/quantum-os/issues/96) |
+| rnodes as room members, chain-backed records | — | [#138](https://github.com/rhovision-org/quantum-os/issues/138) · [#96](https://github.com/rhovision-org/quantum-os/issues/96) |
 | Agents that do the work (standard AI integrations, a Lean-proof agent) | — | [#132](https://github.com/rhovision-org/quantum-os/issues/132) |
 | Native Rust peer | — | planned |
 

@@ -646,6 +646,25 @@ Name-tagged broadcast messaging with per-receiver filtering. The envelope (`kind
 
 Useful for topic-based coordination on top of broadcast — e.g., one channel per long-running discussion, or as the substrate for higher-level macro languages (rho-calculus channels).
 
+#### `/channel chain …` — a channel that outlives the room ([#78](https://github.com/rhovision-org/quantum-os/issues/78))
+
+The room's channels end with the room. These are on chain, in the Channel contract ([RGov_Core.md §4](../RGov_Core.md#4-channel--publish-and-subscribe-on-chain)), so they need a deploy key (`/rholang key generate`) and a node. A channel has one publisher and is named `<publisher address>/<name>`; a bare name means one of your own.
+
+| Subcommand | Effect |
+|---|---|
+| `/channel chain` | The contract you use, the channels you follow and how far you have read |
+| `/channel chain install` · `use <uri>` | Publish a Channel contract, or point at one somebody shared |
+| `/channel chain open <name> [invite]` | Open a channel under your address. **open**: anyone reads it, free. **invite**: only you and the addresses you allow |
+| `/channel chain post <name> <text>` | Publish to your channel (signed) |
+| `/channel chain close <name>` | No more posts. What was posted stays readable, and readers are told it was closed rather than gone quiet |
+| `/channel chain allow\|disallow <name> <address>` | Who may read an invite channel. Disallowing stops their future reads |
+| `/channel chain subscribe <address/name> [--all]` | Follow a channel: from now, or `--all` from the oldest kept post |
+| `/channel chain unsubscribe <address/name>` | Stop following. Only you can end your own subscription |
+| `/channel chain read <address/name> [--all]` | What is new since your last read (50 at a time). Free for an open channel; a signed read for an invite one |
+| `/channel chain info <address/name>` · `list [address]` | A channel's policy, post count and subscriber count · someone's channels |
+
+A channel keeps its newest 500 posts. Relaying between a room channel and a chain channel is not built.
+
 ### `/script <cmd1>; <cmd2>; …`
 
 Sequential command chain. Each `;`-separated segment is trimmed and run through the dispatcher exactly as if typed individually. Segments starting with `//` are skipped (comments). Errors in one segment don't stop subsequent ones; each segment's output appears in chat in order.
