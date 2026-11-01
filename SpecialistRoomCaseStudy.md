@@ -1,6 +1,6 @@
 # Case Study — The Complementary-Specialist Closure Room
 
-**Issue:** [#24](https://github.com/rchain-community/quantum-os/issues/24) · **Macro:** `specialist-closure` ([`RhoQuCalc_Macros.md`](RhoQuCalc_Macros.md)) · **Built on:** [`Room_Best_Practices.md`](Room_Best_Practices.md)
+**Issue:** [#24](https://github.com/rhovision-org/quantum-os/issues/24) · **Macro:** `specialist-closure` ([`RhoQuCalc_Macros.md`](RhoQuCalc_Macros.md)) · **Built on:** [`Room_Best_Practices.md`](Room_Best_Practices.md)
 
 The PFEM "receipt-bearing quadrature cell" made concrete: a room of **complementary specialists** reaches
 a *better* closure than a room of clones — because distinguishable closures bind where identical ones are
@@ -61,7 +61,7 @@ the schema. See [`RhoQuCalc_Macros.md`](RhoQuCalc_Macros.md).
 
 - ✅ **Runs today:** the scripted clones-vs-specialists scenario above; `/channel`, `/probe`, `/note`,
   `/lemma`+`/persist`, capability-token roles.
-- 🔵 **Open — the acceptance criteria** ([#24](https://github.com/rchain-community/quantum-os/issues/24)): a **live**
+- 🔵 **Open — the acceptance criteria** ([#24](https://github.com/rhovision-org/quantum-os/issues/24)): a **live**
   run of Room A (clones) vs Room B (specialists) on the same decision, with **saved, comparable closure
   ledgers**, showing the specialist room catches the failure mode the clone room misses. Plus the
   **closure-gate** primitive (enforce required-dissent at runtime) and the **macro IR + mesh-shared macro

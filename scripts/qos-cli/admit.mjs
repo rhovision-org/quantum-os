@@ -144,7 +144,7 @@ const canPropose = (n, t) => {
   if (!t.ssh) {
     console.log(
       `      (no ssh configured for ${n.name}: check it by hand - \`${t.rnode} --profile docker ` +
-        `--grpc-port ${t.grpcPort} propose\` from https://github.com/rchain-community/rchain-rust/pull/77 ` +
+        `--grpc-port ${t.grpcPort} propose\` from https://github.com/rhovision-org/rholo/pull/77 ` +
         `or later; "Block ... created and added" is the success)`,
     );
     return true;

@@ -6,13 +6,13 @@ Companion to [`Room_Best_Practices.md`](Room_Best_Practices.md) (quality closure
 
 ## The idea
 
-A [QuantumOS](README.md) room is a **Markov blanket**: the peers inside it share a live closure (a common capability token, a common set of lemmas, currencies, and chat), and peers outside see nothing. Each room is one **perspective** — a self-consistent local world, in the sense of the [Quantum Logical Framework](https://github.com/rchain-community/quantum-logical-framework)'s many-observers reading (every observer's local information defines its own coherent relative world).
+A [QuantumOS](README.md) room is a **Markov blanket**: the peers inside it share a live closure (a common capability token, a common set of lemmas, currencies, and chat), and peers outside see nothing. Each room is one **perspective** — a self-consistent local world, in the sense of the [Quantum Logical Framework](https://github.com/rhovision-org/quantum-logical-framework)'s many-observers reading (every observer's local information defines its own coherent relative world).
 
 Two perspectives share information the same way two histories do in QLF: one perspective's **output becomes another's input** only through something that stands in both. That something is a **bridge** — a peer that is a member of two (or more) rooms at once. The bridge's simultaneous membership *is* the shared closure between the rooms. In QLF terms this is **ER=EPR at the collaboration layer**:
 
-> `SharedClosure A B := achieves_ZFA (A ++ B)` ([`ER_EPR_QLF`](https://github.com/rchain-community/quantum-logical-framework/blob/main/ER_EPR_QLF.md)) — entanglement is a shared closure between two histories; a bridge is that shared closure between two rooms.
+> `SharedClosure A B := achieves_ZFA (A ++ B)` ([`ER_EPR_QLF`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/ER_EPR_QLF.md)) — entanglement is a shared closure between two histories; a bridge is that shared closure between two rooms.
 
-It is the exact analogue of [`MultiParticle.py`](https://github.com/rchain-community/quantum-logical-framework/blob/main/MultiParticle.py): two independent histories expand until their causal cones intersect, and the **interaction manifold** — the events they share — is where a joint closure (entanglement) can form. A room bridge is that interaction manifold, made operational.
+It is the exact analogue of [`MultiParticle.py`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/MultiParticle.py): two independent histories expand until their causal cones intersect, and the **interaction manifold** — the events they share — is where a joint closure (entanglement) can form. A room bridge is that interaction manifold, made operational.
 
 ## Inputs and outputs are channels
 
@@ -94,4 +94,4 @@ QuantumOS rooms are pure peer-to-peer — the signaling server only routes WebRT
 - [`Room_Best_Practices.md`](Room_Best_Practices.md) — reaching quality closure within a single room.
 - [`scripts/qos-cli/README.md`](scripts/qos-cli/README.md) — the headless-peer tools (`qos-cli`, `qos-daemon`, `agent`, `bridge`).
 - [`MyRoom.md`](MyRoom.md) — running your own room.
-- QLF: [`ER_EPR_QLF.md`](https://github.com/rchain-community/quantum-logical-framework/blob/main/ER_EPR_QLF.md), [`MultiParticle.md`](https://github.com/rchain-community/quantum-logical-framework/blob/main/MultiParticle.md) — entanglement as a shared closure; the two-history interaction manifold this bridge realizes.
+- QLF: [`ER_EPR_QLF.md`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/ER_EPR_QLF.md), [`MultiParticle.md`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/MultiParticle.md) — entanglement as a shared closure; the two-history interaction manifold this bridge realizes.

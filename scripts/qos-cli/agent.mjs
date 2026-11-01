@@ -170,7 +170,7 @@ export async function run(args) {
   const role = resolveRole(roleKey);
   if (!role) { console.error(`[agent] unknown --role "${args.role}". Known: ${Object.keys(ROLES).join(", ")}`); process.exit(1); return; }
   const CMD = role.cmd;                                   // command prefix, e.g. "facil"
-  const ABOUT_URL = args.about ?? "https://github.com/rchain-community/quantum-os/blob/main/MyRoom.md";
+  const ABOUT_URL = args.about ?? "https://github.com/rhovision-org/quantum-os/blob/main/MyRoom.md";
   const TAG = `[${CMD}]`;                                 // log tag
   const aliases = [...new Set([CMD, role.name])];         // command spellings, e.g. facil|facilitator
   const aliasAlt = aliases.map(escapeRe).join("|");

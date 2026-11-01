@@ -9,19 +9,19 @@ can and can't do.
 
 Quantum optimizers (annealers, QAOA) don't solve NP-hard problems instantly — that's pop-sci. They
 **approximate**: a physical system relaxes toward its minimum-energy (ground) state. The
-[Quantum Logical Framework](https://github.com/rchain-community/quantum-logical-framework) makes the same
+[Quantum Logical Framework](https://github.com/rhovision-org/quantum-logical-framework) makes the same
 point formally — its machine-verified P-vs-NP reading shows **search/generate is exponential while
 verify is O(n), and a solution can't be assembled greedily**
-([P_vs_NP_QLF](https://github.com/rchain-community/quantum-logical-framework/blob/main/P_vs_NP_QLF.md)). So a
+([P_vs_NP_QLF](https://github.com/rhovision-org/quantum-logical-framework/blob/main/P_vs_NP_QLF.md)). So a
 room can't conjure optimal answers either.
 
 What a room *can* do — and what QLF says the universe itself does — is **select by closure**: of all
 the candidate histories, the one that persists is the one that minimizes free action (`ΔF = −log 2`
 per event), favoured because *"the thing that can happen in the most ways happens first"*
-([MRE](https://github.com/rchain-community/quantum-logical-framework/blob/main/MRE.md),
-[QLF_FreeEnergy](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_FreeEnergy.lean)).
+([MRE](https://github.com/rhovision-org/quantum-logical-framework/blob/main/MRE.md),
+[QLF_FreeEnergy](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_FreeEnergy.lean)).
 A room run well is one distributed Markov-blanket agent doing **perceive → predict → act → prune**
-([QuantumOS §3](https://github.com/rchain-community/quantum-logical-framework/blob/main/QuantumOS.md)). That's a
+([QuantumOS §3](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QuantumOS.md)). That's a
 legitimate, physically faithful **metaheuristic** — the same family as simulated annealing,
 evolutionary search, and human computation.
 
@@ -44,7 +44,7 @@ That annealing schedule is the only genuinely new coordination — and a facilit
 position — a twist history the room is trying to close — the browser enumerates the admissible
 **next closures** from that position: every twist word you could append so the whole history is
 ZFA-balanced, shortest first (`qucalc-enum.ts`, a port of the [QLF
-reference](https://github.com/rchain-community/quantum-logical-framework/blob/main/QucalcSearch.md);
+reference](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QucalcSearch.md);
 computed locally, no service). That is the generate step performed by the
 substrate rather than by proposal — *the search is the experiment*, **truth divination**: it asks
 which of the a-priori possibilities actually close from here, and in QLF truth is what closes (a
@@ -52,7 +52,7 @@ closure receipt, not a standing proposition). `/search` with no argument co-read
 `/qlf-action` position through one set of listeners (per-phase, per-depth, and per **listening
 horizon** `capacity:R`) — a **meeting of minds**, the room reading its own possibility space, peers as
 Markov-blanket sub-agents, the listeners the room's joint reading
-([QLF_as_Intelligence §8](https://github.com/rchain-community/quantum-logical-framework/blob/main/QLF_as_Intelligence.md)).
+([QLF_as_Intelligence §8](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QLF_as_Intelligence.md)).
 The rollup (closures per phase, per depth, per horizon) is the cheap score for step 3 when the
 candidates *are* closures.
 
@@ -78,16 +78,16 @@ See: **[Group Decisions](Group_Decisions.md)** (the decision toolset) · **[Cons
 ## What relaxation actually selects — and why step 3 scores the shared objective
 
 This is now a theorem-backed statement, not a metaphor
-([Game_Theory_QLF](https://github.com/rchain-community/quantum-logical-framework/blob/main/Game_Theory_QLF.md);
-[QLF_PotentialGames](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_PotentialGames.lean),
-[QLF_EvolutionaryGames](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_EvolutionaryGames.lean),
+([Game_Theory_QLF](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Game_Theory_QLF.md);
+[QLF_PotentialGames](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_PotentialGames.lean),
+[QLF_EvolutionaryGames](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_EvolutionaryGames.lean),
 machine-verified, no axioms; the runs in
-[evolutionary_census.py](https://github.com/rchain-community/quantum-logical-framework/blob/main/evolutionary_census.py)):
+[evolutionary_census.py](https://github.com/rhovision-org/quantum-logical-framework/blob/main/evolutionary_census.py)):
 
 - **A room's objective is a game only if it is a potential game.** A decision problem has a free-action
   functional — the thing the loop relaxes on — iff its payoff changes are path-independent
   (`free_action_iff_four_cycle`, proven at the room's arity in
-  [QLF_NPlayerPotential](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_NPlayerPotential.lean)). Under it a Nash equilibrium **is** a ZFA closure (`nash_iff_closure`:
+  [QLF_NPlayerPotential](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_NPlayerPotential.lean)). Under it a Nash equilibrium **is** a ZFA closure (`nash_iff_closure`:
   zero regret = zero free action), the loop cannot cycle (`Descent.eventually_fixed`), and a pure
   equilibrium exists (`exists_nash_of_potential`). Pure-conflict objectives (matching pennies) have no
   functional; the loop cycles, which is the substrate reporting that the problem was posed as conflict.
@@ -161,7 +161,7 @@ room both *relax toward a low-energy answer* — but for real-world problems the
 - **Collective intelligence built in.** Many complementary perspectives, earned trust as the selection
   weight, governance to keep it honest — the QLF complementary-binding thesis (distinguishable closures
   bind where clones only flood,
-  [QLF_as_Intelligence](https://github.com/rchain-community/quantum-logical-framework/blob/main/QLF_as_Intelligence.md)).
+  [QLF_as_Intelligence](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QLF_as_Intelligence.md)).
 - **No decoherence to fight.** The annealing is over candidate *solutions*, not fragile qubit states —
   nothing to hold coherent at millikelvin.
 
@@ -186,20 +186,20 @@ round, ask a facilitator in your room: **`/facil optimize <objective + constrain
 ## Grounding (QLF)
 
 - Selection by closure / least free action, `ΔF = −log 2` per half-spin event:
-  [MRE](https://github.com/rchain-community/quantum-logical-framework/blob/main/MRE.md) ·
-  [QLF_FreeEnergy](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_FreeEnergy.lean).
+  [MRE](https://github.com/rhovision-org/quantum-logical-framework/blob/main/MRE.md) ·
+  [QLF_FreeEnergy](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_FreeEnergy.lean).
 - *"Most ways happens first"* (Born-rule multiplicity):
-  [BayesianMechanics](https://github.com/rchain-community/quantum-logical-framework/blob/main/BayesianMechanics.md).
+  [BayesianMechanics](https://github.com/rhovision-org/quantum-logical-framework/blob/main/BayesianMechanics.md).
 - Perceive→predict→act→prune as the room's cycle; collective intelligence as one distributed synthesis:
-  [QuantumOS §3](https://github.com/rchain-community/quantum-logical-framework/blob/main/QuantumOS.md) ·
-  [QLF_as_Intelligence](https://github.com/rchain-community/quantum-logical-framework/blob/main/QLF_as_Intelligence.md).
+  [QuantumOS §3](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QuantumOS.md) ·
+  [QLF_as_Intelligence](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QLF_as_Intelligence.md).
 - Why there is no instant NP solve (generate vs verify):
-  [P_vs_NP_QLF](https://github.com/rchain-community/quantum-logical-framework/blob/main/P_vs_NP_QLF.md) ·
-  [QLF_InfoSynthesis](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_InfoSynthesis.lean).
+  [P_vs_NP_QLF](https://github.com/rhovision-org/quantum-logical-framework/blob/main/P_vs_NP_QLF.md) ·
+  [QLF_InfoSynthesis](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_InfoSynthesis.lean).
 - What relaxation selects (risk dominance), why scoring the shared objective fixes it, and the
   emergent basis-choice game — game theory from QLF, Rung 10 of
-  [Mathematics_From_QLF](https://github.com/rchain-community/quantum-logical-framework/blob/main/Mathematics_From_QLF.md):
-  [Game_Theory_QLF](https://github.com/rchain-community/quantum-logical-framework/blob/main/Game_Theory_QLF.md) ·
-  [QLF_PotentialGames](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_PotentialGames.lean) ·
-  [QLF_EvolutionaryGames](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_EvolutionaryGames.lean) ·
-  [QLF_NPlayerPotential](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_NPlayerPotential.lean).
+  [Mathematics_From_QLF](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Mathematics_From_QLF.md):
+  [Game_Theory_QLF](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Game_Theory_QLF.md) ·
+  [QLF_PotentialGames](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_PotentialGames.lean) ·
+  [QLF_EvolutionaryGames](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_EvolutionaryGames.lean) ·
+  [QLF_NPlayerPotential](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_NPlayerPotential.lean).

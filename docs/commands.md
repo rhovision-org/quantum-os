@@ -134,9 +134,9 @@ Output:
 ·   bra_ket_always_balanced: ✓ (BraKetRhoQuCalc.lean)
 ```
 
-The `|0⟩ + |1⟩` superposition yields the identity matrix — a complete basis. See [BraKetRhoQuCalc.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/BraKetRhoQuCalc.md) for the full bra-ket ↔ RhoQuCalc correspondence.
+The `|0⟩ + |1⟩` superposition yields the identity matrix — a complete basis. See [BraKetRhoQuCalc.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/BraKetRhoQuCalc.md) for the full bra-ket ↔ RhoQuCalc correspondence.
 
-Lean anchor: [`bra_ket_always_balanced`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/BraKetRhoQuCalc.lean)
+Lean anchor: [`bra_ket_always_balanced`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/BraKetRhoQuCalc.lean)
 
 ### `/qucalc [twists]` [shared]
 Evaluates a RhoQuCalc twist sequence. Accepts symbolic twists (`^v<>/\+-`), hex digits `0-7`, a `cap:label:hex` token, or `@name` references to named lemmas. No argument → show your peer's twist sequence. Click a peer or lemma name in the sidebar to prefill the input.
@@ -180,13 +180,13 @@ Output:
 ·   achieves_ZFA: ✗  gap=1  (not a physical process)
 ```
 
-ZFA balance is the selection principle: `@major @minor` composed (gap=0) is a valid deduction; an unbalanced composition is pruned by `full_zeno_prune` before becoming a physical event. See [BraKetRhoQuCalc.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/BraKetRhoQuCalc.md) and [QuantumOS.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/QuantumOS.md) for the capability-security model built on this invariant.
+ZFA balance is the selection principle: `@major @minor` composed (gap=0) is a valid deduction; an unbalanced composition is pruned by `full_zeno_prune` before becoming a physical event. See [BraKetRhoQuCalc.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/BraKetRhoQuCalc.md) and [QuantumOS.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QuantumOS.md) for the capability-security model built on this invariant.
 
-Lean anchors: [`RhoProcess`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean) · [`rho_process_always_zfa`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean) · [`bra_ket_always_balanced`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/BraKetRhoQuCalc.lean)
+Lean anchors: [`RhoProcess`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean) · [`rho_process_always_zfa`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean) · [`bra_ket_always_balanced`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/BraKetRhoQuCalc.lean)
 
 ### `/conj <twists>` [shared]
 
-Computes the **Hermitian adjoint** of a twist history `H`: reverse the sequence and flip each twist's parity (the pairing `0↔1, 2↔3, 4↔5, 6↔7`). This is QLF's structural "negation" operator — implemented as `Twist::conjugate` in the WASM kernel (`crates/zfa-core/src/twist.rs`), `Twist.conj` in Lean (`lean/QLF_TwistAlphabet.lean`), and `adjointHistory` in `packages/browser/src/app.ts`. Defining identity: `E + E† ≡ ZFA` (see [Hermitian_Conjugacy_Proof.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/Hermitian_Conjugacy_Proof.md)).
+Computes the **Hermitian adjoint** of a twist history `H`: reverse the sequence and flip each twist's parity (the pairing `0↔1, 2↔3, 4↔5, 6↔7`). This is QLF's structural "negation" operator — implemented as `Twist::conjugate` in the WASM kernel (`crates/zfa-core/src/twist.rs`), `Twist.conj` in Lean (`lean/QLF_TwistAlphabet.lean`), and `adjointHistory` in `packages/browser/src/app.ts`. Defining identity: `E + E† ≡ ZFA` (see [Hermitian_Conjugacy_Proof.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Hermitian_Conjugacy_Proof.md)).
 
 Accepts the full twist-parsing pipeline used by `/qucalc`: symbolic (`^v<>/\+-`), hex digits 0-7, `cap:label:hex` tokens, and `@lemma` references.
 
@@ -215,9 +215,9 @@ Hermitian adjoint (H†):
 ·   (counterpart of Re(s)=1/2 in Riemann ξ;  see ReverseMathematics §4.9)
 ```
 
-Self-adjoint histories `Σ_sa = {H : H = H†}` form the operator-side counterpart of the Riemann ξ critical line — see [ReverseMathematics §4.9](https://github.com/rchain-community/quantum-logical-framework/blob/main/ReverseMathematics.md). The vacuum-alignment principle in [VacuumEnergy §6](https://github.com/rchain-community/quantum-logical-framework/blob/main/VacuumEnergy.md) reads the adjoint operator as the framework's negation; under [Magic_numbers.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/Magic_numbers.md) the same adjoint structure drives the vacuum-as-intruder selection in nuclear shells.
+Self-adjoint histories `Σ_sa = {H : H = H†}` form the operator-side counterpart of the Riemann ξ critical line — see [ReverseMathematics §4.9](https://github.com/rhovision-org/quantum-logical-framework/blob/main/ReverseMathematics.md). The vacuum-alignment principle in [VacuumEnergy §6](https://github.com/rhovision-org/quantum-logical-framework/blob/main/VacuumEnergy.md) reads the adjoint operator as the framework's negation; under [Magic_numbers.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Magic_numbers.md) the same adjoint structure drives the vacuum-as-intruder selection in nuclear shells.
 
-Lean anchors: [`Twist.conj`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_TwistAlphabet.lean) · [`vacuum_alignment_selects_zfa`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_VacuumAlignment.lean) · [`global_alignment_selects_zfa`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_VacuumAlignment.lean) · [`rho_process_alignment_saturates`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_RhoProcessBridge.lean)
+Lean anchors: [`Twist.conj`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_TwistAlphabet.lean) · [`vacuum_alignment_selects_zfa`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_VacuumAlignment.lean) · [`global_alignment_selects_zfa`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_VacuumAlignment.lean) · [`rho_process_alignment_saturates`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_RhoProcessBridge.lean)
 
 ### `/coupling [<twists> …]`
 
@@ -274,7 +274,7 @@ Rust: [`crates/zfa-core/src/coupling.rs`](../crates/zfa-core/src/coupling.rs) ·
 The admissible **next closures** from a QuCalc position — the twist words you can
 append so the whole history is a ZFA closure — **computed in your browser**
 (`qucalc-enum.ts`, a port of the QLF reference
-[`qucalc_search.py`](https://github.com/rchain-community/quantum-logical-framework/blob/main/QucalcSearch.md),
+[`qucalc_search.py`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QucalcSearch.md),
 run in a Web Worker so a deep sweep doesn't hitch the UI). No server, no
 endpoint: every peer runs the same algebra.
 
@@ -312,7 +312,7 @@ reach `R` hears).
 `/qlf-action` position at once, with shared listeners: peers contribute their
 positions into the room, the listeners are the room's joint reading, and the
 result is broadcast — the room reading its own possibility space as one
-distributed experiment ([QLF_as_Intelligence §8](https://github.com/rchain-community/quantum-logical-framework/blob/main/QLF_as_Intelligence.md);
+distributed experiment ([QLF_as_Intelligence §8](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QLF_as_Intelligence.md);
 peers as Markov-blanket sub-agents). `capacity:R` gives each peer's reach on the
 *same* census — one possibility structure, heard by horizons of different capacity.
 
@@ -590,7 +590,7 @@ peer ID: cap:peer:024602460246024602460246…
   ZFA-balanced: ✓  spectral gap: 0
   rho_process_always_zfa: ✓ (Lean-verified)
 ```
-Lean anchor: [`rho_process_always_zfa`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean)
+Lean anchor: [`rho_process_always_zfa`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean)
 
 ### `/room [sub]`
 
@@ -720,7 +720,7 @@ Validates any `cap:label:hex` token — checks ZFA balance and reports the spect
   valid: ✓  spectral gap: 0
   twists: 32 (16 positive, 16 negative)
 ```
-Lean anchor: [`achieves_ZFA`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_Axioms.lean)
+Lean anchor: [`achieves_ZFA`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_Axioms.lean)
 
 ### `/cap [label]`
 Generates a fresh ZFA-balanced capability token locally (not shared).

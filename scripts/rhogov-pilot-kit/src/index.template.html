@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#101017">
+  <meta name="description" content="Agree a bounded action, record evidence and decide what happens next. A local-first RhoGov pilot workbench.">
+  <title>RhoGov Pilot Kit · Decisions That Learn</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%23111019'/%3E%3Cpath d='M10 28V12h10a8 8 0 0 1 0 16h-3V18m3 10 10 5' fill='none' stroke='%23b5a0ff' stroke-width='3'/%3E%3C/svg%3E">
+  <style>/*__STYLES__*/</style>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">Skip to workspace</a>
+  <header class="topbar">
+    <a class="brand" href="#workspace" aria-label="RhoGov Pilot Kit overview">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><path d="M10 28V12h10a8 8 0 0 1 0 16h-3V18M20 28l10 5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg></span>
+      <span><strong>RhoGov <span>Pilot Kit</span></strong><small>DECISIONS THAT LEARN</small></span>
+    </a>
+    <div class="top-actions">
+      <span id="storage-status" class="save-state" role="status">Local workspace</span>
+      <a class="button subtle compact proposal-link" href="https://github.com/rhovision-org/quantum-os/issues/242" target="_blank" rel="noopener noreferrer">Proposal #242 <span aria-hidden="true">↗</span></a>
+      <button class="button subtle compact" data-action="backup">Backup JSON <span aria-hidden="true">↓</span></button>
+    </div>
+  </header>
+  <div class="app-layout">
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <p class="nav-caption">PILOT WORKSPACE</p>
+      <nav id="navigation" aria-label="Pilot sections">
+        <button class="nav-item active" data-tab="overview"><span aria-hidden="true">◈</span> Overview</button>
+        <button class="nav-item" data-tab="protocol"><span aria-hidden="true">▤</span> Experiment card</button>
+        <button class="nav-item" data-tab="attempts"><span aria-hidden="true">◎</span> Attempt log</button>
+        <button class="nav-item" data-tab="review"><span aria-hidden="true">◇</span> Human review</button>
+        <button class="nav-item" data-tab="report"><span aria-hidden="true">↗</span> Report & exports</button>
+      </nav>
+      <div class="sidebar-note">
+        <span class="tiny-label">THE PRINCIPLE</span>
+        <p>A decision can keep its history.<br>Its next action can still change.</p>
+        <a href="https://digitalcommons.njit.edu/ccccreports/28/" target="_blank" rel="noopener noreferrer">EIES2 · 1992 ↗</a>
+      </div>
+      <div class="sidebar-footer"><span class="status-dot"></span> Browser-local · v1.0</div>
+    </aside>
+    <div class="content-wrap">
+      <div id="mode-bar" class="mode-bar"></div>
+      <div id="persistent-warning" class="notice danger hidden" role="alert"></div>
+      <main id="workspace" tabindex="-1"></main>
+      <footer class="app-footer"><span>RhoGov Pilot Kit · Built for the proposal by Aria</span><span>Human authorization. Visible evidence. Reviewable next steps.</span></footer>
+    </div>
+  </div>
+  <input id="import-file" type="file" accept=".json,application/json" class="hidden" aria-label="Import pilot JSON backup">
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <noscript><p class="notice">Enable JavaScript to use the pilot workbench. It runs entirely in your browser.</p></noscript>
+  <script>/*__CORE__*/</script>
+  <script>/*__APP__*/</script>
+</body>
+</html>

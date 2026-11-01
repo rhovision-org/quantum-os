@@ -1,11 +1,11 @@
 # Case Study — The Framework Attacks Its Own Claim
 
-**Issue:** [#55](https://github.com/rchain-community/quantum-os/issues/55) · **Status:** has a **first real run** (the α residual, below) by the minimal human+AI pair; a full multi-human room is the open next step (criterion #1). · **Macro:** `claim-closure` (proposed) · **Built on:**
+**Issue:** [#55](https://github.com/rhovision-org/quantum-os/issues/55) · **Status:** has a **first real run** (the α residual, below) by the minimal human+AI pair; a full multi-human room is the open next step (criterion #1). · **Macro:** `claim-closure` (proposed) · **Built on:**
 [`Room_Best_Practices.md`](Room_Best_Practices.md) · [`Collective_Optimization.md`](Collective_Optimization.md) ·
-[`SEX.md`](https://github.com/rchain-community/quantum-logical-framework/blob/main/SEX.md)
+[`SEX.md`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/SEX.md)
 
 The intersection of the two halves of the project: a room of **complementary specialists — humans plus
-the QuantumOS AI agents** (facilitator, scribe, skeptic) — takes a [QLF](https://github.com/rchain-community/quantum-logical-framework)
+the QuantumOS AI agents** (facilitator, scribe, skeptic) — takes a [QLF](https://github.com/rhovision-org/quantum-logical-framework)
 open question and reaches an *honest* closure with the real commands. The collective-intelligence engine
 doing comprehensible-physics work — **the framework working on itself.**
 
@@ -51,10 +51,10 @@ The room closed on the **scoped** framing — stronger than the bare claim becau
 Skeptic, and honest about where the proof stops. And note the method: **one** facilitator leads (no
 second co-lead — rule 6, the social diproton it was just discussing), and the closure bound *Jim's
 intuition* to *the Skeptic's check* — distinguishable roles producing a closure neither makes alone
-(the human+AI deuteron of [`ClaudesStory.md`](https://github.com/rchain-community/quantum-logical-framework/blob/main/ClaudesStory.md)).
+(the human+AI deuteron of [`ClaudesStory.md`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/ClaudesStory.md)).
 **The room obeyed the law while ruling on it.**
 
-> Stated plainly (the framing from [#23](https://github.com/rchain-community/quantum-os/issues/23), @lightrock):
+> Stated plainly (the framing from [#23](https://github.com/rhovision-org/quantum-os/issues/23), @lightrock):
 > *identical agents tend to produce redundant closure; complementary specialists can produce
 > higher-order closure.* The QLF "Pauli-blocked / diproton" reading is the **model**, not a claim about
 > people — and the room's own closure above scoped it to exactly that.
@@ -78,7 +78,7 @@ The hardest acceptance criterion (#4 below: *a room materially advancing an open
 a **first real run**, and it is the right demonstration because of *how it ended*, not because it "solved"
 α. The "room" was the **minimal complementary-specialist pair** — a human (intuition, direction, and the
 binding *don't-fit-it* discipline) + an AI agent (derivation, Lean formalization, verification): the
-human+AI deuteron of [`ClaudesStory.md`](https://github.com/rchain-community/quantum-logical-framework/blob/main/ClaudesStory.md).
+human+AI deuteron of [`ClaudesStory.md`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/ClaudesStory.md).
 The target was the sharpest open α question: **why `α⁻¹ = 137.035999`, not the derived `137`?**
 
 The honest-scope discipline — **derive a mechanism's prediction *first*, let the 44σ measurement decide,
@@ -110,9 +110,9 @@ never fit** — was the closure gate (the skeptic role internalized), and it did
   representation, not physics. *None survived contact with the measurement — and that is the result.*
 
 The full ledger — every mechanism, every reversal, the named obstacles, the resume-paths — is
-[`Alpha_Residual.md`](https://github.com/rchain-community/quantum-logical-framework/blob/main/Alpha_Residual.md)
-(anchor: [`QLF_AlphaBound`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_AlphaBound.lean),
-[`Alpha.md`](https://github.com/rchain-community/quantum-logical-framework/blob/main/Alpha.md)). The contrast with
+[`Alpha_Residual.md`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Alpha_Residual.md)
+(anchor: [`QLF_AlphaBound`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_AlphaBound.lean),
+[`Alpha.md`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Alpha.md)). The contrast with
 **Eddington's "+1"** is the whole point: the leading number is *derived* and the residual is honestly
 bounded and mechanistically understood — because the human held the no-fitting line, the agent did the
 derivation, and the machine checked it. The framework attacked its own claim and reached an honest

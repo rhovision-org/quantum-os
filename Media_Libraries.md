@@ -5,7 +5,7 @@ A chain can be synced to later, and the last section says what that would add;
 everything before it works with peers and browsers alone — no server, and no
 always-on anything that the library depends on.
 
-Tracking issue: [#99](https://github.com/rchain-community/quantum-os/issues/99).
+Tracking issue: [#99](https://github.com/rhovision-org/quantum-os/issues/99).
 
 ---
 
@@ -131,13 +131,13 @@ a chain adds, when a group does:
 - a name for the library that outlives the room, and can be handed to someone
   who was never in it;
 - a capability that a group holds and enforces on chain, once a group can act
-  as an identity ([#103](https://github.com/rchain-community/quantum-os/issues/103)).
+  as an identity ([#103](https://github.com/rhovision-org/quantum-os/issues/103)).
 
 What it does not add is storage. Rholang holds terms, not media: the bytes stay
 in layers 0–4 whatever happens on chain, and what a chain can hold is the index
 — hashes, names, capabilities. This is a **sync of layer 2**, not a foundation
 under it, and it is designed in
-[#102](https://github.com/rchain-community/quantum-os/issues/102).
+[#102](https://github.com/rhovision-org/quantum-os/issues/102).
 
 ---
 
@@ -200,18 +200,18 @@ composable rather than a feature with a UI.
 are as often a group as a person — so a fetch wants a general address rather
 than a fourth private delivery rule beside `/request`, `/gov say` and
 `/channel send`. The inbox is that component, and every one of those verbs is a
-macro over it ([#104](https://github.com/rchain-community/quantum-os/issues/104)).
+macro over it ([#104](https://github.com/rhovision-org/quantum-os/issues/104)).
 
 *Who may add* is the other. A group's library should be able to require a trust
 level to write to it, which `gov.ts` already computes and currently only tallies
 use. The check runs on every receiver, so it holds with nobody enforcing it —
 and it stays separate from who may **read**, which is a capability's job
-([#105](https://github.com/rchain-community/quantum-os/issues/105)).
+([#105](https://github.com/rhovision-org/quantum-os/issues/105)).
 
 *Who may receive it* is the third, and it is not the library's to answer either.
 A group's index is group memory, and group memory syncs to a newcomer only with
 the members' consent — ⅔ of the active ones by default, a fraction the group can
-override ([#106](https://github.com/rchain-community/quantum-os/issues/106)).
+override ([#106](https://github.com/rhovision-org/quantum-os/issues/106)).
 The same quorum #103 gives a group for acting, applied to disclosing.
 
 ---
@@ -222,14 +222,14 @@ The same quorum #103 gives a group for acting, applied to disclosing.
    Nothing is transferred yet; the library is a list, and already useful.
 2. **Layer 3** — availability, so the list says what can be had.
 3. **Layer 4** — fetch on request, past 8 MB, with progress
-   ([#100](https://github.com/rchain-community/quantum-os/issues/100)).
+   ([#100](https://github.com/rhovision-org/quantum-os/issues/100)).
 4. **Replication** — fetching is already keeping, so what is missing is saying
    when a copy is at risk: an entry with a single holder, marked as such, while
    a second copy can still be made.
 5. **Layer 5** — the interface
-   ([#101](https://github.com/rchain-community/quantum-os/issues/101)).
+   ([#101](https://github.com/rhovision-org/quantum-os/issues/101)).
 6. **Layer 6** — chain sync, if a group wants it
-   ([#102](https://github.com/rchain-community/quantum-os/issues/102)).
+   ([#102](https://github.com/rhovision-org/quantum-os/issues/102)).
 
 Each step is usable on its own, and none of the first five needs an rnode, a
 key or phlo.

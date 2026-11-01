@@ -1,0 +1,42 @@
+name: RhoGov pilot kit
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/rhogov-pilot-kit/**'
+      - '.github/workflows/rhogov-pilot-kit.yml'
+  push:
+    branches: [main, work]
+    paths:
+      - 'scripts/rhogov-pilot-kit/**'
+      - '.github/workflows/rhogov-pilot-kit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pilot-kit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: scripts/rhogov-pilot-kit
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Core tests
+        run: npm test
+      - name: JavaScript syntax
+        run: |
+          node --check src/pilot-core.js
+          node --check src/app.js
+          node --check scripts/build.mjs
+          node --check scripts/export-examples.mjs
+      - name: Rebuild committed offline app
+        run: |
+          git ls-files --error-unmatch dist/index.html
+          npm run build
+          git diff --exit-code -- dist/index.html

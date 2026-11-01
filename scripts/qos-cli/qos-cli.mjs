@@ -39,7 +39,7 @@ Usage:
   node qos-cli.mjs --room <…> --listen        # stay and print room chat
 
 Options:
-  --room <cap|url>   Room capability token, or a full rchain-community.github.io/quantum-os
+  --room <cap|url>   Room capability token, or a full rhovision-org.github.io/quantum-os
                      URL whose #room=… fragment carries the cap. (required)
   --message, -m <s>  Text to broadcast to the room.
   --name <s>         Display name shown to peers (default: "qos-cli").

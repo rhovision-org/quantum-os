@@ -1,7 +1,7 @@
 # RhoQuCalc Macros — group-process protocols as verified ρ-processes
 
 **Status:** Design spec + three worked case studies. Grounds the macro layer in the machine-verified
-ρ-process algebra ([`RhoQuCalc.lean`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean), [`BraKetRhoQuCalc.lean`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/BraKetRhoQuCalc.lean)) rather than the ad-hoc `/rhoqu` parser alone.
+ρ-process algebra ([`RhoQuCalc.lean`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean), [`BraKetRhoQuCalc.lean`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/BraKetRhoQuCalc.lean)) rather than the ad-hoc `/rhoqu` parser alone.
 
 A [quantum-os](README.md) room already has a rich primitive set (`/poll`, `/probe`, `/rdv`, `/gov`, `/lemma`+`/persist`,
 `/channel`, `/note`, `/grant`, `/cap`, `/conj`, `/script`, `/rhoqu`). The hard parts are built; what's
@@ -12,7 +12,7 @@ it inherits the verification for free.
 ## Why RhoQuCalc, not just RhoQu
 
 - **RhoQu** (`/rhoqu`, `packages/browser/src/rhoqu.ts`) is the *surface syntax* that lowers to `/commands`.
-- **RhoQuCalc** ([`RhoQuCalc.lean`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean)) is the *machine-verified ρ-process algebra*.
+- **RhoQuCalc** ([`RhoQuCalc.lean`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean)) is the *machine-verified ρ-process algebra*.
 
 Grounding macros in RhoQuCalc buys, by construction:
 
@@ -160,5 +160,5 @@ The verification (a macro is ZFA-balanced, reflective, capability-bearing) is in
 
 See [`Room_Best_Practices.md`](Room_Best_Practices.md), [`Group_Decisions.md`](Group_Decisions.md),
 [`Governance.md`](Governance.md), [`RhoQuDemo.md`](RhoQuDemo.md), and QLF's
-[`zfa-catalog-rho-notation.md`](https://github.com/rchain-community/quantum-logical-framework/blob/main/zfa-catalog-rho-notation.md)
+[`zfa-catalog-rho-notation.md`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/zfa-catalog-rho-notation.md)
 (the closure-catalog parallel — macros are its group-process analogue).

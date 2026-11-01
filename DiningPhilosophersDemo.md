@@ -483,4 +483,4 @@ The [rendezvous lens (Step 7)](#step-7--the-rendezvous-lens-atomic-acquisition-a
 - [`packages/browser/src/rendezvous.ts`](packages/browser/src/rendezvous.ts) — protocol module: `Proposal`, `Row`, `CommitRow`, `conservationCheck`, `cyclicSwap`
 - [SECURITY.md § no consensus](SECURITY.md#the-shared-root-no-consensus) — why best-effort atomicity is the right primary mitigation only in some places, and where a consensus mechanism would be needed instead
 
-**[Open a room and try it →](https://rchain-community.github.io/quantum-os/)**
+**[Open a room and try it →](https://rhovision-org.github.io/quantum-os/)**

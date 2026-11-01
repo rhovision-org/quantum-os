@@ -52,7 +52,7 @@ Pauli closure is not a "second condition" layered on top of count balance — it
 
 `Capability::from_entropy` uses rejection sampling so every issued token satisfies both faces by construction — unbalanced or Pauli-open tokens are algebraically impossible to construct, not merely rejected at runtime.
 
-Key invariants (machine-verified in [QLF](https://github.com/rchain-community/quantum-logical-framework)):
+Key invariants (machine-verified in [QLF](https://github.com/rhovision-org/quantum-logical-framework)):
 - `achieves_zfa` — half-spin closure (both algebraic faces: Pauli scalar return ∧ Hermitian-pair count balance)
 - `spectral_gap = 0 ↔ is_symmetric` — eigenvalue-level stability
 - `decoherence_impossibility` — parallel composition stays ZFA-balanced

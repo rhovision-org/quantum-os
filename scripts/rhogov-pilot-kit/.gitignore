@@ -1,0 +1,8 @@
+node_modules/
+*.tar.gz
+*.zip
+.DS_Store
+
+# Keep the offline app despite the repository-wide dist/ ignore rule.
+!dist/
+!dist/index.html

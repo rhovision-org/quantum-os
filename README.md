@@ -1,6 +1,6 @@
 # quantum-os
 
-> **QuantumOS (QOS) is an intelligent gateway to each other and everything.** It is the rho ZFA peer-to-peer layer — proven secure. Every identity, message, claim, and unit of value is a capability token whose validity is a machine-checked algebraic fact (Curry–Howard security, Lean-verified in [QLF](https://github.com/rchain-community/quantum-logical-framework)), not a policy anyone has to trust or a server anyone has to ask. To an engineer that reads as *zero-trust p2p with capability tokens standing in for ACLs, sessions, and TLS all at once*. To anyone else it reads more simply: reaching another person and reaching the truth, the agreement, or the value between you are the same one verified act — the gateway to each other *is* the gateway to everything, because in QOS a relationship and a reality are the same kind of object.
+> **QuantumOS (QOS) is an intelligent gateway to each other and everything.** It is the rho ZFA peer-to-peer layer — proven secure. Every identity, message, claim, and unit of value is a capability token whose validity is a machine-checked algebraic fact (Curry–Howard security, Lean-verified in [QLF](https://github.com/rhovision-org/quantum-logical-framework)), not a policy anyone has to trust or a server anyone has to ask. To an engineer that reads as *zero-trust p2p with capability tokens standing in for ACLs, sessions, and TLS all at once*. To anyone else it reads more simply: reaching another person and reaching the truth, the agreement, or the value between you are the same one verified act — the gateway to each other *is* the gateway to everything, because in QOS a relationship and a reality are the same kind of object.
 >
 > That security model runs **off-chain by default** — rooms, capability tokens, lemmas, notes, polls, rendezvous swaps, governance, and the file library are all verified peer-to-peer by the algebra itself, no consensus and no ledger required. That's not a limitation, it's the point: everyday activity leaves no public trace to correlate and costs nothing beyond the peers' own bandwidth. A blockchain (`/rholang`, the pooled token exchange, wrapped native tokens) is an opt-in extension reached for deliberately — a durable public record, a currency that must exist outside any one room — never a dependency of the security or privacy guarantee.
 >
@@ -10,7 +10,7 @@
 
 Peer-to-peer QuantumOS running in the browser. ZFA kernel in Rust/WASM, WebRTC data channels for transport, self-hosted signaling server.
 
-**[Open a room →](https://rchain-community.github.io/quantum-os/)** · **[My room →](MyRoom.md)** · **[Syllogism Demo →](SyllogismDemo.md)** · **[Promissory Note Demo →](PromissoryNoteDemo.md)** · **[Atomic Swap Demo →](AtomicSwapDemo.md)** · **[Token Exchange Demo →](ExchangeDemo.md)** · **[Multisig Demo →](MultisigDemo.md)** · **[Dining Philosophers Demo →](DiningPhilosophersDemo.md)** · **[RhoQu Macro Demo →](RhoQuDemo.md)** · **[Optimization Demo →](OptimizationDemo.md)** · **[Consensus →](Consensus.md)** · **[EIES legacy →](EIES_Legacy.md)** · **[Security →](SECURITY.md)** · **[New issue →](https://github.com/rchain-community/quantum-os/issues/new)**
+**[Open a room →](https://rhovision-org.github.io/quantum-os/)** · **[My room →](MyRoom.md)** · **[Syllogism Demo →](SyllogismDemo.md)** · **[Promissory Note Demo →](PromissoryNoteDemo.md)** · **[Atomic Swap Demo →](AtomicSwapDemo.md)** · **[Token Exchange Demo →](ExchangeDemo.md)** · **[Multisig Demo →](MultisigDemo.md)** · **[Dining Philosophers Demo →](DiningPhilosophersDemo.md)** · **[RhoQu Macro Demo →](RhoQuDemo.md)** · **[Optimization Demo →](OptimizationDemo.md)** · **[Consensus →](Consensus.md)** · **[EIES legacy →](EIES_Legacy.md)** · **[Security →](SECURITY.md)** · **[New issue →](https://github.com/rhovision-org/quantum-os/issues/new)**
 
 **Group processes:** **[User Guide →](User_Guide.md)** · **[Developer Guide (build agents) →](Developer_Guide.md)** · **[MacRhoLang — write your own commands →](MacRhoLang.md)** · **[Group Decisions →](Group_Decisions.md)** · **[Quantum Problem Solver →](Collective_Optimization.md)** · **[Governance (liquid democracy) →](Governance.md)** · **[Room Best Practices →](Room_Best_Practices.md)** · **[Live Testing (2+ people) →](Live_Testing.md)** · **[RhoQuCalc Macros — protocols as verified ρ-processes →](RhoQuCalc_Macros.md)**
 
@@ -20,18 +20,18 @@ Peer-to-peer QuantumOS running in the browser. ZFA kernel in Rust/WASM, WebRTC d
 
 | You are… | Start here | Then |
 |---|---|---|
-| **Using it** — joining a room, deciding things together | **[Open a room](https://rchain-community.github.io/quantum-os/)** · [User Guide](User_Guide.md) · [My Room](MyRoom.md) | [Group Decisions](Group_Decisions.md) · [Governance](Governance.md) · [Room Best Practices](Room_Best_Practices.md) · the demos below |
+| **Using it** — joining a room, deciding things together | **[Open a room](https://rhovision-org.github.io/quantum-os/)** · [User Guide](User_Guide.md) · [My Room](MyRoom.md) | [Group Decisions](Group_Decisions.md) · [Governance](Governance.md) · [Room Best Practices](Room_Best_Practices.md) · the demos below |
 | **Building it** — compiling, running a node, the wire contracts | [Quick Start](#quick-start) · [Build commands](#build-commands) · **[docs/architecture.md](docs/architecture.md)** | [docs/connection.md](docs/connection.md) · [docs/commands.md](docs/commands.md) · [SECURITY.md](SECURITY.md) · [Testing](#testing) |
-| **Extending it** — agents, macros, a chain behind the room | [Developer Guide](Developer_Guide.md) · [scripts/qos-cli](scripts/qos-cli/README.md) | [MacRhoLang](MacRhoLang.md) · [docs/rholang.md](docs/rholang.md) · [scripts/localnet](scripts/localnet/README.md) · **[The public testnet](https://github.com/rchain-community/rchain-rust/blob/dev/docs/src/node/testnet.md)** (the live net: hosts, genesis, the verified onboarding path, r-wallet) · [CLAUDE.md](CLAUDE.md) (the per-feature module map) |
-| **Understanding it** — why ZFA is the security model, the proofs | [Manifesto](Manifesto.md) · **[quantum-logical-framework](https://github.com/rchain-community/quantum-logical-framework)** (Lean 4, 218 modules, zero `sorry`) | [Consensus](Consensus.md) · [Collective Optimization](Collective_Optimization.md) · [RhoQuCalc Macros](RhoQuCalc_Macros.md) · [Related](#related) |
-| **Planning it** — what is designed but not yet code | [Roadmap](#roadmap--what-is-design-not-code) | the [`feature`](https://github.com/rchain-community/quantum-os/issues?q=is%3Aissue+is%3Aopen+label%3Afeature) issues |
+| **Extending it** — agents, macros, a chain behind the room | [Developer Guide](Developer_Guide.md) · [scripts/qos-cli](scripts/qos-cli/README.md) | [MacRhoLang](MacRhoLang.md) · [docs/rholang.md](docs/rholang.md) · [scripts/localnet](scripts/localnet/README.md) · **[The public testnet](https://github.com/rhovision-org/rholo/blob/dev/docs/src/node/testnet.md)** (the live net: hosts, genesis, the verified onboarding path, r-wallet) · [CLAUDE.md](CLAUDE.md) (the per-feature module map) |
+| **Understanding it** — why ZFA is the security model, the proofs | [Manifesto](Manifesto.md) · **[quantum-logical-framework](https://github.com/rhovision-org/quantum-logical-framework)** (Lean 4, 218 modules, zero `sorry`) | [Consensus](Consensus.md) · [Collective Optimization](Collective_Optimization.md) · [RhoQuCalc Macros](RhoQuCalc_Macros.md) · [Related](#related) |
+| **Planning it** — what is designed but not yet code | [Roadmap](#roadmap--what-is-design-not-code) | the [`feature`](https://github.com/rhovision-org/quantum-os/issues?q=is%3Aissue+is%3Aopen+label%3Afeature) issues |
 
 Everything linked from the first four rows is **running code or a verified proof**; the last row is the only place a design lives without an implementation behind it.
 
 
 ### How to create reality together
 
-1. Open **https://rchain-community.github.io/quantum-os/** in your browser.
+1. Open **https://rhovision-org.github.io/quantum-os/** in your browser.
 2. Click **Connect** — you join a room identified by a ZFA capability token in the URL hash. Your peer ID is a ZFA-balanced process.
 3. Copy the share link and send it to someone (or open a second tab).
 4. The second peer clicks **Connect** — both appear in the **Peers** list.
@@ -48,16 +48,16 @@ The room URL encodes a ZFA capability token in the hash (`#room=cap:room:…`). 
 
 ### The room as a quantum problem solver
 
-**A QuantumOS room optimizes the way a quantum annealer actually does — by relaxing toward a low-energy consensus, not by "trying every answer at once."** Many minds (human *and* AI) propose candidates in parallel; the room scores them cheaply and **trust-weighted**; a facilitator lowers the "temperature" each round — explore wide early, refine the leader late — until the room settles on a ZFA-balanced closure and records it with `/lemma` + `/persist`. That is a physically faithful metaheuristic: the [Quantum Logical Framework](https://github.com/rchain-community/quantum-logical-framework) says the substrate itself selects by closure / least free action (`ΔF = −log 2` per event), and the room realizes that same selection principle at the *logical* layer where human-meaningful problems live.
+**A QuantumOS room optimizes the way a quantum annealer actually does — by relaxing toward a low-energy consensus, not by "trying every answer at once."** Many minds (human *and* AI) propose candidates in parallel; the room scores them cheaply and **trust-weighted**; a facilitator lowers the "temperature" each round — explore wide early, refine the leader late — until the room settles on a ZFA-balanced closure and records it with `/lemma` + `/persist`. That is a physically faithful metaheuristic: the [Quantum Logical Framework](https://github.com/rhovision-org/quantum-logical-framework) says the substrate itself selects by closure / least free action (`ΔF = −log 2` per event), and the room realizes that same selection principle at the *logical* layer where human-meaningful problems live.
 
 - **`/facil optimize <objective + constraints>`** — an AI facilitator runs a round: proposes candidates, suggests the scoring step (`/estimate` or `/poll`), and on the next call refines the leaders (the *anneal*) toward `/probe` → `/lemma`.
-- **`/search [position]`** — the possibility step made literal, and **the search is the experiment**: the browser enumerates the admissible **next closures** from the room's current QuCalc position — the a-priori possibility space the room is annealing over — and asks the substrate which of them close from *here* (truth divination; truth is what closes). A port of the [QLF reference](https://github.com/rchain-community/quantum-logical-framework/blob/main/QucalcSearch.md), run locally — no service. Bare `/search` runs one enumeration over every peer's position with shared listeners — a **meeting of minds**, the room reading its own possibility space.
+- **`/search [position]`** — the possibility step made literal, and **the search is the experiment**: the browser enumerates the admissible **next closures** from the room's current QuCalc position — the a-priori possibility space the room is annealing over — and asks the substrate which of them close from *here* (truth divination; truth is what closes). A port of the [QLF reference](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QucalcSearch.md), run locally — no service. Bare `/search` runs one enumeration over every peer's position with shared listeners — a **meeting of minds**, the room reading its own possibility space.
 - **`/solve [position]`** — the selection step: **`/search` renders every way to close; `/solve` finds the solution, or the path to it.** It picks the one closure the substrate takes by a deterministic least-free-action cascade (so every peer agrees), widening the horizon until something closes; on a miss it reports the residual — what a completion still owes.
 - **Why a room, not a QPU:** runs in a browser with nothing to cool; takes the problem in plain language (no lossy QUBO/Ising encoding); handles soft, qualitative, evolving objectives an energy function can't express; and every step is explainable and dyncap-auditable — a trust-weighted decision trail, not a black-box bitstring.
 
 **Honest scope:** like every metaheuristic — and like a real annealer — it finds *good* solutions, not provably optimal ones; it is not an NP solver. Full method, worked example, and the QLF grounding: **[Collective Optimization →](Collective_Optimization.md)** · runnable demo (a room session converging to the brute-force TSP optimum): **[OptimizationDemo.md →](OptimizationDemo.md)** (`node scripts/qos-cli/optimize-demo.mjs`).
 
-**Foundation:** [Quantum Logical Framework](https://github.com/rchain-community/quantum-logical-framework) — ZFA (Zero Free Action) is the security model. Every peer identity is a ZFA-balanced capability token. Possessing a token IS authorization (Curry-Howard for capabilities). The room process `parallel(peer1, peer2, …)` is machine-verified to stay ZFA-balanced under composition — decoherence is impossible by construction.
+**Foundation:** [Quantum Logical Framework](https://github.com/rhovision-org/quantum-logical-framework) — ZFA (Zero Free Action) is the security model. Every peer identity is a ZFA-balanced capability token. Possessing a token IS authorization (Curry-Howard for capabilities). The room process `parallel(peer1, peer2, …)` is machine-verified to stay ZFA-balanced under composition — decoherence is impossible by construction.
 
 ---
 
@@ -162,7 +162,7 @@ rejection sampling so an unbalanced token cannot be issued
 ([`crates/zfa-core/src/capability.rs`](crates/zfa-core/src/capability.rs)). Possessing the
 token *is* the authorization; there is no account and no server-side state. The proof that
 count balance implies Pauli closure is
-[`count_balanced_pauli_closed`](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_TwistAlphabet.lean);
+[`count_balanced_pauli_closed`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_TwistAlphabet.lean);
 the threat model, known issues and reporting policy are [SECURITY.md](SECURITY.md).
 
 ---
@@ -220,7 +220,7 @@ is the room's persistence layer, not a server. Full docs: **[scripts/qos-cli/REA
 | Cross-peer persistence | ✓ `/persist @lemma to <peer>` — agreed replication of public state with explicit accept/reject |
 | RhoQu macro language | ✓ `/rhoqu` — `process` / `new` / `\|` parallel / `if` / `on channel` / `for` transpile to dispatcher commands; handlers persist per-room |
 | Mobile viewport | ✓ `100dvh` + `interactive-widget=resizes-content` — input stays above the Android keyboard; not clipped on mobile Firefox |
-| GitHub Pages | ✓ https://rchain-community.github.io/quantum-os/ |
+| GitHub Pages | ✓ https://rhovision-org.github.io/quantum-os/ |
 | Headless CLI peer | ✓ `scripts/qos-cli` — one-shot join + broadcast (Node + werift); ZFA/dyncap ported and self-tested |
 | Memory-peer daemon | ✓ persistent signed peer — persists + re-serves lemmas/currencies/transcript; stable identity; verified werift↔browser live |
 | Native Rust peer | Planned |
@@ -234,15 +234,15 @@ issue, and a design document says so in its first lines:
 
 | Design | Doc | Issue |
 |---|---|---|
-| Libraries of audio and video built in a room | [Media_Libraries.md](Media_Libraries.md) | [#99](https://github.com/rchain-community/quantum-os/issues/99) |
-| Cross-shard CapTP: revocable proxies, promise pipelining (Layer 2; Layer 1 in draft) | [CapabilityTransport.md](CapabilityTransport.md) | [#173](https://github.com/rchain-community/quantum-os/issues/173) · [#107](https://github.com/rchain-community/quantum-os/issues/107) |
+| Libraries of audio and video built in a room | [Media_Libraries.md](Media_Libraries.md) | [#99](https://github.com/rhovision-org/quantum-os/issues/99) |
+| Cross-shard CapTP: revocable proxies, promise pipelining (Layer 2; Layer 1 in draft) | [CapabilityTransport.md](CapabilityTransport.md) | [#173](https://github.com/rhovision-org/quantum-os/issues/173) · [#107](https://github.com/rhovision-org/quantum-os/issues/107) |
 | Group-process protocols as verified ρ-processes | [RhoQuCalc_Macros.md](RhoQuCalc_Macros.md) (design spec + case studies) | — |
-| A group as an identity, consent-gated memory, trust-gated library | — | [#103](https://github.com/rchain-community/quantum-os/issues/103) · [#106](https://github.com/rchain-community/quantum-os/issues/106) · [#105](https://github.com/rchain-community/quantum-os/issues/105) |
-| rnodes as room members, chain-backed channels and records | — | [#138](https://github.com/rchain-community/quantum-os/issues/138) · [#78](https://github.com/rchain-community/quantum-os/issues/78) · [#96](https://github.com/rchain-community/quantum-os/issues/96) |
-| Agents that do the work (standard AI integrations, a Lean-proof agent) | — | [#132](https://github.com/rchain-community/quantum-os/issues/132) |
+| A group as an identity, consent-gated memory, trust-gated library | — | [#103](https://github.com/rhovision-org/quantum-os/issues/103) · [#106](https://github.com/rhovision-org/quantum-os/issues/106) · [#105](https://github.com/rhovision-org/quantum-os/issues/105) |
+| rnodes as room members, chain-backed channels and records | — | [#138](https://github.com/rhovision-org/quantum-os/issues/138) · [#78](https://github.com/rhovision-org/quantum-os/issues/78) · [#96](https://github.com/rhovision-org/quantum-os/issues/96) |
+| Agents that do the work (standard AI integrations, a Lean-proof agent) | — | [#132](https://github.com/rhovision-org/quantum-os/issues/132) |
 | Native Rust peer | — | planned |
 
-The live list is the [`feature`](https://github.com/rchain-community/quantum-os/issues?q=is%3Aissue+is%3Aopen+label%3Afeature)
+The live list is the [`feature`](https://github.com/rhovision-org/quantum-os/issues?q=is%3Aissue+is%3Aopen+label%3Afeature)
 label. A doc PR that adds a design must land it here, not in the sections above
 (the review checklist is in [CLAUDE.md](CLAUDE.md#documentation-prs)).
 
@@ -250,25 +250,25 @@ label. A doc PR that adds a design must land it here, not in the sections above
 
 ## Related
 
-**[quantum-logical-framework](https://github.com/rchain-community/quantum-logical-framework)** — the Lean 4 formal proof repo that underpins this app. Zero `sorry` blocks across 218 modules. Key documents:
+**[quantum-logical-framework](https://github.com/rhovision-org/quantum-logical-framework)** — the Lean 4 formal proof repo that underpins this app. Zero `sorry` blocks across 218 modules. Key documents:
 
 | Document | Relevant to |
 |---|---|
-| [README.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/README.md) | Overview; "Try in the browser" section with `/braket` and `/qucalc` examples |
-| [AI.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/AI.md) | Quantum AI and syllogism solving — live collaboration script showing two peers prove "Socrates is Mortal" with `/qucalc`, `/braket`, `/grant` |
-| [BraKetRhoQuCalc.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/BraKetRhoQuCalc.md) | `/braket` — `action`=ket, `lift`=bra, `parallel`=superposition; `bra_ket_always_balanced` proof |
-| [QuantumOS.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/QuantumOS.md) | `/qucalc` — ZFA as OS kernel; `full_zeno_prune` as security, GC, and error correction |
-| [QuCalc.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/QuCalc.md) | The 8-twist alphabet `{^v<>/\+-}`; ZFA generation engine |
-| [Maxwell.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/Maxwell.md) | Maxwell equations from ZFA; `no_magnetic_monopoles` (∇·B=0) |
-| [Lagrangian_Formulation.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/Lagrangian_Formulation.md) | ZFA as ℒ=0 (null Lagrangian = condition of origin); variational grounding |
-| [Philosophy.md](https://github.com/rchain-community/quantum-logical-framework/blob/main/Philosophy.md) | Possibilist ontology; ZFA as the sole selection principle |
+| [README.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/README.md) | Overview; "Try in the browser" section with `/braket` and `/qucalc` examples |
+| [AI.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/AI.md) | Quantum AI and syllogism solving — live collaboration script showing two peers prove "Socrates is Mortal" with `/qucalc`, `/braket`, `/grant` |
+| [BraKetRhoQuCalc.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/BraKetRhoQuCalc.md) | `/braket` — `action`=ket, `lift`=bra, `parallel`=superposition; `bra_ket_always_balanced` proof |
+| [QuantumOS.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QuantumOS.md) | `/qucalc` — ZFA as OS kernel; `full_zeno_prune` as security, GC, and error correction |
+| [QuCalc.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QuCalc.md) | The 8-twist alphabet `{^v<>/\+-}`; ZFA generation engine |
+| [Maxwell.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Maxwell.md) | Maxwell equations from ZFA; `no_magnetic_monopoles` (∇·B=0) |
+| [Lagrangian_Formulation.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Lagrangian_Formulation.md) | ZFA as ℒ=0 (null Lagrangian = condition of origin); variational grounding |
+| [Philosophy.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Philosophy.md) | Possibilist ontology; ZFA as the sole selection principle |
 
 **Lean source files** (machine-verified, zero `sorry`):
 
 | File | Theorems |
 |---|---|
-| [lean/RhoQuCalc.lean](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean) | `rho_process_always_zfa`, `action`, `lift`, `parallel` — `/id`, `/qucalc` |
-| [lean/BraKetRhoQuCalc.lean](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/BraKetRhoQuCalc.lean) | `bra_ket_always_balanced`, `action_topo_is_ket`, `lift_topo_is_bra` — `/braket` |
-| [lean/SpacetimeDynamics.lean](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/SpacetimeDynamics.lean) | `Form.toMatrix_adjoint` — Hermitian matrix used by `/braket` |
-| [lean/QLF_Axioms.lean](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_Axioms.lean) | `achieves_ZFA`, `spectral_gap`, `full_zeno_prune` — `/zfa`, `/qucalc` |
-| [lean/QLF_Universality.lean](https://github.com/rchain-community/quantum-logical-framework/blob/main/lean/QLF_Universality.lean) | `qlf_universality` — every terminating computation IS a ZFA string |
+| [lean/RhoQuCalc.lean](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean) | `rho_process_always_zfa`, `action`, `lift`, `parallel` — `/id`, `/qucalc` |
+| [lean/BraKetRhoQuCalc.lean](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/BraKetRhoQuCalc.lean) | `bra_ket_always_balanced`, `action_topo_is_ket`, `lift_topo_is_bra` — `/braket` |
+| [lean/SpacetimeDynamics.lean](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/SpacetimeDynamics.lean) | `Form.toMatrix_adjoint` — Hermitian matrix used by `/braket` |
+| [lean/QLF_Axioms.lean](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_Axioms.lean) | `achieves_ZFA`, `spectral_gap`, `full_zeno_prune` — `/zfa`, `/qucalc` |
+| [lean/QLF_Universality.lean](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_Universality.lean) | `qlf_universality` — every terminating computation IS a ZFA string |

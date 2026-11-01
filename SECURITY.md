@@ -191,7 +191,7 @@ fails the build. It is the check that found the balance-predicate gap above.
 
 Tokens are generated using `crypto.getRandomValues()` (browser) or the `getrandom` crate (Rust/WASM), which calls `crypto.getRandomValues()` internally. Entropy: 128 bits. Since v0.17, `Capability::from_entropy` uses rejection sampling (expected ~4 iterations) to guarantee both faces of the half-spin closure hold for every issued token. The output space is reduced versus the count-only check, but remains astronomically large for 32-twist tokens.
 
-The ZFA invariant is machine-verified in [Lean 4](https://github.com/rchain-community/quantum-logical-framework):
+The ZFA invariant is machine-verified in [Lean 4](https://github.com/rhovision-org/quantum-logical-framework):
 
 - `achieves_ZFA` — half-spin closure (Pauli scalar return ∧ Hermitian-pair count balance)
 - `rho_process_always_zfa` — parallel composition stays ZFA
@@ -439,6 +439,6 @@ pnpm audit
 
 ## Reporting a vulnerability
 
-Please report security vulnerabilities by opening a [GitHub issue](https://github.com/rchain-community/quantum-os/issues) marked **[security]**, or by emailing the maintainer directly. Do not include exploit code in public issues.
+Please report security vulnerabilities by opening a [GitHub issue](https://github.com/rhovision-org/quantum-os/issues) marked **[security]**, or by emailing the maintainer directly. Do not include exploit code in public issues.
 
 Responsible disclosure: allow 30 days for a fix before public disclosure.
