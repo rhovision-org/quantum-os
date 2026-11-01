@@ -13,7 +13,7 @@ dir to a timestamped `.bak-` (keeping the last 3) rather than deleting it, so a
 genesis you didn't intend is recoverable — but the running chain still resets.
 
 The node binary is `bin/rnode` at the repo root, committed so that a checkout of
-quantum-os alone brings a chain up — no rchain-rust checkout, no PATH symlink.
+quantum-os alone brings a chain up — no rholo checkout, no PATH symlink.
 To try a candidate build against a copy of the current chain first:
 
 ```bash
@@ -71,12 +71,12 @@ payload = 00000000 ++ keccak256(eth)
 address = base58(payload ++ first 4 bytes of blake2b256(payload))
 ```
 
-Checked against rchain-rust's own devnet key, which derives to the address its
+Checked against rholo's own devnet key, which derives to the address its
 `tools/devnet.sh` publishes.
 
 ## What works
 
-Verified against rchain-rust `dev` at `f3f4759e9`.
+Verified against rholo `dev` at `f3f4759e9`.
 
 **`/rholang eval` works**, including the powerbox. It runs the program in a
 read-only sandbox over finalized state and hands back whatever reached `return`,
@@ -119,7 +119,7 @@ goes up as a JSON string. `rholang.ts` already does this.
 
 ## What is known about rnode
 
-**The build `bin/rnode` ships** is rchain-rust `dev` at `bc80abb` (2026-10-08),
+**The build `bin/rnode` ships** is rholo `dev` at `bc80abb` (2026-10-08),
 static musl (`cargo build --release -p rchain-node --bin rnode --target
 x86_64-unknown-linux-musl`), `sha256:a22e0ead719f…`. On a fresh genesis from
 these files it passes `rgov-core-check` 84/84, `dictionary-check` 27/27,
@@ -151,7 +151,7 @@ answer at depth 2560.
 
 Two things to know when writing contracts here:
 
-**[#19](https://github.com/rchain-community/rchain-rust/issues/19) — a
+**[#19](https://github.com/rhovision-org/rholo/issues/19) — a
 one-binder persistent receive inside a nested `new` does not terminate.** It
 re-fires until the budget stops it. Give every `contract` at least two
 parameters; where a verb genuinely takes only a return channel, an ignored first

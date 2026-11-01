@@ -11,9 +11,9 @@ Everything below is one line each, typed into a [quantum-os](README.md) room
 after `/rholang key generate` (or an existing funded key) — `$xinstall()`
 deploys a fresh exchange, and the rest are ordinary `$name(…)` macro calls,
 no `/` command of their own. (For the curious: the contract itself is
-[`rholang-exchange.js`](https://github.com/rchain-community/quantum-os/blob/main/packages/browser/src/rholang-exchange.js),
+[`rholang-exchange.js`](https://github.com/rhovision-org/quantum-os/blob/main/packages/browser/src/rholang-exchange.js),
 the macros are registered in
-[`rholang-macros.js`](https://github.com/rchain-community/quantum-os/blob/main/packages/browser/src/rholang-macros.js) —
+[`rholang-macros.js`](https://github.com/rhovision-org/quantum-os/blob/main/packages/browser/src/rholang-macros.js) —
 neither needs reading to follow this walkthrough.) Native platform tokens
 (REV, or any chain's own) trade too — **wrapped**, never directly; see §6.
 
@@ -361,14 +361,14 @@ shards, not one contract standing in for both).
 **Recovery, if Bob's client crashes mid-flight.** Both legs are gated to
 *Bob's own key* throughout, so recovery needs no counterparty — Bob (or his
 client, reconnecting) reads `$xstateof` on both legs and follows a fixed
-recovery table ([`exchange-2pc.ts`](https://github.com/rchain-community/quantum-os/blob/main/packages/browser/src/exchange-2pc.ts)
+recovery table ([`exchange-2pc.ts`](https://github.com/rhovision-org/quantum-os/blob/main/packages/browser/src/exchange-2pc.ts)
 for the curious): both
 `prepared` → finish committing both; one `prepared`, the other never
 happened → abort the one that ran; either side already `committed` → finish
 the other (idempotent). This is why **`commit` stays gated to the tx's own
 holder** — only the identity that drove both legs can finish the job.
 
-**`abort` is holder-or-expired-gated** ([#198](https://github.com/rchain-community/quantum-os/issues/198),
+**`abort` is holder-or-expired-gated** ([#198](https://github.com/rhovision-org/quantum-os/issues/198),
 shipped). Bob can always abort his own prepared tx, as above. But if Bob's
 key is lost or his browser is gone for good, the tx doesn't stay `prepared`
 forever — once the current block number passes the `expiryBlock` Bob himself
@@ -388,7 +388,7 @@ The `abort` contract reads `rho:block:data` to make this check — the same
 URN that used to silently break signed-deploy readback on the shipped rnode
 build (reproduced down to the simplest possible program: a bare block-data
 read + `return!`, a clean "Success!", no value ever reaching the registry
-slot). That no longer reproduces on rchain-rust `dev` `9e667e203`; not
+slot). That no longer reproduces on rholo `dev` `9e667e203`; not
 bisected which upstream change fixed it. Verified end to end against
 localnet: a non-holder refused before expiry, the same non-holder succeeding
 after it, and reserves landing back exactly where they started. See
@@ -442,7 +442,7 @@ agnostic: it moves messages to whatever `token` URI you name.
   itself (`$wtransfer`, §1), moving value to someone else *inside* a pool
   today means `withdraw` → `$wtransfer` → they `deposit` again, three
   transactions where one would do
-  ([#202](https://github.com/rchain-community/quantum-os/issues/202)).
+  ([#202](https://github.com/rhovision-org/quantum-os/issues/202)).
 - **Cross-shard trades are safety-atomic, not instant-atomic.** Two-phase
   commit means either both legs settle or the prepared one reverts exactly —
   never a state where value is lost or a party is shorted — but it is still
@@ -467,7 +467,7 @@ agnostic: it moves messages to whatever `token` URI you name.
 - [`PromissoryNoteDemo.md`](PromissoryNoteDemo.md) — quantum-os `/note` currencies (the bearer side).
 - [`AtomicSwapDemo.md`](AtomicSwapDemo.md) — `/rdv swap`, the in-room atomic 2-party trade (no rholang, no rate).
 - [`MacRhoLang.md`](MacRhoLang.md) — the `$` macro layer.
-- rchain-community/rchain-rust#33 — the linked-invoke primitive `prepareReceive` builds on.
+- rhovision-org/rholo#33 — the linked-invoke primitive `prepareReceive` builds on.
 
 ---
 
@@ -476,8 +476,8 @@ agnostic: it moves messages to whatever `token` URI you name.
 Multi-hop routing past two pools, an AMM-style rate curve, a
 `KnownCurrency` field so a `/note` currency remembers where it trades,
 holder-to-holder transfer of in-pool balances (already tracked,
-[#202](https://github.com/rchain-community/quantum-os/issues/202)) —
-none of this is closed. **[Open an issue →](https://github.com/rchain-community/quantum-os/issues/new)**
+[#202](https://github.com/rhovision-org/quantum-os/issues/202)) —
+none of this is closed. **[Open an issue →](https://github.com/rhovision-org/quantum-os/issues/new)**
 and say what you hit or what you'd want; that's exactly how this exchange
 went from a single pool to atomic federation, wrapped native tokens, and
 peer-to-peer transfer.

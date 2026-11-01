@@ -34,9 +34,9 @@ npm install          # pulls ws + werift (werift = pure-TS headless WebRTC)
 ```bash
 # Announce to the public room (someone must be in it):
 node qos-cli.mjs \
-  --room "https://rchain-community.github.io/quantum-os/#room=cap%3Aroom%3A05214747236101414325074505234721" \
+  --room "https://rhovision-org.github.io/quantum-os/#room=cap%3Aroom%3A05214747236101414325074505234721" \
   --name "release-bot" \
-  --message "QLF v1.6.0 released — https://github.com/rchain-community/quantum-logical-framework/releases/tag/v1.6.0"
+  --message "QLF v1.6.0 released — https://github.com/rhovision-org/quantum-logical-framework/releases/tag/v1.6.0"
 
 # A bare cap works too:
 node qos-cli.mjs --room cap:room:0521… -m "hello room"
@@ -64,7 +64,7 @@ continuous peer.
 
 ```bash
 node qos-daemon.mjs \
-  --room "https://rchain-community.github.io/quantum-os/#room=cap%3Aroom%3A05214747236101414325074505234721" \
+  --room "https://rhovision-org.github.io/quantum-os/#room=cap%3Aroom%3A05214747236101414325074505234721" \
   --name "memory" --state ./.qos-state
 ```
 
@@ -374,7 +374,7 @@ recording. Recording is the observer's own — it does not depend on any agent c
 room's memory (`--persist`), though the trust-weighted tally uses a persisted `groups.json`
 when one is present under the same state dir. Analysis lives in the QLF repo
 (`game_log_analysis.py`), which scores a record against its pre-registered predictions
-([Game_Theory_QLF](https://github.com/rchain-community/quantum-logical-framework/blob/main/Game_Theory_QLF.md) §7).
+([Game_Theory_QLF](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Game_Theory_QLF.md) §7).
 `node observer.e2e.mjs` exercises the whole path against an in-process relay.
 
 **Multiple agents in one room.** Run several with different `--role` (and distinct
@@ -464,7 +464,7 @@ GET  /faucet?address=1111…               (the same)
 GET  /health                             → the terms: amount (dust) + amountRev, funding address, rnode, limits
 ```
 
-**Wire-compatible with rnode's own faucet.** A rchain-rust node in dev mode
+**Wire-compatible with rnode's own faucet.** A rholo node in dev mode
 has a native `POST /api/faucet {"address"}` → `{deployId, amount, to}` (amount
 in dust, 1 REV = 10⁸), and r-wallet already calls exactly that against the
 node it is pointed at. This endpoint answers in that shape (its own fields
@@ -572,7 +572,7 @@ persist under `--state`.
 ## RChain capability macros — the `/rholang` agent (`rholang-agent.mjs`)
 
 The `/rholang` macro agent joins the room and turns chat messages into RChain capability
-operations. It maps macro requests to the rchain-rust system contracts and shares
+operations. It maps macro requests to the rholo system contracts and shares
 the results back into the room chat:
 
 ```bash
@@ -633,7 +633,7 @@ expansion is well-formed. There is no forbidden rholang — capability security
 decides what a deploy can reach. Run `node rholang-macros.mjs --selftest` to
 verify (26 cases).
 
-Twenty macros, mirroring the `qucalc/examples/*.rho` in rchain-rust — see
+Twenty macros, mirroring the `qucalc/examples/*.rho` in rholo — see
 [`RChain_Macros.md`](../../RChain_Macros.md) for the full library and for running
 a local node.
 

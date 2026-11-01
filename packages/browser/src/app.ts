@@ -2883,10 +2883,10 @@ function runRholangProgram(mode: "eval" | "deploy", source: string): void {
           if (fate?.errored) {
             say(`  ✗ it ran in block ${fate.blockNumber} and errored (cost ${fate.cost ?? "?"}) — nothing was sent to return`);
             // The node records the reducer's first error against the deploy
-            // (rchain-rust#15). Older nodes leave it empty, so say so rather
+            // (rholo#15). Older nodes leave it empty, so say so rather
             // than printing a blank line where the reason should be.
             if (fate.systemDeployError) say(`     ${fate.systemDeployError}`);
-            else say(`     no reason recorded — this node predates rchain-rust#15`);
+            else say(`     no reason recorded — this node predates rholo#15`);
           } else if (fate) {
             // The registry result slot is not written on every node — a
             // ProcessedWithSuccess deploy left it empty on the rebuilt
@@ -6493,7 +6493,7 @@ function handleCommand(raw: string): string[] {
       sys(`  signaling  ${activeRoom.signalingUrl}`);
       sys(`  rnode      ${loadNodeConfig().url}`);
       sys(`  webrtc     ${webrtcMissing() ? "MISSING — this browser cannot connect to anyone" : "available"}`);
-      sys("  https://github.com/rchain-community/quantum-os");
+      sys("  https://github.com/rhovision-org/quantum-os");
       break;
     }
 
@@ -6781,7 +6781,7 @@ function handleCommand(raw: string): string[] {
           const groupLocker = lockerFromGroups();
           // Every locker verb is its own deploy. `deployerId` exists only
           // inside one, and a facet reached through the registry answers the
-          // first call in a program and nothing after it (rchain-rust#21) — so
+          // first call in a program and nothing after it (rholo#21) — so
           // one verb per program is the shape either way.
           const locker = cfg.locker ?? groupLocker?.uri;
           if (!locker) {

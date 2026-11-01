@@ -58,7 +58,7 @@ async function write(label, key, program, check) {
 // Read at the NEWEST block. Plain /api/explore-deploy evaluates against the last
 // FINALIZED block, which trails a write by a block or more, so a read right after
 // a write saw the state from before it — 16 of rgov-core-check's and 5 of
-// dictionary-check's failures on rchain-rust bc80abb were exactly that.
+// dictionary-check's failures on rholo bc80abb were exactly that.
 async function exploreLatest(program) {
   const blocks = await (await fetch(`${NODE}/api/blocks/1`)).json().catch(() => []);
   const blockHash = blocks?.[0]?.blockHash;

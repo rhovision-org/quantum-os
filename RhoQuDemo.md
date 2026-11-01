@@ -251,4 +251,4 @@ Where the demo *is* still a stretch: `if` evaluates against current room state a
 - [Consensus.md](Consensus.md) — the probe layer the RhoQu macro inherits for free at every `parallel { … }` boundary
 - [SECURITY.md § Multi-room blanket isolation](SECURITY.md#multi-room-blanket-isolation-room) — why `bridge` is application-level only
 
-**[Open a room and try the expansions →](https://rchain-community.github.io/quantum-os/)**
+**[Open a room and try the expansions →](https://rhovision-org.github.io/quantum-os/)**

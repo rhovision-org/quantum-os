@@ -1,6 +1,6 @@
 # Case Study — Multi-Stakeholder Governance
 
-**Issue:** [#26](https://github.com/rchain-community/quantum-os/issues/26) · **Macro:** `gov-9stage` ([`RhoQuCalc_Macros.md`](RhoQuCalc_Macros.md)) · **Built on:** [`Governance.md`](Governance.md) (liquid democracy), [`Group_Decisions.md`](Group_Decisions.md)
+**Issue:** [#26](https://github.com/rhovision-org/quantum-os/issues/26) · **Macro:** `gov-9stage` ([`RhoQuCalc_Macros.md`](RhoQuCalc_Macros.md)) · **Built on:** [`Governance.md`](Governance.md) (liquid democracy), [`Group_Decisions.md`](Group_Decisions.md)
 
 A decentralized, multi-stakeholder governance process run entirely in the browser mesh — propose system
 changes, delegate voting rights, and reach robust consensus with no central server.
@@ -58,4 +58,4 @@ mapping.
   `/channel`, capability-token stakeholder roles, and the **`/estimate` median** round (mesh-synced).
 - 🔵 **Open:** the **`RhoProcess` macro IR + mesh-shared macro names** so a community adopts `gov-9stage`
   once and every peer has it; the sentiment-slider UI.
-  Tracked in [#24](https://github.com/rchain-community/quantum-os/issues/24).
+  Tracked in [#24](https://github.com/rhovision-org/quantum-os/issues/24).

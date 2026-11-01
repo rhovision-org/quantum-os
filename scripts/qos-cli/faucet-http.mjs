@@ -6,7 +6,7 @@
 // `GET /faucet?address=`) → the agent's `send(address)`, which deploys the
 // same `$transfer` from the same throwaway key.
 //
-// WIRE-COMPATIBLE WITH RNODE'S OWN FAUCET. rchain-rust's dev-mode node has a
+// WIRE-COMPATIBLE WITH RNODE'S OWN FAUCET. rholo's dev-mode node has a
 // native `POST /api/faucet {"address"}` → `{deployId, amount, to}` (amount in
 // dust), and r-wallet already calls exactly that. This endpoint answers in
 // that shape (plus its own fields) and is served at `/api/faucet` as well as

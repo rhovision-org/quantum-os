@@ -10,7 +10,7 @@
 // **Federation, atomically.** An exchange records peer exchanges by name
 // (`link`), each on its own shard. A cross-shard trade is a **two-phase
 // commit, client-orchestrated over the Layer-1 remote signed deploy**
-// (rchain-rust#33/#34) — no relay, no new consensus, no coordinator that can
+// (rholo#33/#34) — no relay, no new consensus, no coordinator that can
 // lose the decision:
 //   1. `prepare` on the local pool — does the swap now, holds a reversible
 //      tx record.
@@ -35,7 +35,7 @@
 // pooled.
 //
 // Modeled on locker.js / shard_exchange.rho: every contract takes ≥2 params
-// (rchain-rust#19), state cells are consumed-and-restored, no quoted names.
+// (rholo#19), state cells are consumed-and-restored, no quoted names.
 //
 //   node packages/browser/src/rholang-exchange.js --selftest
 
@@ -349,7 +349,7 @@ in {
   // deploy reading rho:block:data never got its return!'d value through
   // wrapProgram's registry-readback forwarder (reproduced down to a bare
   // block-data read + return!, bin/rnode 0.1.0) does not reproduce on
-  // rchain-rust dev 9e667e203 — re-verified 2026-09-14, twice, against a
+  // rholo dev 9e667e203 — re-verified 2026-09-14, twice, against a
   // fresh devnet: the registry slot resolved on the first poll both times.
   // Not bisected which upstream change (of #44/#45 block-header timestamp,
   // dynamic validators, #47 strings, #48 rho:io:http, #49 universal BigInt,
@@ -414,7 +414,7 @@ in {
   } |
 
   // stateOf — read-only; the recovery primitive. A crashed client (or anyone)
-  // reads this on both legs and finishes deterministically. rchain-rust#33
+  // reads this on both legs and finishes deterministically. rholo#33
   // remote reads need no signature, so this is cheap to poll.
   contract Exchange(_id, @"stateOf", @txId, ret) = {
     for (@txs <<- txCh) {
@@ -479,7 +479,7 @@ export function installProgram() {
 /**
  * One exchange call, as a complete program. Every call is its own deploy —
  * `deployerId` exists only inside a deploy, and a registry facet answers only
- * the first call in a program (rchain-rust#21).
+ * the first call in a program (rholo#21).
  */
 export function exchangeCall(exchangeUri, verb, args = []) {
   const call = ["*deployerId", q(verb), ...args].join(", ");

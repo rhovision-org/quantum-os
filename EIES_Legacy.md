@@ -32,7 +32,7 @@ ran out. That thread continues here — see the
 [Room Best Practices](Room_Best_Practices.md).
 
 **QuantumOS** — this repository
-([README](https://github.com/rchain-community/quantum-os#readme)). Peer-to-peer
+([README](https://github.com/rhovision-org/quantum-os#readme)). Peer-to-peer
 [rooms](MyRoom.md), a ZFA kernel, [governance by liquid
 democracy](Governance.md), and a bridge to a chain ([RChain_Macros.md](RChain_Macros.md))
 for the things that must outlive the room. The vision it serves is stated in the
@@ -40,8 +40,8 @@ for the things that must outlive the room. The vision it serves is stated in the
 and the [User Guide](User_Guide.md) is where to start using it.
 
 **Quantum Logical Framework** — the theory behind QuantumOS, not a second system
-([README](https://github.com/rchain-community/quantum-logical-framework#readme),
-[site](https://rchain-community.github.io/quantum-logical-framework/)). Zero Free
+([README](https://github.com/rhovision-org/quantum-logical-framework#readme),
+[site](https://rhovision-org.github.io/quantum-logical-framework/)). Zero Free
 Action is QLF's idea; the ZFA kernel above is its implementation, and a room's
 capabilities are ZFA-valid twist strings rather than arbitrary tokens because of
 it.
@@ -114,7 +114,7 @@ capabilities its author chose to place in it. Same enabling property; a much
 narrower blast radius; and no superuser needed to administer the boundary,
 because holding the cap *is* the permission.
 
-That is why [the macro design](https://github.com/rchain-community/quantum-os/issues/65)
+That is why [the macro design](https://github.com/rhovision-org/quantum-os/issues/65)
 starts with capabilities and defers governance. It is not a simplification of the
 EIES model — it is the EIES model with the suid bit sharpened into an object.
 
@@ -124,7 +124,7 @@ EIES model — it is the EIES model with the suid bit sharpened into an object.
 written by its users, not its authors. A system where only the maintainers can
 extend the vocabulary gets the vocabulary its maintainers imagined. The current
 library is [RChain_Macros.md](RChain_Macros.md) — deprecated, and being
-redesigned in [#65](https://github.com/rchain-community/quantum-os/issues/65)
+redesigned in [#65](https://github.com/rhovision-org/quantum-os/issues/65)
 around exactly this; [RhoQuCalc_Macros.md](RhoQuCalc_Macros.md) is the qucalc
 side of it.
 
@@ -217,11 +217,11 @@ If you are picking up this project, in order:
 | [Consensus.md](Consensus.md) · [SECURITY.md](SECURITY.md) | what a room agrees · what is enforced |
 | [Room_Bridges.md](Room_Bridges.md) | joining rooms to each other |
 | [RChain_Macros.md](RChain_Macros.md) | reaching a chain from a room |
-| [#65](https://github.com/rchain-community/quantum-os/issues/65) | the macro design this document argues for |
-| [quantum-logical-framework](https://github.com/rchain-community/quantum-logical-framework#readme) | the ZFA foundation underneath all of it |
+| [#65](https://github.com/rhovision-org/quantum-os/issues/65) | the macro design this document argues for |
+| [quantum-logical-framework](https://github.com/rhovision-org/quantum-logical-framework#readme) | the ZFA foundation underneath all of it |
 
 ---
 
 *The argument for capabilities in
-[#65](https://github.com/rchain-community/quantum-os/issues/65) is the one to read
+[#65](https://github.com/rhovision-org/quantum-os/issues/65) is the one to read
 first. It is a forty-year-old result.*

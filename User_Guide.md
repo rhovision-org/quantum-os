@@ -7,7 +7,7 @@ decides, and records** together — no account, no host, no central server. This
 is the **map**: what to do at each stage, the one command for it, and where the full
 details live. It doesn't repeat those docs — follow the links for depth.
 
-> [Open a room →](https://rchain-community.github.io/quantum-os/), set a name, share the
+> [Open a room →](https://rhovision-org.github.io/quantum-os/), set a name, share the
 > room link. Everyone with the link is a peer; holding the link **is** your membership.
 
 **The arc of a session:** gather → **discuss & brainstorm** → **build trust** →

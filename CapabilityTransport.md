@@ -8,10 +8,10 @@ Two layers, and most uses only need the first:
 
 | layer | what | where |
 |---|---|---|
-| **1 — linked invoke** | your *own* account, signed — a remote deploy to another shard to invoke a capability there | [rchain-rust#33](https://github.com/rchain-community/rchain-rust/issues/33) / [#34](https://github.com/rchain-community/rchain-rust/pull/34) |
-| **2 — CapTP** | handing someone a *revocable, attenuated* proxy that acts on your behalf; promise pipelining; routing to non-linked shards and other chains | [quantum-os#173](https://github.com/rchain-community/quantum-os/issues/173) |
+| **1 — linked invoke** | your *own* account, signed — a remote deploy to another shard to invoke a capability there | [rholo#33](https://github.com/rhovision-org/rholo/issues/33) / [#34](https://github.com/rhovision-org/rholo/pull/34) |
+| **2 — CapTP** | handing someone a *revocable, attenuated* proxy that acts on your behalf; promise pipelining; routing to non-linked shards and other chains | [quantum-os#173](https://github.com/rhovision-org/quantum-os/issues/173) |
 
-Status: **Layer 1 in draft** ([rchain-rust#34](https://github.com/rchain-community/rchain-rust/pull/34):
+Status: **Layer 1 in draft** ([rholo#34](https://github.com/rhovision-org/rholo/pull/34):
 `casper::shard_invoke`, the decision record, the exchange contract — CI green,
 and the branch build verified against the local chain). Layer 2 is design.
 On the quantum-os side, the pooled exchange's cross-shard trade is now
@@ -46,8 +46,8 @@ a transport problem — it is signed message-passing where the far shard binds
 
 **It is an ordinary, caller-signed deploy submitted to the target shard —
 no relay, no link table, no new consensus** (resolved in
-[rchain-rust#33](https://github.com/rchain-community/rchain-rust/issues/33),
-draft PR rchain-rust#34). A deploy already *is* the signed message that carries
+[rholo#33](https://github.com/rhovision-org/rholo/issues/33),
+draft PR rholo#34). A deploy already *is* the signed message that carries
 the identity; a home-shard relay would have to re-sign a different payload as
 the caller, which the home node cannot do (it holds only the public key).
 
@@ -111,7 +111,7 @@ Two shapes:
   `/note` currency reaches a pool as its token contract's URI; the platform
   token participates only wrapped (below).
   - **`abort` is holder-or-expired-gated**
-    ([quantum-os#198](https://github.com/rchain-community/quantum-os/issues/198),
+    ([quantum-os#198](https://github.com/rhovision-org/quantum-os/issues/198),
     shipped 2026-09-15): the tx's own holder may always abort a prepared tx;
     anyone else may once the current block number passes the tx's recorded
     `expiryBlock`, so a trade abandoned by a lost/gone key is not locked
@@ -121,9 +121,9 @@ Two shapes:
     `return`/registry-readback mechanism, reproduced down to the simplest
     possible program (a bare block-data read + `return!`), with a clean
     "Success!" and no rholang error either — but does not reproduce as of
-    rchain-rust `dev` `9e667e203` (re-verified 2026-09-14, twice, against a
+    rholo `dev` `9e667e203` (re-verified 2026-09-14, twice, against a
     fresh devnet); not bisected which upstream change fixed it.
-- **Bilateral escrow** (`qucalc/examples/shard_exchange.rho`, rchain-rust#34):
+- **Bilateral escrow** (`qucalc/examples/shard_exchange.rho`, rholo#34):
   an escrow on each shard, pre-funded, fixed rate; a send `deposit`s locally
   and `consume`s the remote one through a remote invoke. Still
   client-orchestrated and non-atomic as originally built — the same
@@ -141,7 +141,7 @@ both legs (`crates/zfa-core/src/coupling.rs` `coupled`) — is a *check* a
 contract can run with `rho:qucalc:verify`, which rnode already exposes, not a
 prerequisite; for the pooled exchange the preimage-reveal-style single
 triggering event is now the `commit` pair itself, not a post-hoc monitor.
-rchain-rust already carries the QLF primitives, so the escrow lives there.
+rholo already carries the QLF primitives, so the escrow lives there.
 
 ### Wrapped native tokens — the platform token, without touching `revVault`
 
@@ -227,12 +227,12 @@ its stale view until it re-syncs; *revoked* is shown as distinct from *gone*.
 ## Phases
 
 1. **Layer 1** — the client-side `$at` → remote signed deploy + reply-channel
-   listen (rchain-rust#33 / #34: `casper::shard_invoke`).
+   listen (rholo#33 / #34: `casper::shard_invoke`).
 2. Exchange support — **done**: the pooled exchange's atomic two-phase-commit
    federation (`prepare`/`prepareReceive`/`commit`/`abort`/`stateOf`) and
    wrapped native tokens (`wrapped-token.js`, `$wrap`/`$unwrap`/`$wrelease`),
    both quantum-os-side and verified against localnet. The bilateral escrow
-   (`qucalc/examples/shard_exchange.rho`, rchain-rust#34) is unchanged —
+   (`qucalc/examples/shard_exchange.rho`, rholo#34) is unchanged —
    the same upgrade there is a follow-up, not required.
 3. **Layer 2** — `$proxy` + the gateway peer + `captp-export` / `captp-invoke`
    / `captp-result` / `captp-revoke`; synchronous invocation.
@@ -247,5 +247,5 @@ its stale view until it re-syncs; *revoked* is shown as distinct from *gone*.
 - [`ExchangeDemo.md`](ExchangeDemo.md) — end-user walkthrough of the pooled token exchange and its atomic `link`/`prepare`/`receive`/`commit`/`abort` cross-shard federation over Layer 1, plus wrapped native tokens.
 - [`Room_Bridges.md`](Room_Bridges.md) — a peer in two rooms is the shared closure (the gateway is that, between a room and a shard).
 - [`Governance.md`](Governance.md) — group ownership of a gateway; delegation- and trust-weighted decisions; censure.
-- [quantum-os#173](https://github.com/rchain-community/quantum-os/issues/173) (Layer 2) · [rchain-rust#33](https://github.com/rchain-community/rchain-rust/issues/33) (Layer 1) · [#138](https://github.com/rchain-community/quantum-os/issues/138) · [#107](https://github.com/rchain-community/quantum-os/issues/107).
+- [quantum-os#173](https://github.com/rhovision-org/quantum-os/issues/173) (Layer 2) · [rholo#33](https://github.com/rhovision-org/rholo/issues/33) (Layer 1) · [#138](https://github.com/rhovision-org/quantum-os/issues/138) · [#107](https://github.com/rhovision-org/quantum-os/issues/107).
 - [OCapN](https://github.com/ocapn/ocapn) · Agoric [`@endo/captp`](https://www.npmjs.com/package/@endo/captp).

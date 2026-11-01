@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 // rgov-check.mjs — does rgov's governance rholang still run, on THIS rnode?
 //
-// rgov (rchain-community/rgov) is the governance app r-wallet's contract
+// rgov (rhovision-org/rgov) is the governance app r-wallet's contract
 // dropdown was ported from: ten contract classes in `rholang/core/`, and ~36
 // action scripts that are CLIENTS of those classes. It was written against the
-// Scala node. This asks what still works on rchain-rust, so a redesign starts
+// Scala node. This asks what still works on rholo, so a redesign starts
 // from evidence rather than from the 2021 shape.
 //
 // It exists because two node bugs that shaped rgov's design are now FIXED —
-// rchain-rust#19 (a one-binder persistent receive in a nested `new` never
+// rholo#19 (a one-binder persistent receive in a nested `new` never
 // terminates) and #21 (a registry-looked-up facet answers only the first call
 // per program), both closed 2026-08-29 and verified live. Code written to dodge
 // them can be simplified, but only once we know what it is.
@@ -81,7 +81,7 @@ const PHLO = Number(arg("--phlo", "5000000"));
 const GENESIS_READCAP = "rho:id:wxc4mwdh7otq4fd6iuxt84inepssyz5tugojf7ao68dkh4ebbncy";
 const GENESIS = process.argv.includes("--genesis");
 
-const RAW = "https://raw.githubusercontent.com/rchain-community/rgov/master/";
+const RAW = "https://raw.githubusercontent.com/rhovision-org/rgov/master/";
 const CACHE = join(import.meta.dirname, ".rgov-cache");
 
 /** rgov's sources, from a local checkout or GitHub (cached). Returns null when

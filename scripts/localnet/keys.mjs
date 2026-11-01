@@ -14,7 +14,7 @@
 //   payload = 00000000 ++ keccak256(eth)
 //   address = base58(payload ++ first 4 bytes of blake2b256(payload))
 //
-// Verified against rchain-rust's own devnet key, which derives to the address
+// Verified against rholo's own devnet key, which derives to the address
 // its devnet.sh publishes.
 
 import { readFileSync } from "node:fs";
