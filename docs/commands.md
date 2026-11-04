@@ -654,13 +654,13 @@ The room's channels end with the room. These are on chain, in the Channel contra
 |---|---|
 | `/channel chain` | The contract you use, the channels you follow and how far you have read |
 | `/channel chain install` · `use <uri>` | Publish a Channel contract, or point at one somebody shared |
-| `/channel chain open <name> [invite]` | Open a channel under your address. **open**: anyone reads it, free. **invite**: only you and the addresses you allow |
+| `/channel chain open <name> [invite]` | Open a channel under your address. **open**: anyone reads it, free. **invite**: only you and the addresses you allow can read it through the contract. That gates reading; posts are still plaintext on chain. Any other policy is refused |
 | `/channel chain post <name> <text>` | Publish to your channel (signed) |
 | `/channel chain close <name>` | No more posts. What was posted stays readable, and readers are told it was closed rather than gone quiet |
 | `/channel chain allow\|disallow <name> <address>` | Who may read an invite channel. Disallowing stops their future reads |
 | `/channel chain subscribe <address/name> [--all]` | Follow a channel: from now, or `--all` from the oldest kept post |
 | `/channel chain unsubscribe <address/name>` | Stop following. Only you can end your own subscription |
-| `/channel chain read <address/name> [--all]` | What is new since your last read (50 at a time). Free for an open channel; a signed read for an invite one |
+| `/channel chain read <address/name> [--all]` | What is new since your last read (50 at a time). Free for an open channel; a signed read, which costs phlo, for an invite one. Where you have read up to is kept per node, shard and contract |
 | `/channel chain info <address/name>` · `list [address]` | A channel's policy, post count and subscriber count · someone's channels |
 
 A channel keeps its newest 500 posts. Relaying between a room channel and a chain channel is not built.

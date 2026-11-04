@@ -53,9 +53,14 @@ export function parseRendered(text: string): unknown {
   try { return JSON.parse(out); } catch { return null; }
 }
 
-/** The same decoding `channelText.decode` does in rgov-core.js, kept local so this file has no imports. */
+/**
+ * The same decoding `channelText.decode` does in rgov-core.js, kept local so
+ * this file has no imports. `%XX` is one ASCII code unit and `%uXXXX` one
+ * UTF-16 code unit; the encoder writes every `%` as `%25`, so nothing else in a
+ * stored post can look like either.
+ */
 export const decodeText = (t: string): string =>
-  String(t).replace(/%(25|22|5C|0A)/g, (_, h: string) => ({ "25": "%", "22": '"', "5C": "\\", "0A": "\n" } as Record<string, string>)[h]);
+  String(t).replace(/%u([0-9A-F]{4})|%([0-9A-F]{2})/g, (_, u?: string, h?: string) => String.fromCharCode(parseInt((u ?? h) as string, 16)));
 
 /** A `("gov-error", reason, …)` answer, as one readable line; null for anything else. */
 export function errorOf(v: unknown): string | null {
@@ -82,6 +87,59 @@ export function postsOf(v: unknown): PostsPage | { error: string } {
     .filter((p): p is { seq: number; text: string } => !!p && typeof p === "object" && typeof (p as { seq?: unknown }).seq === "number")
     .map((p) => ({ seq: p.seq, text: decodeText(String(p.text ?? "")) }));
   return { id: String(v[1]), posts, next: Number(v[3]) || 0, closed: v[4] === true, newest: Number(v[5]) || 0 };
+}
+
+/**
+ * What a write answers when it worked. A signed command checks its answer
+ * against this rather than only looking for a `gov-error`: anything else (a
+ * failed deploy rendered as a value, an answer from the wrong verb, nothing it
+ * can parse) is a failure, never a success line.
+ */
+export const EXPECTED_TAG = {
+  open: ["opened", "already"], post: ["posted"], close: ["closed"],
+  allow: ["allowed"], disallow: ["disallowed"],
+  subscribe: ["subscribed"], unsubscribe: ["unsubscribed"], read: ["posts"],
+} as const;
+export type ChannelVerb = keyof typeof EXPECTED_TAG;
+
+/** Null when `v` is the answer `verb` gives on success; otherwise why it is not. */
+export function answerError(verb: ChannelVerb, v: unknown): string | null {
+  const err = errorOf(v);
+  if (err) return err;
+  const want: readonly string[] = EXPECTED_TAG[verb];
+  if (Array.isArray(v) && typeof v[0] === "string" && want.includes(v[0])) return null;
+  return `unexpected answer: ${v === null ? "nothing readable" : JSON.stringify(v)?.slice(0, 160)}`;
+}
+
+/**
+ * A policy argument, strictly. Absent is "open", the default; anything other
+ * than open or invite is refused, so a typo cannot publish a channel meant to
+ * be gated.
+ */
+export function policyFrom(arg: string | undefined): "open" | "invite" | null {
+  const p = (arg ?? "").trim().toLowerCase();
+  if (!p || p === "open") return "open";
+  return p === "invite" ? "invite" : null;
+}
+
+/**
+ * Where a read cursor is kept. A channel id alone is not enough: two Channel
+ * contracts can each hold `<address>/news` with unrelated sequence numbers, and
+ * so can two networks, so a cursor from one would skip posts in the other. The
+ * key is the node, the shard, the contract and the channel.
+ */
+export interface CursorScope { node: string; shard: string; contract: string }
+export const cursorKey = (sc: CursorScope, id: string): string =>
+  JSON.stringify([sc.node.replace(/\/+$/, ""), sc.shard, sc.contract, id]);
+
+/** The cursors for one scope, by channel id, out of the whole stored book. */
+export function cursorsIn(book: Record<string, number>, sc: CursorScope): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, n] of Object.entries(book)) {
+    let a: unknown; try { a = JSON.parse(k); } catch { continue; }
+    if (Array.isArray(a) && a.length === 4 && cursorKey(sc, String(a[3])) === k) out[String(a[3])] = n;
+  }
+  return out;
 }
 
 /** `("info", {…})` → the channel, or an error line. */

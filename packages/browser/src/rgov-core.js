@@ -1465,11 +1465,19 @@ const CHANNEL_VERBS = `// order is ascending; ctx is [cursor, limit, posts]. The
   } |`;
 
 // Whole-contract load is refused: it would create channels with no log cell.
-// dump stays — it answers what `info` already publishes, nothing more.
+// Whole-contract dump is refused too. The state cell holds every channel's
+// `allowed` list and `subs` set, which `info` deliberately reduces to a count,
+// so a dump would hand the installer who reads whom — more than any facet
+// publishes. Nothing needs it: a channel's posts are in its own log cell, which
+// dump never reached, so it could not have migrated a channel anyway.
+const CHANNEL_DUMP_ARM = /\n        \["dump", \[\]\]    => \{ state!\(s\) \| ret!\(\("dump", s\)\) \}\n/;
 const CHANNEL_LOAD_ARM = /\/\/ Refuses a non-empty cell[\s\S]*?\n        \["load", \[s2\]\]  => \{[\s\S]*?\n        \}\n/;
 
 export const CHANNEL_RHO = preamble("Channel/1")
   .replace("HELPERS", CHANNEL_HELPERS)
+  .replace(CHANNEL_DUMP_ARM, `
+        ["dump", []]    => { state!(s) | ret!(("gov-error", "no whole-contract dump", "who reads and follows a channel is not published")) }
+`)
   .replace(CHANNEL_LOAD_ARM, `// No whole-contract load: a channel's posts live in its own cell, which
         // only \`open\` writes, so a loaded channel would have none to post to.
         ["load", [s2]]  => { state!(s) | ret!(("gov-error", "no whole-contract load", "a channel's log is its own cell")) }
@@ -1644,14 +1652,24 @@ export const channelIdOf = (owner, name) => `${owner}/${name}`;
 export const channelOpenProgram     = (uri, name, policy = "open") => writeProgram(uri, "self", "open", [q(name), q(policy)]);
 /**
  * A post's text as it is stored. MEASURED: this node's parser refuses the
- * backslash JSON.stringify puts before a quote ("Illegal character \\"), so a
- * post containing `"` could not be sent at all. The four characters that need
- * it are percent-escaped, `%` itself first, so decoding is exact and a post
- * that needs none of them is stored as typed.
+ * backslash JSON.stringify puts before a quote ("Illegal character \\"), and
+ * JSON.stringify writes a backslash escape for every control character too —
+ * so a post with a quote, a tab or a pasted CRLF could not be sent at all.
+ *
+ * Every code unit JSON.stringify would escape is percent-escaped instead, and
+ * so are `%` (first, so decoding is exact), DEL and the C1 controls, and the
+ * line and paragraph separators: `%XX` for one under 0x100, `%uXXXX` for one
+ * above (a lone surrogate). Everything else, ordinary Unicode included, is
+ * stored as typed, so a post that needs no escaping reads the same on chain.
  */
+const CHANNEL_ESCAPE = /[\u0000-\u001F"%\\\u007F-\u009F\u2028\u2029]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const hex = (n, w) => n.toString(16).toUpperCase().padStart(w, "0");
 export const channelText = {
-  encode: (t) => String(t).replace(/%/g, "%25").replace(/"/g, "%22").replace(/\\/g, "%5C").replace(/\n/g, "%0A"),
-  decode: (t) => String(t).replace(/%(25|22|5C|0A)/g, (_, h) => ({ "25": "%", "22": '"', "5C": "\\", "0A": "\n" })[h]),
+  encode: (t) => String(t).replace(CHANNEL_ESCAPE, (c) => {
+    const n = c.charCodeAt(0);
+    return n < 0x100 ? `%${hex(n, 2)}` : `%u${hex(n, 4)}`;
+  }),
+  decode: (t) => String(t).replace(/%u([0-9A-F]{4})|%([0-9A-F]{2})/g, (_, u, h) => String.fromCharCode(parseInt(u ?? h, 16))),
 };
 export const channelPostProgram     = (uri, name, text) => writeProgram(uri, "self", "post", [q(name), q(channelText.encode(text))]);
 export const channelCloseProgram    = (uri, name) => writeProgram(uri, "self", "close", [q(name)]);
@@ -1901,6 +1919,15 @@ export function selftest() {
   ok("Channel: text with quotes and backslashes round-trips, and reaches rholang with no backslash",
      channelText.decode(channelText.encode(odd)) === odd && !/\\/.test(channelText.encode(odd)) &&
      channelText.encode("plain words") === "plain words");
+  ok("Channel: whole-contract dump is refused, so allow lists and subscribers stay unpublished",
+     /\["dump", \[\]\]    => \{ state!\(s\) \| ret!\(\("gov-error", "no whole-contract dump"/.test(CHANNEL_RHO) &&
+     !/ret!\(\("dump", s\)\)/.test(CHANNEL_RHO));
+  const controls = Array.from({ length: 32 }, (_, i) => String.fromCharCode(i)).join("") + "\u007F\u0085\u2028\u2029";
+  const every = [controls, "a\r\nb\tc", 'q " b \\ p % %22 %u0041', "héllo 日本 🎉", "lone \uD800 and \uDC00", ""];
+  ok("Channel: every text round-trips, and none reaches rholang with a backslash",
+     every.every((t) => channelText.decode(channelText.encode(t)) === t && !/\\/.test(q(channelText.encode(t)))),
+     every.filter((t) => channelText.decode(channelText.encode(t)) !== t || /\\/.test(q(channelText.encode(t)))).map((t) => JSON.stringify(t)).join(" "));
+  ok("Channel: ordinary Unicode is stored as typed", channelText.encode("héllo 日本 🎉") === "héllo 日本 🎉");
   const chNasty = channelPostProgram(URI, "news", 'x", *evil) | @"stolen"!("');
   ok("Channel: a hostile post stays inside its literal",
      balanced(chNasty) && !/@"stolen"!/.test(chNasty.replace(/"(?:[^"\\]|\\.)*"/g, '""')), chNasty);

@@ -17,7 +17,7 @@ const bundle = await build({
   entryPoints: [join(here, "..", "src", "rholang.ts")],
   bundle: true, format: "esm", platform: "node", write: false,
 });
-const { renderExpr } = await import(
+const { renderExpr, classifyDeployStatus } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
 
 let failed = 0;
@@ -54,6 +54,16 @@ check("nothing", renderExpr(null), "Nil");
 // An expression a future build names differently should not become JSON.
 check("an unknown Expr renders its contents, not rnode's wire shape",
   renderExpr({ ExprSomethingNew: { ExprInt: 7 } }), "7");
+
+// A deploy that failed on chain is a failure, not an answer (PR #258 review).
+{
+  const bad = classifyDeployStatus({ ProcessedWithError: { deployError: "Out of phlo" } });
+  check("a failed deploy is not ok", bad?.ok, false);
+  check("a failed deploy says why", bad?.error, "Out of phlo");
+  const good = classifyDeployStatus({ ProcessedWithSuccess: { deployResult: [{ ExprTuple: { data: [{ ExprString: { data: "posted" } }] } }] } });
+  check("a deploy that ran answers its values", good?.ok && good.values[0], '("posted")');
+  check("a pending deploy has no verdict yet", classifyDeployStatus({ Pending: {} }), null);
+}
 
 console.log(failed === 0 ? "\nrender-expr: all passed" : `\nrender-expr: ${failed} FAILED`);
 process.exit(failed ? 1 : 0);

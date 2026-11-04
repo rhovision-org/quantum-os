@@ -31,7 +31,7 @@ import { installProgram, registerProgram, bindProgram, resolveProgram,
 // The three on-chain governance contracts. `readProgram` is already taken by
 // the locker's, so rgov-core's call-site builders come in under a namespace.
 import * as rgov from "./rgov-core.js";
-import { firstValue, errorOf, postsOf, infoOf, channelIdFrom, validName, channelLabel } from "./chain-channel.js";
+import { firstValue, errorOf, postsOf, infoOf, channelIdFrom, validName, channelLabel, answerError, policyFrom, cursorKey, cursorsIn, type ChannelVerb, type CursorScope } from "./chain-channel.js";
 import { parseDefinition, parseInvocation, expandCommand, expandCallSites,
          formatDefinition, findMacros, bodyKind, MacroError,
          MACRO_NAME_RE, MAX_BODY } from "./macro-lang.js";
@@ -52,7 +52,7 @@ import { loadConfig as loadNodeConfig, saveConfig as saveNodeConfig, describeCon
          generateKey as generateDeployKey, revAddressOf, nodeStatus, evalTerm, deployTerm,
          readResultsFresh, readName, deployFate, wrapProgram, powerboxNames, powerboxSpec,
          registryUriOf, powerboxUsed, DEFAULT_CONFIG as DEFAULT_NODE_CONFIG,
-         readResult, readResultRecord, syncResultNonce, deployAnswer,
+         readResult, readResultRecord, syncResultNonce, deployAnswer, deployVerdict,
          type NodeConfig } from "./rholang.js";
 import { qucalcSearch, qucalcSolve,
          type SearchDone as QucalcSearchDone } from "./qucalc-search.js";
@@ -3228,9 +3228,11 @@ function linkifyHelp(line: string): string {
 // one by a signed read from its publisher and whoever it allowed.
 //
 // What this browser remembers is only a cursor per channel, so a second read
-// shows what is new. The posts are on chain, not here.
+// shows what is new. The posts are on chain, not here. A cursor is kept under
+// the node, shard and contract as well as the channel (`cursorKey`), since the
+// same `<address>/<name>` in another contract is another channel.
 
-const CHAIN_FOLLOWS_KEY = "qos-chain-channels";
+const CHAIN_FOLLOWS_KEY = "qos-chain-cursors";
 function loadChainFollows(): Record<string, number> {
   try {
     const o = JSON.parse(localStorage.getItem(CHAIN_FOLLOWS_KEY) ?? "{}");
@@ -3260,10 +3262,17 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
   const verb = (parts[0] ?? "").toLowerCase();
   const uri = cfg.channels;
   const say = (t: string) => addMessage("", t, "system");
+  const scope: CursorScope = { node: cfg.url, shard: cfg.shard, contract: uri ?? "" };
+  const getCursor = (id: string): number | null => loadChainFollows()[cursorKey(scope, id)] ?? null;
+  const setCursor = (id: string, n: number | null) => {
+    const f = loadChainFollows();
+    if (n === null) delete f[cursorKey(scope, id)]; else f[cursorKey(scope, id)] = n;
+    saveChainFollows(f);
+  };
 
   if (!verb) {
     sys(uri ? `channel contract ${uri}` : "no channel contract — /channel chain install, or /channel chain use <uri>");
-    const follows = Object.entries(loadChainFollows());
+    const follows = Object.entries(uri ? cursorsIn(loadChainFollows(), scope) : {});
     if (follows.length) {
       sys(`read here (${follows.length}), up to the post shown:`);
       for (const [id, at] of follows) sys(`  ${channelLabel(id, myAddr)}  read up to #${at}   ${id}`);
@@ -3282,19 +3291,28 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
 
   // Every write is its own signed deploy: `deployerId` exists only inside one,
   // and that is how the contract knows who is posting or reading.
-  const signed = (label: string, program: string, done?: (v: unknown, raw: string[]) => void, { textAnswer = false } = {}) => {
+  // `expect` names the verb whose success answer this must be: a failed deploy,
+  // a refusal or any other answer is reported as a failure, never as done.
+  const signed = (label: string, program: string, expect: ChannelVerb | "install", done?: (v: unknown, raw: string[]) => void) => {
     if (!cfg.key) { sys("no key — /rholang key generate first"); return; }
     sys(`${label}…`);
     void (async () => {
       try {
         const r = await deployTerm(cfg, program);
         if (!r.ok || !r.sig) { say(`✗ ${label}: ${r.message}`); return; }
-        const raw = await deployAnswer(cfg, r.sig);
-        if (!raw || !raw.length) { say(`✗ ${label}: deployed, but no answer came back yet`); return; }
+        const out = await deployVerdict(cfg, r.sig);
+        if (!out) { say(`✗ ${label}: deployed, but no status came back yet — it may still land, so check before repeating it`); return; }
+        if (!out.ok) { say(`✗ ${label}: the deploy failed on chain — ${out.error}`); return; }
+        const raw = out.values;
+        if (!raw.length) { say(`✗ ${label}: deployed, but it answered nothing`); return; }
         const v = firstValue(raw);
-        const err = errorOf(v);
-        if (err) { say(`✗ ${label}: ${err}`); return; }
-        if (v === null && !textAnswer) { say(`✗ ${label}: unexpected answer ${raw.join(" ").slice(0, 160)}`); return; }
+        if (expect !== "install") {
+          const err = answerError(expect, v);
+          if (err) { say(`✗ ${label}: ${err}`); return; }
+        } else {
+          const err = errorOf(v);
+          if (err) { say(`✗ ${label}: ${err}`); return; }
+        }
         if (done) done(v, raw); else say(`✓ ${label}`);
       } catch (e) { say(`✗ ${label}: ${(e as Error).message}`); }
     })();
@@ -3302,12 +3320,12 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
 
   if (verb === "install") {
     // A uri renders unquoted, so the answer is read as text rather than parsed.
-    signed("installing a Channel contract", rgov.installChannelProgram(), (_v, raw) => {
+    signed("installing a Channel contract", rgov.installChannelProgram(), "install", (_v, raw) => {
       const got = raw.join(" ").match(/rho:id:[a-z0-9]+/)?.[0];
       if (!got) { say("✗ installed, but no uri came back"); return; }
       saveNodeConfig({ ...loadNodeConfig(), channels: got });
       say(`✓ channels at ${got} — share it, and anyone can /channel chain use ${got}`);
-    }, { textAnswer: true });
+    });
     return;
   }
 
@@ -3322,8 +3340,9 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
     case "open": {
       const n = parts[1] ?? "";
       if (!validName(n)) { sys("usage: /channel chain open <name> [invite] — a name is one word, no slash"); return; }
-      const policy = (parts[2] ?? "").toLowerCase() === "invite" ? "invite" : "open";
-      signed(`opening ${n} (${policy})`, rgov.channelOpenProgram(uri, n, policy), (v) => {
+      const policy = policyFrom(parts[2]);
+      if (!policy) { sys(`a policy is open or invite, not "${parts[2]}" — nothing was opened`); return; }
+      signed(`opening ${n} (${policy})`, rgov.channelOpenProgram(uri, n, policy), "open", (v) => {
         const id = Array.isArray(v) ? String(v[1]) : "";
         say(Array.isArray(v) && v[0] === "already" ? `· ${n} already exists: ${id}` : `✓ ${n} is open at ${id}`);
       });
@@ -3333,7 +3352,7 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
       const n = parts[1] ?? "";
       const text = rawRest.replace(/^post\s+\S+\s*/i, "");
       if (!validName(n) || !text) { sys("usage: /channel chain post <name> <text>"); return; }
-      signed(`posting to ${n}`, rgov.channelPostProgram(uri, n, text), (v) => {
+      signed(`posting to ${n}`, rgov.channelPostProgram(uri, n, text), "post", (v) => {
         say(`✓ posted to ${n} as #${Array.isArray(v) ? v[2] : "?"}`);
       });
       return;
@@ -3341,7 +3360,7 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
     case "close": {
       const n = parts[1] ?? "";
       if (!validName(n)) { sys("usage: /channel chain close <name>"); return; }
-      signed(`closing ${n}`, rgov.channelCloseProgram(uri, n), () => say(`✓ ${n} is closed — nothing more can be posted, and what was posted stays readable`));
+      signed(`closing ${n}`, rgov.channelCloseProgram(uri, n), "close", () => say(`✓ ${n} is closed — nothing more can be posted, and what was posted stays readable`));
       return;
     }
     case "allow":
@@ -3349,31 +3368,30 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
       const n = parts[1] ?? "", who = parts[2] ?? "";
       if (!validName(n) || !/^1111/.test(who)) { sys(`usage: /channel chain ${verb} <name> <address>`); return; }
       signed(`${verb === "allow" ? "allowing" : "disallowing"} ${who.slice(0, 8)}… on ${n}`,
-        verb === "allow" ? rgov.channelAllowProgram(uri, n, who) : rgov.channelDisallowProgram(uri, n, who));
+        verb === "allow" ? rgov.channelAllowProgram(uri, n, who) : rgov.channelDisallowProgram(uri, n, who), verb);
       return;
     }
     case "subscribe": {
       const id = idArg(1); if (!id) return;
       const from = parts.includes("--all") ? "head" : "now";
-      signed(`subscribing to ${channelLabel(id, myAddr)}`, rgov.channelSubscribeProgram(uri, id, from), (v) => {
+      signed(`subscribing to ${channelLabel(id, myAddr)}`, rgov.channelSubscribeProgram(uri, id, from), "subscribe", (v) => {
         const start = Array.isArray(v) ? Number(v[2]) || 0 : 0, newest = Array.isArray(v) ? Number(v[3]) || 0 : 0;
-        const f = loadChainFollows(); f[id] = start; saveChainFollows(f);
+        setCursor(id, start);
         say(`✓ following ${channelLabel(id, myAddr)} — ${start < newest ? `${newest - start} post(s) to read` : "new posts from here on"}: /channel chain read ${id}`);
       });
       return;
     }
     case "unsubscribe": {
       const id = idArg(1); if (!id) return;
-      signed(`unsubscribing from ${channelLabel(id, myAddr)}`, rgov.channelUnsubscribeProgram(uri, id), () => {
-        const f = loadChainFollows(); delete f[id]; saveChainFollows(f);
+      signed(`unsubscribing from ${channelLabel(id, myAddr)}`, rgov.channelUnsubscribeProgram(uri, id), "unsubscribe", () => {
+        setCursor(id, null);
         say(`✓ no longer following ${channelLabel(id, myAddr)}`);
       });
       return;
     }
     case "read": {
       const id = idArg(1); if (!id) return;
-      const follows = loadChainFollows();
-      const cursor = parts.includes("--all") ? 0 : (follows[id] ?? null);
+      const cursor = parts.includes("--all") ? 0 : getCursor(id);
       const show = (v: unknown) => {
         const page = postsOf(v);
         if ("error" in page) { say(`✗ ${page.error}`); return; }
@@ -3382,7 +3400,7 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
         for (const p of page.posts) say(`📣 ${label} #${p.seq}: ${p.text}`);
         if (page.posts.length && page.closed && page.next >= page.newest) say(`  ${label} is closed — that was the last post`);
         if (page.next < page.newest) say(`  ${page.newest - page.next} more — /channel chain read ${id}`);
-        const f = loadChainFollows(); f[id] = page.next; saveChainFollows(f);
+        setCursor(id, page.next);
       };
       // An open channel answers on the free read; an invite one needs the
       // signed read, which is the only path that carries who is asking.
@@ -3392,7 +3410,7 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
         try { v = firstValue((await evalTerm(cfg, rgov.channelPostsProgram(uri, id, cursor))).values); }
         catch (e) { say(`✗ ${(e as Error).message}`); return; }
         if (errorOf(v)?.startsWith("invite-only channel")) {
-          signed(`signed read of ${channelLabel(id, myAddr)} (invite-only)`, rgov.channelReadProgram(uri, id, cursor), show);
+          signed(`signed read of ${channelLabel(id, myAddr)} (invite-only)`, rgov.channelReadProgram(uri, id, cursor), "read", show);
           return;
         }
         show(v);

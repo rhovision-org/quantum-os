@@ -762,14 +762,39 @@ export async function deployFate(cfg: NodeConfig, sig: string, depth = 12): Prom
  * sends to both.
  */
 export async function deployAnswer(cfg: NodeConfig, sig: string, attempts = 20): Promise<string[] | null> {
+  const o = await deployVerdict(cfg, sig, attempts);
+  if (!o) return null;
+  return o.ok ? o.values : [o.raw];
+}
+
+/**
+ * A deploy's fate, with a failure kept apart from an answer. `deployAnswer`
+ * renders a `ProcessedWithError` into the same list a success answers, which
+ * is fine for showing it and wrong for deciding on it: a caller that only
+ * looks for a `("gov-error", …)` tuple would read a deploy that failed on
+ * chain as one that worked. Null when no status came back within the window.
+ */
+export type DeployVerdict = { ok: true; values: string[] } | { ok: false; error: string; raw: string };
+export async function deployVerdict(cfg: NodeConfig, sig: string, attempts = 20): Promise<DeployVerdict | null> {
   for (let i = 0; i < attempts; i++) {
     await new Promise((r) => setTimeout(r, 3000));
     let j: unknown;
     try { j = await getJson(cfg, `/api/v1/deploy-status/${sig}`); } catch { continue; }
-    const o = j as { ProcessedWithSuccess?: { deployResult?: unknown[] }; ProcessedWithError?: unknown };
-    if (o?.ProcessedWithError) return [renderExpr(o.ProcessedWithError)];
-    if (o?.ProcessedWithSuccess) return (o.ProcessedWithSuccess.deployResult ?? []).map(renderExpr);
+    const o = classifyDeployStatus(j);
+    if (o) return o;
   }
+  return null;
+}
+
+/** One deploy-status reply → its outcome; null while it is still pending. Pure, for tests. */
+export function classifyDeployStatus(j: unknown): DeployVerdict | null {
+  const o = j as { ProcessedWithSuccess?: { deployResult?: unknown[] }; ProcessedWithError?: { deployError?: unknown } | unknown };
+  if (o?.ProcessedWithError) {
+    const e = o.ProcessedWithError as { deployError?: unknown };
+    const why = e && typeof e === "object" && "deployError" in e ? e.deployError : e;
+    return { ok: false, error: typeof why === "string" ? why : JSON.stringify(why).slice(0, 240), raw: renderExpr(o.ProcessedWithError) };
+  }
+  if (o?.ProcessedWithSuccess) return { ok: true, values: (o.ProcessedWithSuccess.deployResult ?? []).map(renderExpr) };
   return null;
 }
 

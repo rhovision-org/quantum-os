@@ -134,6 +134,35 @@ await write("alice still reads her own", alice, C.channelReadProgram(CH, DESK), 
 await read("channelsOf alice", C.channelsOfProgram(CH, A), (v) => { const s = JSON.stringify(v); return s.includes("news") && s.includes("desk"); });
 await write("a bad arity answers", alice, C.writeProgram(CH, "self", "post", ['"news"']), has("bad verb or arity"));
 
+// ── every text survives the chain (PR #258 review) ───────────────────────────
+// Posted through channelText, read back and decoded the way chain-channel.ts does.
+const HARD = ["a\r\nb\tc", Array.from({ length: 32 }, (_, i) => String.fromCharCode(i)).join("") + "\u007F\u0085\u2028\u2029",
+  'q " b \\ p 100% %22 %u0041', "héllo 日本 🎉", "lone \uD800 and \uDC00"];
+await write("alice opens text", alice, C.channelOpenProgram(CH, "text", "open"), has("opened"));
+for (const [i, t] of HARD.entries()) await write(`post hard text #${i + 1}`, alice, C.channelPostProgram(CH, "text", t), has("posted"));
+await read("every hard text reads back exactly", C.channelPostsProgram(CH, C.channelIdOf(A, "text")), (v) => {
+  const posts = (v?.[0]?.[2] ?? []).map((p) => C.channelText.decode(p.text));
+  return posts.length === HARD.length && posts.every((t, i) => t === HARD[i]);
+});
+
+// ── the installer cannot dump who reads whom ─────────────────────────────────
+await write("whole-contract dump is refused, even to the installer", alice, C.dumpProgram(CH), has("no whole-contract dump"));
+
+// ── a deploy that fails on chain is reported as one ──────────────────────────
+// Too little phlo to run: the node answers ProcessedWithError, which the browser
+// must report as a failure (rholang.ts classifyDeployStatus), not as an answer.
+{
+  const r = await deployTerm({ ...cfg(alice), phloLimit: 2000 }, C.channelPostProgram(CH, "news", "starved"), { waitAttempts: 0 });
+  let shape = null;
+  for (let i = 0; r.ok && i < 16 && !shape; i++) {
+    await sleep(4000);
+    try { const j = await (await fetch(`${NODE}/api/v1/deploy-status/${r.sig}`)).json(); if (j?.ProcessedWithError || j?.ProcessedWithSuccess) shape = j; } catch { /* keep waiting */ }
+  }
+  const okc = !r.ok || !!shape?.ProcessedWithError;
+  if (okc) pass++; else fail++;
+  console.log(`${okc ? "ok  " : "FAIL"} a starved deploy is ProcessedWithError: ${r.ok ? JSON.stringify(shape).slice(0, 200) : `refused at submit — ${String(r.message).slice(0, 120)}`}`);
+}
+
 // ── retention: the oldest post goes once a channel passes its cap ────────────
 // The same contract with the cap at 2 instead of CHANNEL_KEEP, so the trim runs
 // in three posts rather than five hundred.

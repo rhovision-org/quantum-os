@@ -63,5 +63,42 @@ const odd = 'quote " back \\ pct % nl\nend';
 check("the browser decodes what rgov-core encodes", M.decodeText(R.channelText.encode(odd)) === odd);
 check("channelIdOf and channelIdFrom agree", R.channelIdOf(A, "news") === M.channelIdFrom("news", A));
 
+// --- a write is done only when it answers its own verb's success -----------
+check("each verb's own answer is success", M.answerError("post", ["posted", NEWS, 3]) === null &&
+  M.answerError("open", ["already", NEWS]) === null && M.answerError("subscribe", ["subscribed", NEWS, 0, 2]) === null);
+check("a refusal is a failure", M.answerError("close", ["gov-error", "no such channel", NEWS])?.startsWith("no such channel"));
+check("another verb's answer is a failure", M.answerError("allow", ["disallowed", NEWS, A]) !== null);
+check("a failed deploy rendered as a value is a failure", M.answerError("post", M.firstValue(['{"deployError": "Out of phlo"}'])) !== null);
+check("an answer that cannot be read is a failure", M.answerError("unsubscribe", null) !== null);
+
+// --- a policy is open or invite, nothing else --------------------------------
+check("no policy is open", M.policyFrom(undefined) === "open" && M.policyFrom("") === "open");
+check("open and invite are taken as typed", M.policyFrom("open") === "open" && M.policyFrom("Invite") === "invite");
+check("a typo is refused, not made public", M.policyFrom("invte") === null && M.policyFrom("private") === null);
+
+// --- cursors are kept per node, shard and contract ---------------------------
+const one = { node: "http://127.0.0.1:40403/", shard: "/root", contract: "rho:id:aaa" };
+const two = { ...one, contract: "rho:id:bbb" };
+const net = { ...one, node: "https://playground.rhobot.net" };
+const book = {};
+book[M.cursorKey(one, NEWS)] = 40;   // contract one has run to post 40
+book[M.cursorKey(two, NEWS)] = 2;    // the same address/name in contract two is only at 2
+check("the same channel id in two contracts keeps two cursors",
+  M.cursorKey(one, NEWS) !== M.cursorKey(two, NEWS) && M.cursorsIn(book, two)[NEWS] === 2 && M.cursorsIn(book, one)[NEWS] === 40);
+check("a cursor from one contract is not used in another it has never read",
+  M.cursorsIn(book, net)[NEWS] === undefined);
+check("a trailing slash on the node does not split a scope",
+  M.cursorKey(one, NEWS) === M.cursorKey({ ...one, node: "http://127.0.0.1:40403" }, NEWS));
+
+// --- every text survives the trip --------------------------------------------
+const controls = Array.from({ length: 32 }, (_, i) => String.fromCharCode(i)).join("") + "\u007F\u0085\u2028\u2029";
+for (const [label, t] of [["CRLF and tab", "a\r\nb\tc"], ["every control character", controls],
+  ["quotes, backslashes, percents", 'q " b \\ p 100% %22 %u0041'], ["Unicode", "héllo 日本 🎉"],
+  ["lone surrogates", "x \uD800 y \uDC00"]]) {
+  const e = R.channelText.encode(t);
+  check(`${label}: decoded exactly, sent with no backslash`, M.decodeText(e) === t && !JSON.stringify(e).includes("\\"), JSON.stringify(e));
+}
+check("a post stored by the earlier encoding still decodes", M.decodeText("say %22hi%22 %5C 100%25%0Aend") === 'say "hi" \\ 100%\nend');
+
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);
