@@ -326,6 +326,53 @@ Five reads, four native calls, and `Issue.propose` to publish the result. `Inbox
 `acceptOne` and `castOne` caps that make enrollment work without anyone holding an admin facet they
 did not earn.
 
+## 4. Channel — publish and subscribe on chain
+
+Not a governance contract: it shares this file's machinery (the preamble, the facets, derived
+identity, one consumed-and-restored cell) because it is [the inbox's shape turned
+around](https://github.com/rhovision-org/quantum-os/issues/78). An inbox has one owner and gates on
+who may **write**; a channel has one publisher and gates on who may **read**. Reached from a room
+through `/channel chain` ([docs/commands.md](docs/commands.md#channel-sub)).
+
+- **An id is rooted in its publisher**: `<address>/<name>`, built inside the contract from the derived
+  address. `post`, `close`, `allow` and `disallow` take only a name, so there is no argument that
+  reaches somebody else's channel, and no name to squat.
+- **Each channel's log is its own cell** (`@(*log, id)`), so a busy channel never makes another one cost
+  more. It keeps the newest 500 posts (`CHANNEL_KEEP`) and answers 50 at a time (`CHANNEL_PAGE`).
+  Whole-contract `load` is refused, because a loaded channel would have no log cell to post to.
+  Whole-contract `dump` is refused too: the state cell holds every `allowed` list and subscriber set,
+  which no facet publishes, so a dump would show the installer who reads whom.
+- **Reading.** An `open` channel is a publication, so `postsOf` answers it on the free `read` facet.
+  An `invite` channel answers only on `self`, to its publisher and the addresses it allowed, which takes
+  a signed deploy, so it costs the reader phlo. The public facet gives a subscriber **count**, never
+  the list.
+- **`invite` gates reading. It does not keep posts confidential.** Posts are plaintext in chain
+  state, and a signed read's answer sits in that deploy's result. Anyone who can read chain storage
+  can read an invite channel. Nothing built on it should call it private or encrypted.
+- **One publisher per channel.** `post` writes to the caller's own channel only. Being `allow`ed
+  lets you read, not post. A conversation among several people is several channels, or a contract
+  this one is not.
+
+The three questions #78 left open, answered:
+
+| Question | Answer |
+|---|---|
+| Does a subscriber's read survive the publisher? | Yes. `close` stops new posts and nothing else; `info` and every page say `closed`, so withdrawn and quiet are told apart |
+| Backlog? | The subscriber's choice: `subscribe(id, "now")` starts after the newest post, `"head"` from the oldest kept |
+| What relays between a room and a chain channel? | Nothing yet. `bridge.mjs` relays room channels only; a chain endpoint brings back the loop-guard question and is its own piece of work |
+
+Two things the live check found. **This node's parser refuses a backslash**, so a post containing
+`"` (or a tab, or a pasted CRLF) could not be sent through `JSON.stringify`. `channelText`
+percent-escapes every character `JSON.stringify` would escape, plus `%`, DEL, the C1 controls and the
+line separators (`%XX`, or `%uXXXX` for a lone surrogate), and the browser decodes them. Ordinary
+Unicode is stored as typed. **Unsubscribe and disallow are different rows.** Your subscription
+is yours, so a publisher cannot decide who stops listening. The allowed set is the publisher's, so
+disallowing stops future reads.
+
+Verified on a localnet by [`scripts/localnet/channel-check.mjs`](scripts/localnet/channel-check.mjs)
+(39/39, including the retention trim on a copy capped at 2). Offline, by the `Channel:` rows of the
+`rgov-core.js --selftest` and by `packages/browser/test/chain-channel.test.mjs`.
+
 ---
 
 ## Naming, addressing, migration
