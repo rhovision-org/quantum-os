@@ -1159,6 +1159,332 @@ export const ISSUE_RHO = preamble("Issue/4")
   .replace("VERBS", ISSUE_VERBS);
 
 // ---------------------------------------------------------------------------
+// 4. Channel — publish and subscribe that outlive the room (quantum-os#78)
+// ---------------------------------------------------------------------------
+//
+// `/channel listen|send` is the room's form: subscriptions live in a
+// RoomContext, so a channel exists only while the room does. This is the chain
+// form. It has the inbox's shape turned around: an inbox is addressed to ONE
+// owner and gates on who may WRITE; a channel has ONE publisher and gates on
+// who may READ. Unsubscribing and being shut out are different operations, so
+// they are different rows: a subscriber's own subscription is a self verb
+// nobody else can touch, and the publisher's allowed set is the publisher's.
+//
+//   state : { id: {"owner": addr, "name": str, "policy": "open"|"invite",
+//                  "closed": bool, "allowed": {addr: true}, "subs": {addr: seq}} }
+//   @(*log, id) : {"seq": n, "order": [seq, …] (oldest first),
+//                  "posts": {seq: {"seq": n, "text": str}}}
+//
+// AN ID IS ROOTED IN ITS PUBLISHER: `<owner address>/<name>`, built from the
+// derived address, so a name cannot be squatted and only its publisher can post
+// to it (the same rule as dictionary.js). Each channel's log is its OWN cell, so
+// a busy channel never makes another one's post or read cost more; the log
+// cell is written by `open` and only ever consumed-and-restored after that,
+// which is why whole-contract `load` is refused below (it would create channels
+// with no log cell, and the first post to one would wait forever).
+//
+// The three questions #78 left open, answered:
+//
+//   A SUBSCRIBER'S READ SURVIVES THE PUBLISHER. `close` stops new posts and
+//   nothing else: what was published stays readable, and `info` says "closed",
+//   so a stream that was withdrawn is told apart from one that went quiet.
+//
+//   BACKLOG IS THE SUBSCRIBER'S CHOICE. `subscribe(id, "now")` starts after the
+//   newest post; `subscribe(id, "head")` from the oldest still kept. A channel
+//   keeps its newest CHANNEL_KEEP posts.
+//
+//   RELAYING between a room and a chain channel is not done here. A post is
+//   text from a signed deploy; carrying it into a room (bridge.mjs) is a
+//   separate piece with its own loop-guard question.
+//
+// READING: an "open" channel is a publication, so its posts are answered on the
+// free `read` facet (an exploratory deploy, no key). An "invite" channel's posts
+// are answered only on the `self` facet, to its publisher and to the addresses
+// it allowed — a signed deploy, because only a deploy carries an identity. As
+// everywhere in this file, the facet decides whom the CONTRACT answers, not
+// what a node operator can see: chain state is not encrypted.
+
+/** One page of posts answers at most this many. */
+export const CHANNEL_PAGE = 50;
+/** A channel keeps this many posts, newest; the oldest is dropped past it. */
+export const CHANNEL_KEEP = 500;
+
+const CHANNEL_HELPERS = `log, pageOf, ownedBy, clampPage, pageAnswer, mayRead, startOf,`;
+
+const CHANNEL_VERBS = `// order is ascending; ctx is [cursor, limit, posts]. The posts after the
+  // cursor, oldest first, at most limit of them.
+  contract pageOf(@order, @ctx, @acc, ret) = {
+    match order {
+      [] => { ret!(acc) }
+      [k ...rest] => {
+        match acc.length() >= ctx.nth(1) {
+          true  => { ret!(acc) }
+          false => {
+            match k > ctx.nth(0) {
+              true  => { pageOf!(rest, ctx, acc ++ [ctx.nth(2).get(k)], *ret) }
+              false => { pageOf!(rest, ctx, acc, *ret) }
+            }
+          }
+        }
+      }
+    }
+  } |
+  contract ownedBy(@kvs, @ctx, ret) = {
+    match kvs {
+      [] => { ret!(ctx.nth(1)) }
+      [(_, ch) ...rest] => {
+        match ch.get("owner") == ctx.nth(0) {
+          true  => { ownedBy!(rest, [ctx.nth(0), ctx.nth(1) ++ [ch.get("name")]], *ret) }
+          false => { ownedBy!(rest, ctx, *ret) }
+        }
+      }
+    }
+  } |
+  contract clampPage(@limit, ret) = {
+    match limit > ${CHANNEL_PAGE} {
+      true  => { ret!(${CHANNEL_PAGE}) }
+      false => { match limit < 1 { true => { ret!(1) } false => { ret!(limit) } } }
+    }
+  } |
+  // A cursor of Nil means "from the start" unless the caller subscribed, in
+  // which case it means "from where my subscription began".
+  contract startOf(@cursor, @dflt, ret) = {
+    match cursor { Nil => { ret!(dflt) } c => { ret!(c) } }
+  } |
+  // args: [cursor, limit, closed]. Answers
+  //   ("posts", id, [post, …], nextCursor, closed, newestSeq)
+  // and the next page is the posts after nextCursor.
+  contract pageAnswer(@id, @args, ret) = {
+    new lim, got in {
+      clampPage!(args.nth(1), *lim) |
+      for (@n <- lim; @l <- @(*log, id)) {
+        @(*log, id)!(l) |
+        pageOf!(l.get("order"), [args.nth(0), n, l.get("posts")], [], *got) |
+        for (@page <- got) {
+          match page {
+            [] => { ret!(("posts", id, [], args.nth(0), args.nth(2), l.get("seq"))) }
+            _  => { ret!(("posts", id, page, page.nth(page.length() - 1).get("seq"), args.nth(2), l.get("seq"))) }
+          }
+        }
+      }
+    }
+  } |
+  contract mayRead(@ch, @me, ret) = {
+    match [ch.get("policy"), ch.get("owner") == me, ch.get("allowed").contains(me)] {
+      ["open", _, _] => { ret!(true) }
+      [_, true, _]   => { ret!(true) }
+      [_, _, true]   => { ret!(true) }
+      _              => { ret!(false) }
+    }
+  } |
+
+  contract doSelf(@me, @verb, @args, ret) = {
+    for (@s <- state) {
+      match [verb, args] {
+        // The id is built from the DERIVED address, so a caller can open a
+        // channel under their own name and nobody else's.
+        ["open", [name, policy]] => {
+          let @id <- me ++ "/" ++ name in {
+            match [s.contains(id), policy] {
+              [true, _] => { state!(s) | ret!(("already", id)) }
+              [false, "open"] => {
+                state!(s.set(id, {"owner": me, "name": name, "policy": policy, "closed": false, "allowed": {}, "subs": {}})) |
+                @(*log, id)!({"seq": 0, "order": [], "posts": {}}) |
+                ret!(("opened", id, policy))
+              }
+              [false, "invite"] => {
+                state!(s.set(id, {"owner": me, "name": name, "policy": policy, "closed": false, "allowed": {}, "subs": {}})) |
+                @(*log, id)!({"seq": 0, "order": [], "posts": {}}) |
+                ret!(("opened", id, policy))
+              }
+              _ => { state!(s) | ret!(("gov-error", "policy is open or invite", policy)) }
+            }
+          }
+        }
+
+        // Only the publisher posts: the id is rebuilt from the caller's own
+        // address, so there is no argument that names somebody else's channel.
+        ["post", [name, text]] => {
+          state!(s) |
+          let @id <- me ++ "/" ++ name in {
+            match s.getOrElse(id, Nil) {
+              Nil => { ret!(("gov-error", "no such channel", id)) }
+              ch  => {
+                match [ch.get("closed"), text] {
+                  [true, _]       => { ret!(("gov-error", "closed", id)) }
+                  [false, String] => {
+                    for (@l <- @(*log, id)) {
+                      let @n <- l.get("seq") + 1 in {
+                        let @l1 <- l.set("seq", n).set("order", l.get("order") ++ [n])
+                            .set("posts", l.get("posts").set(n, {"seq": n, "text": text})) in {
+                          match [l1.get("order").length() > ${CHANNEL_KEEP}, l1.get("order")] {
+                            [true, [oldest ...kept]] => { @(*log, id)!(l1.set("order", kept).set("posts", l1.get("posts").delete(oldest))) }
+                            _ => { @(*log, id)!(l1) }
+                          } |
+                          ret!(("posted", id, n))
+                        }
+                      }
+                    }
+                  }
+                  _ => { ret!(("gov-error", "a post is text", id)) }
+                }
+              }
+            }
+          }
+        }
+
+        // Withdrawn, not erased: nothing more can be posted, and everything
+        // already posted stays readable to whoever could read it.
+        ["close", [name]] => {
+          let @id <- me ++ "/" ++ name in {
+            match s.getOrElse(id, Nil) {
+              Nil => { state!(s) | ret!(("gov-error", "no such channel", id)) }
+              ch  => { state!(s.set(id, ch.set("closed", true))) | ret!(("closed", id)) }
+            }
+          }
+        }
+
+        // Who may read an invite channel. The publisher's rows, nobody else's.
+        ["allow", [name, addr]] => {
+          let @id <- me ++ "/" ++ name in {
+            match s.getOrElse(id, Nil) {
+              Nil => { state!(s) | ret!(("gov-error", "no such channel", id)) }
+              ch  => { state!(s.set(id, ch.set("allowed", ch.get("allowed").set(addr, true)))) | ret!(("allowed", id, addr)) }
+            }
+          }
+        }
+        ["disallow", [name, addr]] => {
+          let @id <- me ++ "/" ++ name in {
+            match s.getOrElse(id, Nil) {
+              Nil => { state!(s) | ret!(("gov-error", "no such channel", id)) }
+              ch  => { state!(s.set(id, ch.set("allowed", ch.get("allowed").delete(addr)))) | ret!(("disallowed", id, addr)) }
+            }
+          }
+        }
+
+        // from: "now" (after the newest post) or "head" (the oldest kept).
+        ["subscribe", [id, from]] => {
+          match s.getOrElse(id, Nil) {
+            Nil => { state!(s) | ret!(("gov-error", "no such channel", id)) }
+            ch  => {
+              new may, st in {
+                mayRead!(ch, me, *may) |
+                for (@yes <- may; @l <- @(*log, id)) {
+                  @(*log, id)!(l) |
+                  match yes {
+                    false => { state!(s) | ret!(("gov-error", "invite-only channel", id)) }
+                    true  => {
+                      match from { "head" => { st!(0) } _ => { st!(l.get("seq")) } } |
+                      for (@start <- st) {
+                        state!(s.set(id, ch.set("subs", ch.get("subs").set(me, start)))) |
+                        ret!(("subscribed", id, start, l.get("seq")))
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Your own subscription and nobody else's: a publisher cannot decide
+        // who stops listening.
+        ["unsubscribe", [id]] => {
+          match s.getOrElse(id, Nil) {
+            Nil => { state!(s) | ret!(("gov-error", "no such channel", id)) }
+            ch  => { state!(s.set(id, ch.set("subs", ch.get("subs").delete(me)))) | ret!(("unsubscribed", id)) }
+          }
+        }
+
+        // The read that works on an invite channel too. A Nil cursor starts
+        // where your subscription began (or at the oldest kept post).
+        ["read", [id, cursor, limit]] => {
+          state!(s) |
+          match s.getOrElse(id, Nil) {
+            Nil => { ret!(("gov-error", "no such channel", id)) }
+            ch  => {
+              new may, c in {
+                mayRead!(ch, me, *may) |
+                startOf!(cursor, ch.get("subs").getOrElse(me, 0), *c) |
+                for (@yes <- may; @from <- c) {
+                  match yes {
+                    false => { ret!(("gov-error", "not allowed", id)) }
+                    true  => { pageAnswer!(id, [from, limit, ch.get("closed")], *ret) }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        _ => { state!(s) | ret!(("gov-error", "bad verb or arity", verb)) }
+      }
+    }
+  } |
+
+  contract doRead(@verb, @args, ret) = {
+    for (@s <- state) {
+      state!(s) |
+      match [verb, args] {
+        // What a channel is, never who is subscribed: a count, not a list.
+        ["info", [id]] => {
+          match s.getOrElse(id, Nil) {
+            Nil => { ret!(("gov-error", "no such channel", id)) }
+            ch  => {
+              for (@l <- @(*log, id)) {
+                @(*log, id)!(l) |
+                ret!(("info", {"id": id, "owner": ch.get("owner"), "name": ch.get("name"),
+                               "policy": ch.get("policy"), "closed": ch.get("closed"),
+                               "seq": l.get("seq"), "kept": l.get("order").length(),
+                               "subscribers": ch.get("subs").keys().toList().length()}))
+              }
+            }
+          }
+        }
+        ["channelsOf", [addr]] => { ownedBy!(s.toList(), [addr, []], *ret) }
+        // An open channel is a publication: anyone reads it, free.
+        ["postsOf", [id, cursor, limit]] => {
+          match s.getOrElse(id, Nil) {
+            Nil => { ret!(("gov-error", "no such channel", id)) }
+            ch  => {
+              match ch.get("policy") {
+                "open" => {
+                  new c in {
+                    startOf!(cursor, 0, *c) |
+                    for (@from <- c) { pageAnswer!(id, [from, limit, ch.get("closed")], *ret) }
+                  }
+                }
+                _ => { ret!(("gov-error", "invite-only channel", id)) }
+              }
+            }
+          }
+        }
+        _ => { ret!(("gov-error", "bad verb or arity", verb)) }
+      }
+    }
+  } |`;
+
+// Whole-contract load is refused: it would create channels with no log cell.
+// Whole-contract dump is refused too. The state cell holds every channel's
+// `allowed` list and `subs` set, which `info` deliberately reduces to a count,
+// so a dump would hand the installer who reads whom — more than any facet
+// publishes. Nothing needs it: a channel's posts are in its own log cell, which
+// dump never reached, so it could not have migrated a channel anyway.
+const CHANNEL_DUMP_ARM = /\n        \["dump", \[\]\]    => \{ state!\(s\) \| ret!\(\("dump", s\)\) \}\n/;
+const CHANNEL_LOAD_ARM = /\/\/ Refuses a non-empty cell[\s\S]*?\n        \["load", \[s2\]\]  => \{[\s\S]*?\n        \}\n/;
+
+export const CHANNEL_RHO = preamble("Channel/1")
+  .replace("HELPERS", CHANNEL_HELPERS)
+  .replace(CHANNEL_DUMP_ARM, `
+        ["dump", []]    => { state!(s) | ret!(("gov-error", "no whole-contract dump", "who reads and follows a channel is not published")) }
+`)
+  .replace(CHANNEL_LOAD_ARM, `// No whole-contract load: a channel's posts live in its own cell, which
+        // only \`open\` writes, so a loaded channel would have none to post to.
+        ["load", [s2]]  => { state!(s) | ret!(("gov-error", "no whole-contract load", "a channel's log is its own cell")) }
+`)
+  .replace("VERBS", CHANNEL_VERBS);
+
+// ---------------------------------------------------------------------------
 // Install programs
 // ---------------------------------------------------------------------------
 //
@@ -1191,6 +1517,7 @@ const installFor = (src, name) => src.replace("CAPS", `new a in {
 export const installInboxProgram = () => installFor(INBOX_RHO, "Inbox");
 export const installGroupProgram = () => installFor(GROUP_RHO, "Group");
 export const installIssueProgram = () => installFor(ISSUE_RHO, "Issue");
+export const installChannelProgram = () => installFor(CHANNEL_RHO, "Channel");
 
 // ---------------------------------------------------------------------------
 // Call sites
@@ -1317,6 +1644,54 @@ export const setRollProgram = (uri, iid, voters) =>
 export const ballotsOfProgram = (uri, iid) => readProgram(uri, "ballotsOf", [q(iid)]);
 export const issuesOfProgram  = (uri, gid) => readProgram(uri, "issuesOf", [q(gid)]);
 
+// --- Channel ---------------------------------------------------------------
+// `name` is the publisher's own; `id` is `<publisher address>/<name>`.
+/** A cursor reaches rholang as Nil or a number, never a string. */
+const qCursor = (c) => (c === null || c === undefined ? "Nil" : String(Math.max(0, Math.floor(Number(c)))));
+export const channelIdOf = (owner, name) => `${owner}/${name}`;
+export const channelOpenProgram     = (uri, name, policy = "open") => writeProgram(uri, "self", "open", [q(name), q(policy)]);
+/**
+ * A post's text as it is stored. MEASURED: this node's parser refuses the
+ * backslash JSON.stringify puts before a quote ("Illegal character \\"), and
+ * JSON.stringify writes a backslash escape for every control character too —
+ * so a post with a quote, a tab or a pasted CRLF could not be sent at all.
+ *
+ * Every code unit JSON.stringify would escape is percent-escaped instead, and
+ * so are `%` (first, so decoding is exact), DEL and the C1 controls, and the
+ * line and paragraph separators: `%XX` for one under 0x100, `%uXXXX` for one
+ * above (a lone surrogate). Everything else, ordinary Unicode included, is
+ * stored as typed, so a post that needs no escaping reads the same on chain.
+ */
+const CHANNEL_ESCAPE = /[\u0000-\u001F"%\\\u007F-\u009F\u2028\u2029]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const hex = (n, w) => n.toString(16).toUpperCase().padStart(w, "0");
+export const channelText = {
+  encode: (t) => String(t).replace(CHANNEL_ESCAPE, (c) => {
+    const n = c.charCodeAt(0);
+    return n < 0x100 ? `%${hex(n, 2)}` : `%u${hex(n, 4)}`;
+  }),
+  decode: (t) => String(t).replace(/%u([0-9A-F]{4})|%([0-9A-F]{2})/g, (_, u, h) => String.fromCharCode(parseInt(u ?? h, 16))),
+};
+export const channelPostProgram     = (uri, name, text) => writeProgram(uri, "self", "post", [q(name), q(channelText.encode(text))]);
+export const channelCloseProgram    = (uri, name) => writeProgram(uri, "self", "close", [q(name)]);
+export const channelAllowProgram    = (uri, name, addr) => writeProgram(uri, "self", "allow", [q(name), q(addr)]);
+export const channelDisallowProgram = (uri, name, addr) => writeProgram(uri, "self", "disallow", [q(name), q(addr)]);
+export const channelSubscribeProgram = (uri, id, from = "now") => writeProgram(uri, "self", "subscribe", [q(id), q(from === "head" ? "head" : "now")]);
+export const channelUnsubscribeProgram = (uri, id) => writeProgram(uri, "self", "unsubscribe", [q(id)]);
+/**
+ * The signed read: works on an invite channel, for its publisher and whoever it allowed.
+ * @param {string} uri @param {string} id @param {number | null} [cursor] @param {number} [limit]
+ */
+export const channelReadProgram  = (uri, id, cursor = null, limit = CHANNEL_PAGE) =>
+  writeProgram(uri, "self", "read", [q(id), qCursor(cursor), String(Math.floor(Number(limit)) || CHANNEL_PAGE)]);
+/**
+ * The free read: an open channel only.
+ * @param {string} uri @param {string} id @param {number | null} [cursor] @param {number} [limit]
+ */
+export const channelPostsProgram = (uri, id, cursor = null, limit = CHANNEL_PAGE) =>
+  readProgram(uri, "postsOf", [q(id), qCursor(cursor), String(Math.floor(Number(limit)) || CHANNEL_PAGE)]);
+export const channelInfoProgram  = (uri, id) => readProgram(uri, "info", [q(id)]);
+export const channelsOfProgram   = (uri, addr) => readProgram(uri, "channelsOf", [q(addr)]);
+
 /**
  * Move one identity's lockers from an old Inbox to a new one, IN ONE TERM.
  *
@@ -1408,7 +1783,7 @@ export function selftest() {
     else { fail++; console.log(`  FAIL ${label}${detail ? `  (${String(detail).slice(0, 220)})` : ""}`); }
   };
   const URI = "rho:id:abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqr";
-  const ALL = { Inbox: INBOX_RHO, Group: GROUP_RHO, Issue: ISSUE_RHO };
+  const ALL = { Inbox: INBOX_RHO, Group: GROUP_RHO, Issue: ISSUE_RHO, Channel: CHANNEL_RHO };
 
   const balanced = (s) => {
     const st = [];
@@ -1458,6 +1833,9 @@ export function selftest() {
          /\["export", \[\]\]/.test(src) && /\["import", \[lockers\]\]/.test(src));
       ok(`${name}: import refuses to merge into existing lockers`,
          /"gov-error", "already has lockers"/.test(src));
+    } else if (name === "Channel") {
+      ok(`${name}: refuses whole-contract load`, /"gov-error", "no whole-contract load", "a channel's log is its own cell"/.test(src) &&
+         !/state!\(s2\)/.test(src), "a loaded channel would have no log cell to post to");
     } else {
       ok(`${name}: load refuses a non-empty cell`, /"gov-error", "not empty"/.test(src));
     }
@@ -1515,6 +1893,45 @@ export function selftest() {
   ok("Inbox: only the default tag is auto-created",
      /false => \{ state!\(s\) \| ret!\(\("gov-error", "no such locker", to, tag\)\) \}/.test(INBOX_RHO),
      "or one sender could litter an identity with lockers it never wanted");
+  // Channel (quantum-os#78): rooted ids, publisher-only posts, the reader's own subscription.
+  const chSelf = CHANNEL_RHO.split("contract doSelf")[1].split("contract doRead")[0];
+  const chRead = CHANNEL_RHO.split("contract doRead")[1] ?? "";
+  ok("Channel: an id is rooted in the caller's derived address",
+     (chSelf.match(/let @id <- me \+\+ "\/" \+\+ name in/g) || []).length === 5,
+     "open, post, close, allow and disallow must rebuild the id from me");
+  ok("Channel: post takes no channel id, only the caller's own name",
+     /\["post", \[name, text\]\]/.test(chSelf));
+  ok("Channel: each channel's log is its own cell", /@\(\*log, id\)!\(\{"seq": 0/.test(CHANNEL_RHO));
+  ok("Channel: a log is bounded", CHANNEL_RHO.includes(`length() > ${CHANNEL_KEEP}`) && CHANNEL_RHO.includes(`ret!(${CHANNEL_PAGE})`));
+  ok("Channel: close stops posting but keeps the posts",
+     /\["close", \[name\]\][\s\S]*?ch\.set\("closed", true\)/.test(chSelf) && !/delete\(id\)/.test(CHANNEL_RHO));
+  ok("Channel: unsubscribe touches only the caller's own row", /ch\.get\("subs"\)\.delete\(me\)/.test(chSelf));
+  ok("Channel: the free read answers an open channel only",
+     /"open" => \{[\s\S]*?pageAnswer!/.test(chRead) && /"gov-error", "invite-only channel", id/.test(chRead));
+  ok("Channel: the public facet never lists subscribers", !/subs"\)\.keys\(\)\.toList\(\)\)/.test(chRead) &&
+     /"subscribers": ch\.get\("subs"\)\.keys\(\)\.toList\(\)\.length\(\)/.test(chRead));
+  ok("Channel: an invite read is gated on the caller", /mayRead!\(ch, me, \*may\)/.test(chSelf));
+  ok("Channel: a cursor is Nil or a number", /"read", \["1111a\/news", Nil, 50\]/.test(channelReadProgram(URI, "1111a/news")) &&
+     /"postsOf", \["1111a\/news", 7, 10\]/.test(channelPostsProgram(URI, "1111a/news", 7, 10)),
+     channelReadProgram(URI, "1111a/news").slice(-120));
+  ok("Channel: subscribe accepts only now or head", /"subscribe", \["x", "now"\]/.test(channelSubscribeProgram(URI, "x", "evil")));
+  const odd = 'say "hi" \\ 100% %22\nnext';
+  ok("Channel: text with quotes and backslashes round-trips, and reaches rholang with no backslash",
+     channelText.decode(channelText.encode(odd)) === odd && !/\\/.test(channelText.encode(odd)) &&
+     channelText.encode("plain words") === "plain words");
+  ok("Channel: whole-contract dump is refused, so allow lists and subscribers stay unpublished",
+     /\["dump", \[\]\]    => \{ state!\(s\) \| ret!\(\("gov-error", "no whole-contract dump"/.test(CHANNEL_RHO) &&
+     !/ret!\(\("dump", s\)\)/.test(CHANNEL_RHO));
+  const controls = Array.from({ length: 32 }, (_, i) => String.fromCharCode(i)).join("") + "\u007F\u0085\u2028\u2029";
+  const every = [controls, "a\r\nb\tc", 'q " b \\ p % %22 %u0041', "héllo 日本 🎉", "lone \uD800 and \uDC00", ""];
+  ok("Channel: every text round-trips, and none reaches rholang with a backslash",
+     every.every((t) => channelText.decode(channelText.encode(t)) === t && !/\\/.test(q(channelText.encode(t)))),
+     every.filter((t) => channelText.decode(channelText.encode(t)) !== t || /\\/.test(q(channelText.encode(t)))).map((t) => JSON.stringify(t)).join(" "));
+  ok("Channel: ordinary Unicode is stored as typed", channelText.encode("héllo 日本 🎉") === "héllo 日本 🎉");
+  const chNasty = channelPostProgram(URI, "news", 'x", *evil) | @"stolen"!("');
+  ok("Channel: a hostile post stays inside its literal",
+     balanced(chNasty) && !/@"stolen"!/.test(chNasty.replace(/"(?:[^"\\]|\\.)*"/g, '""')), chNasty);
+
   ok("Issue: the electorate can be refreshed after open",
      /\["setRoll", \[iid, voters\]\]/.test(ISSUE_RHO) && /"gov-error", "closed", iid/.test(ISSUE_RHO),
      "open is idempotent, so a roll set at first push would freeze the electorate");

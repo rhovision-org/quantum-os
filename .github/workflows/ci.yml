@@ -182,6 +182,15 @@ jobs:
       - name: Rholang multi-rnode probe test
         run: node packages/browser/test/rholang-probe.test.mjs
 
+      # /channel chain (#78): reading the Channel contract's answers back out of
+      # rendered text, post-text decoding, and channel naming.
+      - name: Chain channel test
+        run: node packages/browser/test/chain-channel.test.mjs
+      # What a node's answers render to, and a deploy that failed on chain kept
+      # apart from one that answered (classifyDeployStatus).
+      - name: Render expr test
+        run: node packages/browser/test/render-expr.test.mjs
+
   docs:
     name: Document network
     runs-on: ubuntu-latest

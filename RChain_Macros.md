@@ -454,7 +454,7 @@ resolved name cached? A cache that goes stale silently is worse than a miss.
 |---|---|
 | [#76](https://github.com/rhovision-org/quantum-os/issues/76) | Identity credentials: issue, hold, verify. A credential is a relationship, not a property |
 | [#77](https://github.com/rhovision-org/quantum-os/issues/77) | Inbox: a caretaker facet per correspondent, and ignore |
-| [#78](https://github.com/rhovision-org/quantum-os/issues/78) | Channels that outlive the room: publish and subscribe |
+| [#78](https://github.com/rhovision-org/quantum-os/issues/78) | Channels that outlive the room: publish and subscribe. **Built:** `/channel chain`, the Channel contract in [RGov_Core.md](RGov_Core.md#4-channel--publish-and-subscribe-on-chain) |
 
 **Bearer semantics** sits under this heading and stays open by choice. A granted
 facet is held by whoever it reached and there is no un-granting one; a caretaker

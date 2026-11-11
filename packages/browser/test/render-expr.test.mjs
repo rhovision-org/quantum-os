@@ -17,7 +17,7 @@ const bundle = await build({
   entryPoints: [join(here, "..", "src", "rholang.ts")],
   bundle: true, format: "esm", platform: "node", write: false,
 });
-const { renderExpr } = await import(
+const { renderExpr, classifyDeployStatus } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
 
 let failed = 0;
@@ -32,6 +32,16 @@ check("a par reads as rholang's own |",
 check("an empty par is Nil", renderExpr({ ExprPar: [] }), "Nil");
 
 check("an int", renderExpr({ ExprInt: 42 }), "42");
+// deploy-status wraps each payload in {data: …} (rholo bc80abb), and a map is
+// an object there rather than pairs. Real shape, from a Channel install.
+check("deploy-status: a wrapped list",
+  renderExpr({ ExprList: { data: [{ ExprString: { data: "installed" } }, { ExprUri: { data: "rho:id:abc" } }] } }),
+  '["installed", rho:id:abc]');
+check("deploy-status: a wrapped map is an object",
+  renderExpr({ ExprMap: { data: { seq: { ExprInt: { data: 2 } }, text: { ExprString: { data: "hi" } } } } }),
+  '{"seq": 2, "text": "hi"}');
+check("deploy-status: a wrapped tuple with Nil",
+  renderExpr({ ExprTuple: { data: [{ ExprString: { data: "posts" } }, { ExprPar: { data: [] } }] } }), '("posts", Nil)');
 check("a string keeps its quotes", renderExpr({ ExprString: "hi" }), '"hi"');
 check("a bool", renderExpr({ ExprBool: true }), "true");
 check("a list", renderExpr({ ExprList: [{ ExprInt: 1 }, { ExprInt: 2 }] }), "[1, 2]");
@@ -44,6 +54,16 @@ check("nothing", renderExpr(null), "Nil");
 // An expression a future build names differently should not become JSON.
 check("an unknown Expr renders its contents, not rnode's wire shape",
   renderExpr({ ExprSomethingNew: { ExprInt: 7 } }), "7");
+
+// A deploy that failed on chain is a failure, not an answer (PR #258 review).
+{
+  const bad = classifyDeployStatus({ ProcessedWithError: { deployError: "Out of phlo" } });
+  check("a failed deploy is not ok", bad?.ok, false);
+  check("a failed deploy says why", bad?.error, "Out of phlo");
+  const good = classifyDeployStatus({ ProcessedWithSuccess: { deployResult: [{ ExprTuple: { data: [{ ExprString: { data: "posted" } }] } }] } });
+  check("a deploy that ran answers its values", good?.ok && good.values[0], '("posted")');
+  check("a pending deploy has no verdict yet", classifyDeployStatus({ Pending: {} }), null);
+}
 
 console.log(failed === 0 ? "\nrender-expr: all passed" : `\nrender-expr: ${failed} FAILED`);
 process.exit(failed ? 1 : 0);
