@@ -71,6 +71,19 @@ check("another verb's answer is a failure", M.answerError("allow", ["disallowed"
 check("a failed deploy rendered as a value is a failure", M.answerError("post", M.firstValue(['{"deployError": "Out of phlo"}'])) !== null);
 check("an answer that cannot be read is a failure", M.answerError("unsubscribe", null) !== null);
 
+// --- writers: a post carries the address that wrote it ----------------------
+const B = "11112wWGeUA5qt6MpH9CantYj2UWWt4C3LP4cx8TpQmeM79dyen6Sk";
+const council = M.postsOf(M.parseRendered(`("posts", "${NEWS}", [{"by": "${A}", "seq": 1, "text": "agenda"}, {"by": "${B}", "seq": 2, "text": "I second it"}, {"seq": 3, "text": "older post"}], 3, false, 3)`));
+check("a post keeps its author", !("error" in council) && council.posts[1].by === B && council.posts[0].by === A, JSON.stringify(council));
+check("a post from before writers has no author", !("error" in council) && council.posts[2].by === undefined);
+check("the publisher's own post needs no author label", M.authorLabel(council.posts[0], NEWS, B) === "" && M.authorLabel(council.posts[2], NEWS, B) === "");
+check("a writer's post is labelled, as you when it is yours",
+  M.authorLabel(council.posts[1], NEWS, B) === "you" && M.authorLabel(council.posts[1], NEWS, A) === `${B.slice(0, 8)}…${B.slice(-4)}`);
+check("writer verbs answer their own tags", M.answerError("postTo", ["posted", NEWS, 4]) === null &&
+  M.answerError("allowWriter", ["writer", NEWS, B]) === null && M.answerError("disallowWriter", ["not-writer", NEWS, B]) === null &&
+  M.answerError("postTo", ["gov-error", "not a writer", NEWS])?.startsWith("not a writer"));
+check("info counts writers", M.infoOf(M.parseRendered(`("info", {"closed": false, "id": "${NEWS}", "kept": 0, "name": "news", "owner": "${A}", "policy": "invite", "seq": 0, "subscribers": 0, "writers": 2})`)).writers === 2);
+
 // --- a policy is open or invite, nothing else --------------------------------
 check("no policy is open", M.policyFrom(undefined) === "open" && M.policyFrom("") === "open");
 check("open and invite are taken as typed", M.policyFrom("open") === "open" && M.policyFrom("Invite") === "invite");

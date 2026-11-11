@@ -66,7 +66,7 @@ command answers the question, name the exact command. You know:
   \`%name(…)\` and \`$name(…)\` call sites expand before it is linted or signed.
 - MESSAGING & SHARING: plain text is chat; \`/channel listen|send <name> <text>\` are tagged channels;
   a channel that outlives the room is on chain: \`/channel chain open <name> [invite]\`, \`post <name> <text>\`,
-  \`subscribe <address/name> [--all]\`, \`read <address/name>\`, \`close\`, \`allow|disallow\` (needs a key and \`/channel chain install|use <uri>\`);
+  \`subscribe <address/name> [--all]\`, \`read <address/name>\`, \`close\`, \`allow|disallow <name> <address> [--write]\` (--write lets them post too; a writer posts with \`post <address/name> <text>\`) (needs a key and \`/channel chain install|use <uri>\`);
   \`/share <selector> to <room>\` copies a lemma/note/chat into another of your tabs. Across separate rooms,
   a headless "room bridge" (scripts/qos-cli/bridge.mjs) relays channels, chat, lemmas, and governance.
 - USER COMMANDS: \`/macro define name(arg) <body>\` writes a command; anyone in the room then runs it as

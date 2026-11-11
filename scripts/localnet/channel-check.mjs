@@ -134,6 +134,30 @@ await write("alice still reads her own", alice, C.channelReadProgram(CH, DESK), 
 await read("channelsOf alice", C.channelsOfProgram(CH, A), (v) => { const s = JSON.stringify(v); return s.includes("news") && s.includes("desk"); });
 await write("a bad arity answers", alice, C.writeProgram(CH, "self", "post", ['"news"']), has("bad verb or arity"));
 
+// ── writers: a council chat where several people post (rhogov#117) ─────────
+const carol = keyOf("carol"), Cc = carol ? revAddressOf(carol) : null;
+const COUNCIL = C.channelIdOf(A, "council");
+await write("alice opens council (invite)", alice, C.channelOpenProgram(CH, "council", "invite"), has("opened"));
+await write("bob cannot post to council before he is a writer", bob, C.channelPostToProgram(CH, COUNCIL, "early"), has("not a writer"));
+// allowWriter takes a name, never an id, so bob's call can only mean a
+// council under his own address, and there is none.
+await write("bob cannot make himself a writer: the verb reaches only his own channels", bob, C.channelAllowWriterProgram(CH, "council", B),
+  has(`"no such channel","${C.channelIdOf(B, "council")}"`));
+await write("…and alice's council still refuses him", bob, C.channelPostToProgram(CH, COUNCIL, "still early"), has("not a writer"));
+await write("alice makes bob a writer", alice, C.channelAllowWriterProgram(CH, "council", B), has(`"writer","${COUNCIL}","${B}"`));
+await write("alice posts the agenda", alice, C.channelPostProgram(CH, "council", "agenda: budget"), has(`"posted","${COUNCIL}",1`));
+await write("bob posts to alice's council", bob, C.channelPostToProgram(CH, COUNCIL, "I second it"), has(`"posted","${COUNCIL}",2`));
+await write("a writer reads the invite channel without a separate allow", bob, C.channelReadProgram(CH, COUNCIL),
+  (v) => { const p = v?.[0]?.[2] ?? []; return p.length === 2 && p[0].by === A && p[1].by === B && p[1].text === "I second it"; });
+if (Cc) await write("carol, no writer, is refused", carol, C.channelPostToProgram(CH, COUNCIL, "me too"), has("not a writer"));
+await read("info counts one writer", C.channelInfoProgram(CH, COUNCIL), has('"writers":1'));
+await write("alice removes bob as a writer", alice, C.channelDisallowWriterProgram(CH, "council", B), has("not-writer"));
+await write("bob can no longer post", bob, C.channelPostToProgram(CH, COUNCIL, "late"), has("not a writer"));
+await write("bob can no longer read", bob, C.channelReadProgram(CH, COUNCIL), has("not allowed"));
+await write("alice closes council", alice, C.channelCloseProgram(CH, "council"), has("closed"));
+await write("alice re-adds bob, but a closed council takes no posts", alice, C.channelAllowWriterProgram(CH, "council", B), has("writer"));
+await write("bob's post to the closed council is refused", bob, C.channelPostToProgram(CH, COUNCIL, "after close"), has(`"closed","${COUNCIL}"`));
+
 // ── every text survives the chain (PR #258 review) ───────────────────────────
 // Posted through channelText, read back and decoded the way chain-channel.ts does.
 const HARD = ["a\r\nb\tc", Array.from({ length: 32 }, (_, i) => String.fromCharCode(i)).join("") + "\u007F\u0085\u2028\u2029",

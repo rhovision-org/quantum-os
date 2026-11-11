@@ -8,8 +8,12 @@
 //
 //   node packages/browser/test/chain-channel.test.mjs
 
-/** One post, as the contract stores it. `text` is decoded. */
-export interface ChannelPost { seq: number; text: string }
+/**
+ * One post, as the contract stores it. `text` is decoded. `by` is the address
+ * the contract derived for whoever posted; a post from before writers existed
+ * has none, and was the publisher's.
+ */
+export interface ChannelPost { seq: number; text: string; by?: string }
 
 export interface PostsPage {
   id: string;
@@ -24,7 +28,7 @@ export interface PostsPage {
 export interface ChannelInfo {
   id: string; owner: string; name: string;
   policy: "open" | "invite"; closed: boolean;
-  seq: number; kept: number; subscribers: number;
+  seq: number; kept: number; subscribers: number; writers: number;
 }
 
 /**
@@ -84,8 +88,8 @@ export function postsOf(v: unknown): PostsPage | { error: string } {
   if (!Array.isArray(v) || v[0] !== "posts" || v.length < 6) return { error: `unexpected answer: ${JSON.stringify(v)?.slice(0, 160)}` };
   const raw = Array.isArray(v[2]) ? v[2] : [];
   const posts = raw
-    .filter((p): p is { seq: number; text: string } => !!p && typeof p === "object" && typeof (p as { seq?: unknown }).seq === "number")
-    .map((p) => ({ seq: p.seq, text: decodeText(String(p.text ?? "")) }));
+    .filter((p): p is { seq: number; text: string; by?: unknown } => !!p && typeof p === "object" && typeof (p as { seq?: unknown }).seq === "number")
+    .map((p) => ({ seq: p.seq, text: decodeText(String(p.text ?? "")), ...(typeof p.by === "string" ? { by: p.by } : {}) }));
   return { id: String(v[1]), posts, next: Number(v[3]) || 0, closed: v[4] === true, newest: Number(v[5]) || 0 };
 }
 
@@ -98,6 +102,7 @@ export function postsOf(v: unknown): PostsPage | { error: string } {
 export const EXPECTED_TAG = {
   open: ["opened", "already"], post: ["posted"], close: ["closed"],
   allow: ["allowed"], disallow: ["disallowed"],
+  postTo: ["posted"], allowWriter: ["writer"], disallowWriter: ["not-writer"],
   subscribe: ["subscribed"], unsubscribe: ["unsubscribed"], read: ["posts"],
 } as const;
 export type ChannelVerb = keyof typeof EXPECTED_TAG;
@@ -152,6 +157,7 @@ export function infoOf(v: unknown): ChannelInfo | { error: string } {
     id: String(o.id), owner: String(o.owner), name: String(o.name),
     policy: o.policy === "invite" ? "invite" : "open", closed: o.closed === true,
     seq: Number(o.seq) || 0, kept: Number(o.kept) || 0, subscribers: Number(o.subscribers) || 0,
+    writers: Number(o.writers) || 0,
   };
 }
 
@@ -173,6 +179,17 @@ export function channelIdFrom(arg: string, myAddr?: string): string | null {
 
 /** A channel name: one word, no slash, short enough to read in a line. */
 export const validName = (n: string): boolean => /^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$/.test(n);
+
+/**
+ * Who wrote a post, for a chat line: nothing when it is the channel's own
+ * publisher (the label already says whose channel it is), "you", or a short
+ * address. Only addresses the contract derived reach here.
+ */
+export function authorLabel(post: ChannelPost, channelId: string, myAddr?: string): string {
+  const owner = channelId.slice(0, Math.max(0, channelId.indexOf("/")));
+  if (!post.by || post.by === owner) return "";
+  return post.by === myAddr ? "you" : `${post.by.slice(0, 8)}…${post.by.slice(-4)}`;
+}
 
 /** `<address>/<name>` shortened for a chat line: the name, and whose. */
 export function channelLabel(id: string, myAddr?: string): string {
