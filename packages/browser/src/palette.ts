@@ -117,7 +117,7 @@ export const CMD_HELP: Record<string, string[]> = {
          "Hiding loses nothing — joined rooms come back as tabs, copy still puts the link on your clipboard, and /room ref prints it."],
   share: ["/share <selector> to <room> — bridge an item into another joined room.", "selectors: @lemma · msg <text> · note <cur> <N>"],
   channel: ["/channel listen <name> · unlisten <name> · send <name> <text> · list — tagged broadcast messages (per-room subscriptions).",
-            "/channel chain open <name> [invite] · post <name> <text> · subscribe <address/name> [--all] · read <address/name> · close · allow|disallow <name> <address> · info · list · install|use <uri> — a channel on chain, which outlives the room."],
+            "/channel chain open <name> [invite] · post <name> <text> · subscribe <address/name> [--all] · read <address/name> · close · allow|disallow <name> <address> [--write] · info · list · install|use <uri> — a channel on chain, which outlives the room."],
   facil: ["/facil [help|ask <question>|off|on] — relayed to facilitator daemon(s) in the room.", "The browser does NOT run facilitation and does not vouch for any facilitator — it only forwards the command. Each facilitator answers for ITSELF; trust its self-description only, judge it by its own (signed-name) replies, and note more than one may be present (or none).", "Typical: /facil (present?) · /facil help (it describes itself) · /facil ask <q> (brief AI answer, if it runs --ai) · /facil off|on (mute/unmute)."],
   script: ["/script <c1>; <c2>; … — run a sequential command chain; // skips a segment."],
   persist: ["/persist <@lemma | currency <name>> to <peer> — ask a peer to also hold your public state for redundancy.", "/persist accept <id> · reject <id> · list"],

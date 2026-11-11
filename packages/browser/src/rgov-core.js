@@ -1209,7 +1209,7 @@ export const CHANNEL_PAGE = 50;
 /** A channel keeps this many posts, newest; the oldest is dropped past it. */
 export const CHANNEL_KEEP = 500;
 
-const CHANNEL_HELPERS = `log, pageOf, ownedBy, clampPage, pageAnswer, mayRead, startOf,`;
+const CHANNEL_HELPERS = `log, pageOf, ownedBy, clampPage, pageAnswer, mayRead, mayWrite, appendPost, startOf,`;
 
 const CHANNEL_VERBS = `// order is ascending; ctx is [cursor, limit, posts]. The posts after the
   // cursor, oldest first, at most limit of them.
@@ -1270,11 +1270,38 @@ const CHANNEL_VERBS = `// order is ascending; ctx is [cursor, limit, posts]. The
     }
   } |
   contract mayRead(@ch, @me, ret) = {
-    match [ch.get("policy"), ch.get("owner") == me, ch.get("allowed").contains(me)] {
-      ["open", _, _] => { ret!(true) }
-      [_, true, _]   => { ret!(true) }
-      [_, _, true]   => { ret!(true) }
-      _              => { ret!(false) }
+    match [ch.get("policy"), ch.get("owner") == me, ch.get("allowed").contains(me),
+           ch.getOrElse("writers", {}).contains(me)] {
+      ["open", _, _, _] => { ret!(true) }
+      [_, true, _, _]   => { ret!(true) }
+      [_, _, true, _]   => { ret!(true) }
+      [_, _, _, true]   => { ret!(true) }
+      _                 => { ret!(false) }
+    }
+  } |
+  // The publisher and the writers it named. A channel opened before writers
+  // existed has no "writers" row, which reads as none.
+  contract mayWrite(@ch, @me, ret) = {
+    match [ch.get("owner") == me, ch.getOrElse("writers", {}).contains(me)] {
+      [true, _] => { ret!(true) }
+      [_, true] => { ret!(true) }
+      _         => { ret!(false) }
+    }
+  } |
+  // Appends one post, stamped with the DERIVED address of whoever posted it,
+  // so a reader sees who said what without trusting the text. ctx is [by, text].
+  contract appendPost(@id, @ctx, ret) = {
+    for (@l <- @(*log, id)) {
+      let @n <- l.get("seq") + 1 in {
+        let @l1 <- l.set("seq", n).set("order", l.get("order") ++ [n])
+            .set("posts", l.get("posts").set(n, {"seq": n, "text": ctx.nth(1), "by": ctx.nth(0)})) in {
+          match [l1.get("order").length() > ${CHANNEL_KEEP}, l1.get("order")] {
+            [true, [oldest ...kept]] => { @(*log, id)!(l1.set("order", kept).set("posts", l1.get("posts").delete(oldest))) }
+            _ => { @(*log, id)!(l1) }
+          } |
+          ret!(("posted", id, n))
+        }
+      }
     }
   } |
 
@@ -1288,12 +1315,12 @@ const CHANNEL_VERBS = `// order is ascending; ctx is [cursor, limit, posts]. The
             match [s.contains(id), policy] {
               [true, _] => { state!(s) | ret!(("already", id)) }
               [false, "open"] => {
-                state!(s.set(id, {"owner": me, "name": name, "policy": policy, "closed": false, "allowed": {}, "subs": {}})) |
+                state!(s.set(id, {"owner": me, "name": name, "policy": policy, "closed": false, "allowed": {}, "writers": {}, "subs": {}})) |
                 @(*log, id)!({"seq": 0, "order": [], "posts": {}}) |
                 ret!(("opened", id, policy))
               }
               [false, "invite"] => {
-                state!(s.set(id, {"owner": me, "name": name, "policy": policy, "closed": false, "allowed": {}, "subs": {}})) |
+                state!(s.set(id, {"owner": me, "name": name, "policy": policy, "closed": false, "allowed": {}, "writers": {}, "subs": {}})) |
                 @(*log, id)!({"seq": 0, "order": [], "posts": {}}) |
                 ret!(("opened", id, policy))
               }
@@ -1312,23 +1339,52 @@ const CHANNEL_VERBS = `// order is ascending; ctx is [cursor, limit, posts]. The
               ch  => {
                 match [ch.get("closed"), text] {
                   [true, _]       => { ret!(("gov-error", "closed", id)) }
-                  [false, String] => {
-                    for (@l <- @(*log, id)) {
-                      let @n <- l.get("seq") + 1 in {
-                        let @l1 <- l.set("seq", n).set("order", l.get("order") ++ [n])
-                            .set("posts", l.get("posts").set(n, {"seq": n, "text": text})) in {
-                          match [l1.get("order").length() > ${CHANNEL_KEEP}, l1.get("order")] {
-                            [true, [oldest ...kept]] => { @(*log, id)!(l1.set("order", kept).set("posts", l1.get("posts").delete(oldest))) }
-                            _ => { @(*log, id)!(l1) }
-                          } |
-                          ret!(("posted", id, n))
-                        }
-                      }
-                    }
-                  }
+                  [false, String] => { appendPost!(id, [me, text], *ret) }
                   _ => { ret!(("gov-error", "a post is text", id)) }
                 }
               }
+            }
+          }
+        }
+
+        // A writer posts into somebody else's channel, named by its full id.
+        // The gate is the channel's own writers row, which only its publisher
+        // sets, and the post is stamped with the writer's derived address.
+        ["postTo", [id, text]] => {
+          state!(s) |
+          match s.getOrElse(id, Nil) {
+            Nil => { ret!(("gov-error", "no such channel", id)) }
+            ch  => {
+              new may in {
+                mayWrite!(ch, me, *may) |
+                for (@yes <- may) {
+                  match [yes, ch.get("closed"), text] {
+                    [false, _, _]       => { ret!(("gov-error", "not a writer", id)) }
+                    [_, true, _]        => { ret!(("gov-error", "closed", id)) }
+                    [true, false, String] => { appendPost!(id, [me, text], *ret) }
+                    _ => { ret!(("gov-error", "a post is text", id)) }
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // Who may post. The publisher's rows, nobody else's; a writer can also
+        // read, so an invite channel need not allow its writers separately.
+        ["allowWriter", [name, addr]] => {
+          let @id <- me ++ "/" ++ name in {
+            match s.getOrElse(id, Nil) {
+              Nil => { state!(s) | ret!(("gov-error", "no such channel", id)) }
+              ch  => { state!(s.set(id, ch.set("writers", ch.getOrElse("writers", {}).set(addr, true)))) | ret!(("writer", id, addr)) }
+            }
+          }
+        }
+        ["disallowWriter", [name, addr]] => {
+          let @id <- me ++ "/" ++ name in {
+            match s.getOrElse(id, Nil) {
+              Nil => { state!(s) | ret!(("gov-error", "no such channel", id)) }
+              ch  => { state!(s.set(id, ch.set("writers", ch.getOrElse("writers", {}).delete(addr)))) | ret!(("not-writer", id, addr)) }
             }
           }
         }
@@ -1436,7 +1492,8 @@ const CHANNEL_VERBS = `// order is ascending; ctx is [cursor, limit, posts]. The
                 ret!(("info", {"id": id, "owner": ch.get("owner"), "name": ch.get("name"),
                                "policy": ch.get("policy"), "closed": ch.get("closed"),
                                "seq": l.get("seq"), "kept": l.get("order").length(),
-                               "subscribers": ch.get("subs").keys().toList().length()}))
+                               "subscribers": ch.get("subs").keys().toList().length(),
+                               "writers": ch.getOrElse("writers", {}).keys().toList().length()}))
               }
             }
           }
@@ -1473,7 +1530,7 @@ const CHANNEL_VERBS = `// order is ascending; ctx is [cursor, limit, posts]. The
 const CHANNEL_DUMP_ARM = /\n        \["dump", \[\]\]    => \{ state!\(s\) \| ret!\(\("dump", s\)\) \}\n/;
 const CHANNEL_LOAD_ARM = /\/\/ Refuses a non-empty cell[\s\S]*?\n        \["load", \[s2\]\]  => \{[\s\S]*?\n        \}\n/;
 
-export const CHANNEL_RHO = preamble("Channel/1")
+export const CHANNEL_RHO = preamble("Channel/2")
   .replace("HELPERS", CHANNEL_HELPERS)
   .replace(CHANNEL_DUMP_ARM, `
         ["dump", []]    => { state!(s) | ret!(("gov-error", "no whole-contract dump", "who reads and follows a channel is not published")) }
@@ -1672,6 +1729,9 @@ export const channelText = {
   decode: (t) => String(t).replace(/%u([0-9A-F]{4})|%([0-9A-F]{2})/g, (_, u, h) => String.fromCharCode(parseInt(u ?? h, 16))),
 };
 export const channelPostProgram     = (uri, name, text) => writeProgram(uri, "self", "post", [q(name), q(channelText.encode(text))]);
+export const channelPostToProgram   = (uri, id, text) => writeProgram(uri, "self", "postTo", [q(id), q(channelText.encode(text))]);
+export const channelAllowWriterProgram    = (uri, name, addr) => writeProgram(uri, "self", "allowWriter", [q(name), q(addr)]);
+export const channelDisallowWriterProgram = (uri, name, addr) => writeProgram(uri, "self", "disallowWriter", [q(name), q(addr)]);
 export const channelCloseProgram    = (uri, name) => writeProgram(uri, "self", "close", [q(name)]);
 export const channelAllowProgram    = (uri, name, addr) => writeProgram(uri, "self", "allow", [q(name), q(addr)]);
 export const channelDisallowProgram = (uri, name, addr) => writeProgram(uri, "self", "disallow", [q(name), q(addr)]);
@@ -1897,8 +1957,13 @@ export function selftest() {
   const chSelf = CHANNEL_RHO.split("contract doSelf")[1].split("contract doRead")[0];
   const chRead = CHANNEL_RHO.split("contract doRead")[1] ?? "";
   ok("Channel: an id is rooted in the caller's derived address",
-     (chSelf.match(/let @id <- me \+\+ "\/" \+\+ name in/g) || []).length === 5,
-     "open, post, close, allow and disallow must rebuild the id from me");
+     (chSelf.match(/let @id <- me \+\+ "\/" \+\+ name in/g) || []).length === 7,
+     "open, post, close, allow, disallow, allowWriter and disallowWriter must rebuild the id from me");
+  ok("Channel: postTo is gated on the channel's own writers row", /\["postTo", \[id, text\]\][\s\S]*?mayWrite!\(ch, me, \*may\)[\s\S]*?"not a writer"/.test(chSelf));
+  ok("Channel: every post is stamped with the derived author", /appendPost!\(id, \[me, text\], \*ret\)/.test(chSelf) &&
+     (chSelf.match(/appendPost!\(/g) || []).length === 2 && /"by": ctx\.nth\(0\)/.test(CHANNEL_RHO));
+  ok("Channel: a writer can read what it writes to", /\[_, _, _, true\]   => \{ ret!\(true\) \}/.test(CHANNEL_RHO));
+  ok("Channel: a channel from before writers reads as having none", !/ch\.get\("writers"\)/.test(CHANNEL_RHO));
   ok("Channel: post takes no channel id, only the caller's own name",
      /\["post", \[name, text\]\]/.test(chSelf));
   ok("Channel: each channel's log is its own cell", /@\(\*log, id\)!\(\{"seq": 0/.test(CHANNEL_RHO));

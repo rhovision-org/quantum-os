@@ -31,7 +31,7 @@ import { installProgram, registerProgram, bindProgram, resolveProgram,
 // The three on-chain governance contracts. `readProgram` is already taken by
 // the locker's, so rgov-core's call-site builders come in under a namespace.
 import * as rgov from "./rgov-core.js";
-import { firstValue, errorOf, postsOf, infoOf, channelIdFrom, validName, channelLabel, answerError, policyFrom, cursorKey, cursorsIn, type ChannelVerb, type CursorScope } from "./chain-channel.js";
+import { firstValue, errorOf, postsOf, infoOf, channelIdFrom, validName, channelLabel, authorLabel, answerError, policyFrom, cursorKey, cursorsIn, type ChannelVerb, type CursorScope } from "./chain-channel.js";
 import { parseDefinition, parseInvocation, expandCommand, expandCallSites,
          formatDefinition, findMacros, bodyKind, MacroError,
          MACRO_NAME_RE, MAX_BODY } from "./macro-lang.js";
@@ -3248,8 +3248,10 @@ const CHAIN_CHANNEL_USAGE = [
   "  /channel chain install | use <uri>      — publish a Channel contract, or point at one",
   "  /channel chain open <name> [invite]     — a channel under your address (open: anyone reads)",
   "  /channel chain post <name> <text>       — publish to your channel",
+  "  /channel chain post <address/name> <text> — post to a channel whose publisher made you a writer",
   "  /channel chain close <name>             — no more posts; what was posted stays readable",
   "  /channel chain allow|disallow <name> <address> — who may read an invite channel",
+  "  /channel chain allow|disallow <name> <address> --write — who may post to it too",
   "  /channel chain subscribe <address/name> [--all] — follow it (--all: from the oldest kept post)",
   "  /channel chain unsubscribe <address/name>",
   "  /channel chain read <address/name> [--all] — what is new since your last read",
@@ -3351,6 +3353,16 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
     case "post": {
       const n = parts[1] ?? "";
       const text = rawRest.replace(/^post\s+\S+\s*/i, "");
+      // `<address>/<name>` is somebody else's channel, which takes their
+      // writers row; a bare name is your own.
+      if (n.includes("/")) {
+        const id = channelIdFrom(n, myAddr);
+        if (!id || !text) { sys("usage: /channel chain post <address/name> <text>"); return; }
+        signed(`posting to ${channelLabel(id, myAddr)}`, rgov.channelPostToProgram(uri, id, text), "postTo", (v) => {
+          say(`✓ posted to ${channelLabel(id, myAddr)} as #${Array.isArray(v) ? v[2] : "?"}`);
+        });
+        return;
+      }
       if (!validName(n) || !text) { sys("usage: /channel chain post <name> <text>"); return; }
       signed(`posting to ${n}`, rgov.channelPostProgram(uri, n, text), "post", (v) => {
         say(`✓ posted to ${n} as #${Array.isArray(v) ? v[2] : "?"}`);
@@ -3366,9 +3378,17 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
     case "allow":
     case "disallow": {
       const n = parts[1] ?? "", who = parts[2] ?? "";
-      if (!validName(n) || !/^1111/.test(who)) { sys(`usage: /channel chain ${verb} <name> <address>`); return; }
-      signed(`${verb === "allow" ? "allowing" : "disallowing"} ${who.slice(0, 8)}… on ${n}`,
-        verb === "allow" ? rgov.channelAllowProgram(uri, n, who) : rgov.channelDisallowProgram(uri, n, who), verb);
+      const write = parts.includes("--write");
+      if (!validName(n) || !/^1111/.test(who)) { sys(`usage: /channel chain ${verb} <name> <address> [--write]`); return; }
+      const allow = verb === "allow";
+      if (write) {
+        signed(`${allow ? "making" : "removing"} ${who.slice(0, 8)}… ${allow ? "a writer on" : "as a writer on"} ${n}`,
+          allow ? rgov.channelAllowWriterProgram(uri, n, who) : rgov.channelDisallowWriterProgram(uri, n, who),
+          allow ? "allowWriter" : "disallowWriter");
+        return;
+      }
+      signed(`${allow ? "allowing" : "disallowing"} ${who.slice(0, 8)}… on ${n}`,
+        allow ? rgov.channelAllowProgram(uri, n, who) : rgov.channelDisallowProgram(uri, n, who), verb);
       return;
     }
     case "subscribe": {
@@ -3397,7 +3417,10 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
         if ("error" in page) { say(`✗ ${page.error}`); return; }
         const label = channelLabel(id, myAddr);
         if (!page.posts.length) say(`📣 ${label}: nothing new${page.closed ? " — closed by its publisher" : ""}`);
-        for (const p of page.posts) say(`📣 ${label} #${p.seq}: ${p.text}`);
+        for (const p of page.posts) {
+          const who = authorLabel(p, id, myAddr);
+          say(`📣 ${label} #${p.seq}${who ? ` ${who}` : ""}: ${p.text}`);
+        }
         if (page.posts.length && page.closed && page.next >= page.newest) say(`  ${label} is closed — that was the last post`);
         if (page.next < page.newest) say(`  ${page.newest - page.next} more — /channel chain read ${id}`);
         setCursor(id, page.next);
@@ -3423,7 +3446,7 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
         try {
           const i = infoOf(firstValue((await evalTerm(cfg, rgov.channelInfoProgram(uri, id))).values));
           if ("error" in i) { say(`✗ ${i.error}`); return; }
-          say(`📣 ${channelLabel(i.id, myAddr)} — ${i.policy}${i.closed ? ", closed" : ""}, ${i.seq} post(s) (${i.kept} kept), ${i.subscribers} subscriber(s)`);
+          say(`📣 ${channelLabel(i.id, myAddr)} — ${i.policy}${i.closed ? ", closed" : ""}, ${i.seq} post(s) (${i.kept} kept), ${i.subscribers} subscriber(s)${i.writers ? `, ${i.writers} other writer(s)` : ""}`);
           say(`  ${i.id}`);
         } catch (e) { say(`✗ ${(e as Error).message}`); }
       })();

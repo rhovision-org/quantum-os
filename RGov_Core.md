@@ -349,9 +349,16 @@ through `/channel chain` ([docs/commands.md](docs/commands.md#channel-sub)).
 - **`invite` gates reading. It does not keep posts confidential.** Posts are plaintext in chain
   state, and a signed read's answer sits in that deploy's result. Anyone who can read chain storage
   can read an invite channel. Nothing built on it should call it private or encrypted.
-- **One publisher per channel.** `post` writes to the caller's own channel only. Being `allow`ed
-  lets you read, not post. A conversation among several people is several channels, or a contract
-  this one is not.
+- **A publisher, and the writers it names.** `post` writes to the caller's own channel. `postTo(id, …)`
+  writes to somebody else's, and only if that channel's publisher ran `allowWriter` for the caller.
+  `allowWriter`/`disallowWriter` take a name, not an id, so they reach only the caller's own channels:
+  nobody can make themselves a writer. A writer can also read, so an invite channel need not `allow`
+  its writers separately; being `allow`ed still lets you read, not post.
+- **Every post says who wrote it.** `by` is the address the contract derived from the deploy, never
+  an argument, so one channel can carry a conversation among several people with one order and one
+  list of who may speak. This is what a rhogov council chat is built on
+  ([rhogov#117](https://github.com/rhovision-org/rhogov/issues/117)). A post from a Channel/1
+  contract has no `by` and was its publisher's.
 
 The three questions #78 left open, answered:
 
