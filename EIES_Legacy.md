@@ -43,9 +43,9 @@ messaging, and permission delegation. It reads like a checklist of things later
 rediscovered.
 
 **EIES2 (1980s–90s)** — directed by Jim Whitescarver, implementing distributed
-Smalltalk as a research, development and operational environment for distributed
-CSCW. It supported the Virtual Classroom for years, until funding to maintain it
-ran out. That thread continues here — see the
+Smalltalk as a decentralized research, development and operational environment
+for distributed CSCW. It supported the Virtual Classroom for years, until
+funding to maintain it ran out. That thread continues here — see the
 [Collaborative Learning case study](CollaborativeLearningCaseStudy.md) and
 [Room Best Practices](Room_Best_Practices.md).
 
@@ -58,10 +58,12 @@ lineage that later contributed to HTML and XML.
 **QuantumOS** — this repository
 ([README](https://github.com/rhovision-org/quantum-os#readme)). Peer-to-peer
 [rooms](MyRoom.md), a ZFA kernel, [governance by liquid
-democracy](Governance.md), and a bridge to a chain ([RChain_Macros.md](RChain_Macros.md))
-for the things that must outlive the room. The vision it serves is stated in the
-[Manifesto](Manifesto.md); the [README](README.md) is the practical entry point
-and the [User Guide](User_Guide.md) is where to start using it.
+democracy](Governance.md), and a bridge to a trustless blockchain
+([rholo](https://github.com/rhovision-org/rholo),
+[RChain_Macros.md](RChain_Macros.md)) for the things that must outlive the room.
+The vision it serves is stated in the [Manifesto](Manifesto.md); the
+[README](README.md) is the practical entry point and the
+[User Guide](User_Guide.md) is where to start using it.
 
 **Quantum Logical Framework** — the theory behind QuantumOS, not a second system
 ([README](https://github.com/rhovision-org/quantum-logical-framework#readme),
@@ -243,6 +245,13 @@ already recognises are in [Room_Best_Practices.md](Room_Best_Practices.md), and
 the [Specialist Room case study](SpecialistRoomCaseStudy.md) is one worked
 through.
 
+**Decision support is the through-line.** EIES was built to help groups make
+decisions, not just exchange messages. QuantumOS carries that forward in
+[rooms](MyRoom.md) and [governance](Governance.md);
+[RhoGov](https://github.com/rhovision-org/rhogov) carries it forward as
+[decisions that learn](https://github.com/rhovision-org/quantum-os/issues/242) —
+a record of what was decided, what was tried, and what happened next.
+
 ## What is deliberately different
 
 **Bound to channels, not to prompt text.** INTERACT was called an interface
@@ -265,14 +274,23 @@ Here the equivalent boundary is holding a capability, which is delegable,
 auditable, and does not require anyone to be trusted with everything. Permission
 delegation has the same symmetry: "by default, user controlled" in both end
 columns. A capability is what that looks like when there is no system directory
-to own. The threat model and what is actually enforced are in
-[SECURITY.md](SECURITY.md).
+to own.
 
-**Peer-to-peer, and durable by choice.** EIES was a host everyone dialled into.
-A QuantumOS room is peer-to-peer and ephemeral by default; what needs to outlive
-the room is deployed to a chain deliberately. The persistence that EIES got for
-free from being a mainframe has to be asked for here — which is a cost, and also
-means no one operator can end the conversation.
+**The security core is proved, and identity is BYOID.** The ZFA invariants at the
+core of the capability model are machine-verified in Lean 4
+([quantum-logical-framework](https://github.com/rhovision-org/quantum-logical-framework)),
+and [SECURITY.md](SECURITY.md) records the threat model and what is not defended.
+Identity is BYOID — bring your own identity — so people bring an identity they
+control, rather than receiving one from a platform or an identity provider. See
+[BYOID](https://github.com/rhovision-org/BYOID).
+
+**Decentralized, and durable by choice.** EIES was a host everyone dialled into.
+EIES2 was already decentralized — distributed Smalltalk was its substrate. A
+QuantumOS room is decentralized peer-to-peer, and what needs to outlive the room
+is deployed to a trustless blockchain,
+[rholo](https://github.com/rhovision-org/rholo), rather than to a host. The
+persistence EIES got for free from being a mainframe has to be asked for here —
+which is a cost, and also means no one operator can end the conversation.
 
 **Where it is going.** The macro language is meant to grow into interactive
 rholang process orchestration. The deck's Web 3.0 row guessed "Rholang,
