@@ -72,6 +72,44 @@ Action is QLF's idea; the ZFA kernel above is its implementation, and a room's
 capabilities are ZFA-valid twist strings rather than arbitrary tokens because of
 it.
 
+## The Omni portrait, 1984
+
+In March 1984, *Omni* published Doug Garr's "Life in the Wired Society," a
+contemporary portrait of EIES at its height. It is useful precisely because it
+is not a retrospective: it catches the system with 1,526 users, eight years in,
+one of the longest-running and most prestigious computer networks in the
+country. The article is not reproduced here; its copyright status is unknown,
+and the email that surfaced it asks that it not be redistributed. What follows
+is a summary, with short quotation, not a copy.
+
+EIES in 1984 was a non-profit, nonadvertised network of academics and serious
+researchers, originally funded by NSF grants and then user-supported at $75 a
+month, still subsidized by NJIT. The machine room was in Weston Hall: a
+Perkin-Elmer 3230 minicomputer, four disk drives that looked like washing
+machines, five programmers in their twenties, and a corner called "the
+graveyard" for dead hardware. The article's Turoff is a forty-seven-year-old
+professor who had been online for more than 25,000 hours, accessed EIES 13,495
+times, taken part in 444 of its 922 conferences, and sent 216 messages in an
+18-day period. The medium was not a side interest.
+
+The security culture the article records is the one this document describes. A
+nineteen-year-old programmer, Bobbie Michie, found several weaknesses in EIES's
+protection code and broke into the top-priority level. The bugs were fixed, and
+Michie was rewarded with higher-level access. Turoff's view was that the
+professional societies should give awards "to people who find easy access to
+systems," so they can call attention to the gaps, rather than threaten them with
+jail. That is the same instinct as the `+addsyscommand` culture described below:
+the boundary was held by the students who had broken the security and then fixed
+it.
+
+The article also records the social side the Network Nation argument depends
+on: Hiltz's research on working at home, the "cognitive bonding" the system
+produced, computer-generated romances, a graffiti bulletin board, and a
+six-month soap opera largely originated by Art Kleiner. Its frame is the "wired
+nation" — an "electronic global village" that fosters a togetherness
+unencumbered by geography — the future *The Network Nation* had already
+described. It is a portrait of a medium, not just a machine.
+
 ## Web 0.1 = Web 3.0
 
 ![A ribbon-cutting on the BBN TIP labelled EIES.](docs/images/eies/eies-tip-ribbon-cutting.jpg)
@@ -355,6 +393,16 @@ via Computer*, by Starr Roxanne Hiltz and Murray Turoff (Addison-Wesley, 1978;
 revised edition, MIT Press, 1993). The 1994 follow-up cited in the deck is David
 Belson, *The Network Nation Revisited* (B.A. thesis, Stevens Institute of
 Technology, 1994), available at [dbelson.com/thesis](https://www.dbelson.com/thesis).
+
+The 1984 portrait is Doug Garr, "Life in the Wired Society," *Omni*, March
+1984, p. 48, photograph by Cameron Davidson. Its copyright status is unknown; it
+is cited here but not reproduced. The issue is in the Internet Archive's
+[Omni collection](https://archive.org/details/omni-archive/OMNI_1984_03); the
+magazine's ownership history is summarized on
+[Wikipedia](https://en.wikipedia.org/wiki/Omni_(magazine)). A cccc-alumni email
+from Marty Lyons (23 October 2026) notes that the original prints hung in the
+EIES office for years, were not used with the article, and that the photographer
+may still have the slides.
 
 Where this document states what INTERACT did and why, the source is Jim
 Whitescarver, who was largely responsible for it along with John Howell, Dave
