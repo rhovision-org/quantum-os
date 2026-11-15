@@ -658,6 +658,8 @@ The room's channels end with the room. These are on chain, in the Channel contra
 | `/channel chain post <name> <text>` | Publish to your channel (signed) |
 | `/channel chain close <name>` | No more posts. What was posted stays readable, and readers are told it was closed rather than gone quiet |
 | `/channel chain allow\|disallow <name> <address>` | Who may read an invite channel. Disallowing stops their future reads |
+| `/channel chain allow\|disallow <name> <address> --write` | Who may post to your channel as well as you. A writer can also read it. Each post shows who wrote it |
+| `/channel chain post <address/name> <text>` | Post to somebody else's channel, if its publisher made you a writer |
 | `/channel chain subscribe <address/name> [--all]` | Follow a channel: from now, or `--all` from the oldest kept post |
 | `/channel chain unsubscribe <address/name>` | Stop following. Only you can end your own subscription |
 | `/channel chain read <address/name> [--all]` | What is new since your last read (50 at a time). Free for an open channel; a signed read, which costs phlo, for an invite one. Where you have read up to is kept per node, shard and contract |
