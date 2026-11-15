@@ -16,6 +16,16 @@ descended from, and which lessons are load-bearing in the current design. It is
 written down because the reasoning behind several decisions here is only legible
 if you know they were decided once already.
 
+The epigraph, figures, and the Web 0.1/Web 3.0 comparison below come from a
+presentation on that legacy, linked under [Primary sources](#primary-sources).
+
+> "Whenever some 'new' feature or system comes out, I usually say to myself and
+> others, 'oh, we had that functionality back on EIES…' People do look at me as
+> if I must be crazy, they do not believe that anything like that existed 'way
+> back when'…"
+>
+> — Starr Roxanne Hiltz
+
 ## The systems
 
 **EIES (1976–)** — computer-mediated conferencing, built under Murray Turoff at
@@ -24,12 +34,26 @@ membership directories, data collection forms, global searches, personal
 indexing. It ran for years and carried real communities: scientific research
 groups, the homebound handicapped, and eventually classrooms.
 
+The deck behind the figures here, *Back to the Network Nation Future: Web 0.1 =
+Web 3.0?*, inventories what EIES had: inquiry networking, decision support,
+groupware, anonymity and screen names, help everywhere, object orientation and
+object-action commands, dynamic text and dynamic interfaces, interface
+tailorability, collaborative dictionaries, SGML forms, hypertext, instant
+messaging, and permission delegation. It reads like a checklist of things later
+rediscovered.
+
 **EIES2 (1980s–90s)** — directed by Jim Whitescarver, implementing distributed
 Smalltalk as a research, development and operational environment for distributed
 CSCW. It supported the Virtual Classroom for years, until funding to maintain it
 ran out. That thread continues here — see the
 [Collaborative Learning case study](CollaborativeLearningCaseStudy.md) and
 [Room Best Practices](Room_Best_Practices.md).
+
+The deck's system row is longer than the EIES, EIES2, and QuantumOS story told
+here: Emisari, EIES1/2, and TEIES. Emisari was Turoff's emergency-management
+system before EIES. TEIES was an IBM CMS prototype implemented alongside EIES2;
+both supported SGML interface definitions and objects — the same SGML-and-object
+lineage that later contributed to HTML and XML.
 
 **QuantumOS** — this repository
 ([README](https://github.com/rhovision-org/quantum-os#readme)). Peer-to-peer
@@ -46,6 +70,44 @@ Action is QLF's idea; the ZFA kernel above is its implementation, and a room's
 capabilities are ZFA-valid twist strings rather than arbitrary tokens because of
 it.
 
+## Web 0.1 = Web 3.0
+
+![A ribbon-cutting on the BBN TIP labelled EIES.](docs/images/eies/eies-tip-ribbon-cutting.jpg)
+
+*A ribbon-cutting on the BBN TIP labelled EIES. Image from the Back to the
+Network Nation Future deck.*
+
+The deck's title is a question, and the answer is mostly yes. EIES was not a
+primitive web; it was a different point on the same curve, with different
+defaults. The deck runs the comparison across eighteen dimensions. The ones
+that matter here are those this project keeps having to argue for:
+
+| dimension | Web 0.1 (EIES) | Web 1.0 | Web 2.0 | Web 3.0 |
+|---|---|---|---|---|
+| Interface | rich, uniform, personalized, radically tailorable | static | dynamic, rich, personalized | dynamic, rich, uniform, personalized, radically tailorable |
+| Authoring | collaborative | mass media, self publishing | collective | collaborative |
+| Privacy | extreme, by default | threatened | basic | extreme, by default |
+| Security | user determined (random question, one-time passwords) | weak, basic | public-private keys | user determined |
+| Permission delegation | by default, user controlled | none | none | by default, user controlled |
+| Participation | by default, facilitated | isolated | by default | by default, facilitated |
+| Group semantics | group structural modeling, ranking, etc. | none | semantic web | collective semantics |
+| Hackability | extreme | none intended | elitist | extreme |
+| Formal language | Interact, ASN.1, SGML | HTML | XML, JavaScript | Rholang, Interact2? |
+
+Read the end columns together. On interface, authoring, privacy, security,
+permission delegation, participation, hackability, and formal language, the
+deck's Web 3.0 is EIES again. The middle columns are the detour. Web 1.0 made
+the page the unit and the publisher the author. Web 2.0 made the platform the
+unit and the crowd the author, but left the platform owner holding the
+authority. The deck's gloss on Web 2.0 is that it "is made of people"; EIES's
+insight was that the people could rewrite the system. That is the difference
+between participation and authorship.
+
+The formal-language row is the one to look at twice. The deck's Web 3.0 entry is
+"Rholang, Interact2?" — the question mark is doing real work, and the guess is a
+fair description of what this repository is trying to build. The rest of this
+document is about which parts of that guess are load-bearing.
+
 ## INTERACT: user programming, and why it matters here
 
 The part of EIES most directly ancestral to this project is INTERACT, its
@@ -59,6 +121,25 @@ Commands were inputs to the system that could read prompts and answer them
 conditionally, matching on the text of the last input to decide what to do next.
 Many commands never touched the system at all and were simply programs.
 
+**The command was the unit of the interface language.** A command was a verb,
+an object, and data, and it was an input like any other: a user could type one,
+and a command could read the prompt and answer it. The help screen said so
+plainly:
+
+![The COMMANDS help screen: a command was a verb, an object, and data.](docs/images/eies/interact-commands.png)
+
+*The `COMMANDS` help screen. `GM 1130` was `GET MESSAGE 1130`. Image from the
+Back to the Network Nation Future deck.*
+
+The vocabulary was combinatorial — one verb from column A, one object from
+column B — which is why it could grow without the interface being redesigned.
+The manual's phrase for this was "a 'chinese version' of menu selection":
+
+![The COMMAND ABBREVIATION TABLE.](docs/images/eies/interact-command-table.png)
+
+*The command abbreviation table. Image from the Back to the Network Nation
+Future deck.*
+
 Most commands were written by users, or by group effort — tailoring a group's
 communication structures, defining its roles, or simply adding utility.
 
@@ -70,6 +151,17 @@ Murray Turoff on what that bought:
 > Besides different languages I remember one interface was an English butler and
 > another swore at the user that wrote it. We had dynamic text before any other
 > major applications of it.
+
+The tailorable interface extended to forms. TEIES — the IBM CMS prototype built
+alongside EIES2 — defined forms in SGML: fields, prompts, padding, and database
+variables in one source, so the form a user saw was produced by text rather than
+by a separate form builder:
+
+![A TEIES object-create form definition in SGML.](docs/images/eies/teies-form-definition.png)
+
+*A TEIES object-create form definition in SGML: fields, prompts, padding, and
+database variables in one source. Image from the Back to the Network Nation
+Future deck.*
 
 An R&D machine for communication processes is the point: tailorability was not a
 convenience feature, it was the instrument. What happened next is the interesting
@@ -122,7 +214,9 @@ EIES model — it is the EIES model with the suid bit sharpened into an object.
 
 **User programming is the point, not a feature.** EIES's command library was
 written by its users, not its authors. A system where only the maintainers can
-extend the vocabulary gets the vocabulary its maintainers imagined. The current
+extend the vocabulary gets the vocabulary its maintainers imagined. The deck
+calls this "hackability: extreme" and puts it in both the Web 0.1 and Web 3.0
+columns; the middle columns are "none intended" and "elitist". The current
 library is [RChain_Macros.md](RChain_Macros.md) — deprecated, and being
 redesigned in [#65](https://github.com/rhovision-org/quantum-os/issues/65)
 around exactly this; [RhoQuCalc_Macros.md](RhoQuCalc_Macros.md) is the qucalc
@@ -168,8 +262,11 @@ reaches a chain at all — see [RChain_Macros.md](RChain_Macros.md) and the
 
 **No superusers.** EIES's system command directory was gated by people with root.
 Here the equivalent boundary is holding a capability, which is delegable,
-auditable, and does not require anyone to be trusted with everything. The
-threat model and what is actually enforced are in [SECURITY.md](SECURITY.md).
+auditable, and does not require anyone to be trusted with everything. Permission
+delegation has the same symmetry: "by default, user controlled" in both end
+columns. A capability is what that looks like when there is no system directory
+to own. The threat model and what is actually enforced are in
+[SECURITY.md](SECURITY.md).
 
 **Peer-to-peer, and durable by choice.** EIES was a host everyone dialled into.
 A QuantumOS room is peer-to-peer and ephemeral by default; what needs to outlive
@@ -178,8 +275,39 @@ free from being a mainframe has to be asked for here — which is a cost, and al
 means no one operator can end the conversation.
 
 **Where it is going.** The macro language is meant to grow into interactive
-rholang process orchestration. Template expansion is the seed, not the
-destination.
+rholang process orchestration. The deck's Web 3.0 row guessed "Rholang,
+Interact2?" — this is the Interact2 half of that guess, with rholang underneath.
+Template expansion is the seed, not the destination.
+
+## The Network Nation, revisited
+
+Hiltz and Turoff published *The Network Nation: Human Communication via
+Computer* in 1978, and revised it in 1993. It is the book-length version of the
+claim this document is making: the important thing about a computer network is
+not the computers but the human communication structures it can support. The
+deck cites David Belson's 1994 follow-up: about half of the predictions had been
+realized after sixteen years, and almost all are realized now.
+
+The predictions that matter here are the ones about groups, not gadgets:
+
+> It will be a prominent form of communications in most organizations, it will
+> be as widely used in society as the telephone today. … It will become a
+> fundamental mechanism for individuals to form groups having common concerns,
+> interests or purposes. … It will facilitate a richness and variability of
+> human groupings and relationships almost impossible to comprehend. It will
+> dramatically alter the nature of social science research concerned with the
+> study of human systems and human communication processes — enabling collective
+> intelligence, Science 2.0 = Web 3.0?
+
+That last prediction is the one this project is betting on. If the medium
+changes how groups think, then the medium is the instrument, and designing it is
+the research. That is why the unit here is a room and not a feed: a room is
+small enough for a group to shape, and durable enough, when it needs to be, to
+outlive the group that shaped it.
+
+![EIES reunion, 2005.](docs/images/eies/eies-reunion-2005.jpg)
+
+*EIES reunion, 2005. Image from the Back to the Network Nation Future deck.*
 
 ## Primary sources
 
@@ -198,11 +326,24 @@ NJIT's CCCC report series, in the university's digital repository:
 Also: [the CCCC report index](https://digitalcommons.njit.edu/ccccreports/),
 [NJIT's EIES history page](https://archives.njit.edu/vhlib/cccc-materials/cccc-old-content/eies/eieshist.html),
 and further publications on
-[Jim Whitescarver's LinkedIn](https://www.linkedin.com/in/jimscarver/).
+[Jim Whitescarver's LinkedIn](https://www.linkedin.com/in/jimscarver/). The
+[*Back to the Network Nation Future* deck](https://docs.google.com/presentation/d/1GUXJ50bRlWHZ0245xZwSdAzXwVfWDS4QkDp-q-NeBAQ)
+is the source for the Web 0.1/1.0/2.0/3.0 comparison, the EIES innovation list,
+and the Network Nation predictions quoted above; the images are reproduced from
+it.
+
+The book behind those predictions is *The Network Nation: Human Communication
+via Computer*, by Starr Roxanne Hiltz and Murray Turoff (Addison-Wesley, 1978;
+revised edition, MIT Press, 1993). The 1994 follow-up cited in the deck is David
+Belson, *The Network Nation Revisited* (B.A. thesis, Stevens Institute of
+Technology, 1994), available at [dbelson.com/thesis](https://www.dbelson.com/thesis).
 
 Where this document states what INTERACT did and why, the source is Jim
 Whitescarver, who was largely responsible for it along with John Howell, Dave
-Harvy and Al Leurck. The reports are the record; he is the primary source.
+Harvy and Al Leurck. The reports are the record; he is the primary source. The
+TEIES/EIES2 details — the IBM CMS prototype, the shared SGML interface
+definitions and objects, and the line into HTML and XML — come from the same
+primary source.
 
 ## Where to go from here
 
@@ -224,4 +365,4 @@ If you are picking up this project, in order:
 
 *The argument for capabilities in
 [#65](https://github.com/rhovision-org/quantum-os/issues/65) is the one to read
-first. It is a forty-year-old result.*
+first. It is a fifty-year-old result.*
