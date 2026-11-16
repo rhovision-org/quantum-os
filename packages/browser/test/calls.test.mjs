@@ -367,5 +367,103 @@ permission = "prompt";
   check("a fresh call re-checks", crossings() === once + 1, saidR.join(" | "));
 }
 
+// --- speaker view -----------------------------------------------------------
+// Who is shown large, who sits beside them, and who drops underneath. The
+// arrangement is a pure function so it is asserted directly; then once through
+// the tiles, since a right answer that never reaches a class is no answer.
+{
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const st = (keys, opts) => mod.arrangeStage(keys, { local: "me", ...opts });
+
+  check("alone, you are your own main video",
+        eq(st(["me"]), { main: "me", side: [], below: [] }), JSON.stringify(st(["me"])));
+  check("with one other person, they are large and you are beside them",
+        eq(st(["me", "a"]), { main: "a", side: ["me"], below: [] }), JSON.stringify(st(["me", "a"])));
+  check("whoever is talking is the main video",
+        st(["me", "a", "b"], { speaker: "b" }).main === "b", JSON.stringify(st(["me", "a", "b"], { speaker: "b" })));
+  check("a pin beats the speaker",
+        st(["me", "a", "b"], { speaker: "b", pinned: "a" }).main === "a", "");
+  check("you can pin yourself", st(["me", "a"], { pinned: "me" }).main === "me", "");
+  check("a pin or speaker who has left is ignored",
+        st(["me", "a"], { speaker: "gone", pinned: "gone" }).main === "a", "");
+  const five = st(["me", "a", "b", "c", "d"], { speaker: "a" });
+  check("at most three sit beside the main video", eq(five.side, ["me", "b", "c"]), JSON.stringify(five));
+  check("anyone past three goes below it", eq(five.below, ["d"]), JSON.stringify(five));
+  check("nobody is shown twice or dropped",
+        eq([five.main, ...five.side, ...five.below].sort(), ["a", "b", "c", "d", "me"]), JSON.stringify(five));
+
+  // The speaker: sticky through silence, and not stolen by one loud moment.
+  const t = mod.speakerTracker(0.03, 2);
+  const lv = (o) => new Map(Object.entries(o));
+  check("silence names nobody", t.update(lv({ a: 0.001, b: 0 })) === null, "");
+  t.update(lv({ a: 0.2, b: 0 }));
+  check("a voice has to hold before it takes over", t.update(lv({ a: 0.2, b: 0 })) === "a", String(t.current()));
+  check("the last speaker stays up through silence", t.update(lv({ a: 0, b: 0 })) === "a", String(t.current()));
+  check("one loud moment from someone else changes nothing", t.update(lv({ a: 0, b: 0.3 })) === "a", String(t.current()));
+  t.update(lv({ a: 0, b: 0 }));
+  t.update(lv({ a: 0, b: 0.3 }));
+  check("a sustained voice does", t.update(lv({ a: 0, b: 0.3 })) === "b", String(t.current()));
+  t.drop("b");
+  check("a speaker who leaves is forgotten", t.current() === null, String(t.current()));
+
+  // Through the tiles.
+  const bar = el(), tilesS = el(), viewBtn = el(), fullBtn = el();
+  const sPeer = {
+    peerId: "s0", addLocalMedia() {}, removeLocalMedia() {}, broadcast() {},
+    videoSenders() { return []; }, pinNeighbor() {}, unpinNeighbor() {},
+  };
+  const sCalls = mod.createCalls(
+    { peer: () => sPeer, say() {}, label: (id) => id, isAgent: () => false, roomPeers: () => [], mediaBlocked: () => [] },
+    { bar, tiles: tilesS, mute: el(), cam: el(), share: el(), view: viewBtn, full: fullBtn },
+  );
+  const tile = (key) => tilesS.children.find((c) => c.dataset.key === key && c.parent);
+  const has = (key, cls) => tile(key)?.classList.contains(cls) ?? false;
+  const cam = (n) => new Stream([new Track("audio", n + "-voice"), new Track("video", n + "-cam")]);
+
+  check("the grid is the default view", sCalls.view() === "grid", sCalls.view());
+  sCalls.toggle();
+  await settle();
+  for (const n of ["a", "b", "c", "d"]) sCalls.remoteStream(n, cam(n));
+  check("in the grid, no tile is staged", !has("a", "stage-main") && !tilesS.classList.contains("speaker"), "");
+
+  sCalls.setView("speaker");
+  check("speaker view marks the tile container", tilesS.classList.contains("speaker"), tilesS.className);
+  check("the first other person is the main video", has("a", "stage-main"), tile("a")?.className);
+  check("you are a thumbnail beside it", has("__local__", "stage-side"), tile("__local__")?.className);
+  check("three beside, in rows 1–3",
+        ["__local__", "b", "c"].map((k) => tile(k).style.gridRow).join() === "1,2,3",
+        ["__local__", "b", "c"].map((k) => tile(k).style.gridRow).join());
+  check("the fifth goes below", has("d", "stage-below") && tile("d").style.gridRow === "", tile("d")?.className);
+
+  tile("d").fire("click");
+  check("clicking a thumbnail makes it the main video", has("d", "stage-main") && has("d", "pinned"), tile("d")?.className);
+  check("and the old main becomes a thumbnail", has("a", "stage-side"), tile("a")?.className);
+  tile("d").fire("click");
+  check("clicking it again lets go of the pin", has("a", "stage-main") && !has("d", "pinned"), tile("a")?.className);
+
+  tile("b").fire("click");
+  sCalls.peerGone("b");
+  check("a pinned person leaving hands the main video on", has("a", "stage-main"), tile("a")?.className);
+  check("and the row below closes up", has("d", "stage-side"), tile("d")?.className);
+
+  sCalls.toggleView();
+  check("back in the grid, nothing is left staged",
+        !tilesS.classList.contains("speaker") && !has("a", "stage-main") && tile("c").style.gridRow === "", tile("a")?.className);
+  check("the view button says what it will switch to", viewBtn.dataset.label === "Speaker view", viewBtn.dataset.label);
+
+  // Full screen is the bar, so the controls come with it.
+  sCalls.toggleFull();
+  check("full screen fills the window with the call bar, controls included",
+        bar.classList.contains("call-full"), bar.className);
+  check("the button offers the way back", fullBtn.dataset.label === "Exit full screen", fullBtn.dataset.label);
+  docHandlers.keydown?.({ key: "Escape" });
+  check("Esc leaves it", !bar.classList.contains("call-full"), bar.className);
+  sCalls.toggleFull();
+  for (const n of ["a", "c", "d"]) sCalls.peerGone(n);
+  sCalls.toggle();              // hang up: nobody left, the bar hides
+  check("a call that ends does not leave the window covered",
+        bar.hidden && !bar.classList.contains("call-full"), `hidden=${bar.hidden} ${bar.className}`);
+}
+
 console.log(failed === 0 ? "\ncalls: all passed" : `\ncalls: ${failed} FAILED`);
 process.exit(failed ? 1 : 0);

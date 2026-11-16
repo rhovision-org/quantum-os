@@ -36,6 +36,7 @@ import { parseDefinition, parseInvocation, expandCommand, expandCallSites,
          formatDefinition, findMacros, bodyKind, MacroError,
          MACRO_NAME_RE, MAX_BODY } from "./macro-lang.js";
 import { createCalls, type Calls } from "./calls.js";
+import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
 import { hashBlob, entryFromWire, sortEntries, findEntry, describeEntry, shortHash,
          putBytes, getBytes, dropBytes, heldHashes, availabilityOf, AVAILABILITY_MARK, atRisk,
@@ -8689,14 +8690,17 @@ async function connect(): Promise<void> {
  * earlier lines live until it is sent.
  */
 let pendingLines: string[] = [];
-const MSG_PLACEHOLDER = msgInput.placeholder;
+const MSG_PLACEHOLDER_FULL = msgInput.placeholder;
+/** What the empty composer says — plainer at geek level "low". */
+const msgPlaceholder = (): string =>
+  readGeekLevel() === "low" ? "Message the room…" : MSG_PLACEHOLDER_FULL;
 
 /** Show how many lines are held, so a half-entered message is never invisible. */
 function paintPending(): void {
   const n = pendingLines.length;
   msgInput.placeholder = n
     ? `${n} line${n === 1 ? "" : "s"} held · Shift+Enter for another · Enter sends · Esc discards`
-    : MSG_PLACEHOLDER;
+    : msgPlaceholder();
   msgInput.classList.toggle("continued", n > 0);
 }
 
@@ -8823,6 +8827,17 @@ function updateShareLink(): void {
     ? "Reveal the room capability (it goes back into the address bar)"
     : "Hide the room capability — keep it off screen shares and recordings";
 }
+
+// Geek level "low" shows one button in place of the share row's link, copy and
+// reveal controls. It copies the same URL the copy button does.
+const inviteBtn = document.getElementById("invite-btn") as HTMLButtonElement | null;
+inviteBtn?.addEventListener("click", () => {
+  const label = inviteBtn.textContent;
+  navigator.clipboard.writeText(roomUrl()).then(() => {
+    inviteBtn.textContent = "✓ Link copied — send it to someone";
+    setTimeout(() => { inviteBtn.textContent = label; }, 2000);
+  });
+});
 
 copyBtn.addEventListener("click", () => {
   navigator.clipboard.writeText(roomUrl()).then(() => {
@@ -8982,7 +8997,22 @@ function showWelcome(): void {
     "<li>Use the <strong>action buttons</strong> above, or type <code>/</code> to browse every command.</li>" +
     "</ol>" +
     "<div class=\"tip\">Capabilities, lemmas, promissory notes and atomic swaps are all one click — or one slash — away.</div>";
+  div.classList.add("geek-med");
   messagesEl.appendChild(div);
+  // The same welcome for geek level "low": both are in the page and CSS shows
+  // the one that matches, so switching level needs no re-render.
+  const plain = document.createElement("div");
+  plain.className = "welcome geek-low";
+  plain.innerHTML =
+    "<h3>👋 Welcome</h3>" +
+    "This is a private room. Nothing is stored on a server — it lives with the people in it." +
+    "<ol>" +
+    "<li>Type <strong>your name</strong> on the left.</li>" +
+    "<li>Press <strong>Connect</strong>.</li>" +
+    "<li>Press <strong>Copy invite link</strong> above and send it to whoever you want here.</li>" +
+    "<li>Chat below, or press <strong>Call</strong> to talk face to face.</li>" +
+    "</ol>";
+  messagesEl.appendChild(plain);
 }
 
 function initUx(): void {
@@ -9105,6 +9135,8 @@ function initUx(): void {
       mute:  document.getElementById("call-mute")  as HTMLButtonElement | null,
       cam:   document.getElementById("call-cam")   as HTMLButtonElement | null,
       share: document.getElementById("call-share") as HTMLButtonElement | null,
+      view:  document.getElementById("call-view")  as HTMLButtonElement | null,
+      full:  document.getElementById("call-full")  as HTMLButtonElement | null,
     },
   );
   recorder = createRecorder(
@@ -9155,6 +9187,17 @@ function initUx(): void {
   document.getElementById("call-mute")?.addEventListener("click", () => calls.toggleMute());
   document.getElementById("call-cam")?.addEventListener("click", () => calls.toggleCam());
   document.getElementById("call-share")?.addEventListener("click", () => calls.toggleScreen());
+  document.getElementById("call-view")?.addEventListener("click", () => calls.toggleView());
+  document.getElementById("call-full")?.addEventListener("click", () => calls.toggleFull());
+
+  // Geek level: CSS does most of it (index.html, keyed on <html data-geek>);
+  // this is the part CSS cannot reach. "low" opens calls in speaker view —
+  // the view button still switches, the level only sets where it starts.
+  const applyGeek = (level: GeekLevel) => {
+    calls.setView(level === "low" ? "speaker" : "grid");
+    paintPending();
+  };
+  applyGeek(mountGeekToggle(document.getElementById("geek-toggle"), applyGeek).level());
 }
 
 // ---------------------------------------------------------------------------
