@@ -187,6 +187,8 @@ durable cross-room state. See [`../../Room_Bridges.md`](../../Room_Bridges.md).
 ```bash
 node selftest.mjs        # ZFA: 200 peer caps + closure facts + parseTwists
 node dyncap.selftest.mjs # dyncap: sign→verify chain, canonicalization, fork detection, state round-trip
+node facilitator-faq.mjs --selftest          # /facil ask answers QOS/decision basics without AI
+node facilitator-advisor.selftest.mjs        # advisor failures surface (incl. a Claude session limit)
 ```
 
 The dyncap suite proves the signing port matches the browser byte-for-byte
@@ -413,8 +415,12 @@ Agents are **rated/governed, not raters** — they don't autonomously `/gov trus
 
 **Telling it's there / commands.** Because it's mostly silent, say `/facil` (or
 "anyone here?", or just "hi") and it replies — that's how you confirm it's
-present. `/facil help` lists what it does; `/facil ask <question>` gets a brief AI
-answer about the room, facilitation, or decisions (needs `--ai`); `/facil optimize
+present. `/facil help` lists what it does; `/facil ask <question>` answers basics
+about QuantumOS and group decisions **without** `--ai` (from the deterministic
+[`facilitator-faq.mjs`](facilitator-faq.mjs)), and sends open-ended questions to
+the AI advisor when `--ai` is on. If the AI backend is unavailable — no key, a
+Claude session limit, a logged-out CLI — the reply names that reason instead of
+claiming it has no answer. `/facil optimize
 <objective + constraints>` facilitates an annealing-style optimization round —
 proposes candidates and the next `/estimate`/`/poll` step (needs `--ai`; see
 [`Collective_Optimization.md`](../../Collective_Optimization.md)); `/facil chair
@@ -545,6 +551,14 @@ functional without it. Two backends (`--ai-backend`):
   **Claude subscription** (Pro/Max) instead of API credits. Requires the `claude` CLI
   installed and logged in (`claude` once interactively to authenticate). No key needed:
   `node facilitator.mjs --room <…> --ai --ai-backend claude-code`.
+
+`/facil ask` basics about QuantumOS and group decisions are answered by
+[`facilitator-faq.mjs`](facilitator-faq.mjs) without either backend. When the
+backend itself fails — no key, a network error, a logged-out CLI, or a Claude
+session limit — the advisor records the real reason in `lastError` and the agent
+says it instead of falling back to "I don't have a good answer." A Claude session
+limit is reported with its reset time (e.g. *"You've hit your session limit ·
+resets 3:10pm"*).
 
 **Measured disruption** is enforced by a post budget (`--budget` per 5-min
 window), a minimum gap between posts, per-behaviour cooldowns, a fair-share check

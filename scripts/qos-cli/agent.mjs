@@ -31,6 +31,7 @@ import { generateCapability, validateCapability, parseTwists,
          achievesZfa, achievesZfaPairwise, signedAction, CENSUS_ADMITTED } from "./zfa.mjs";
 import { newDynCapState, signEnvelope, serializeState, deserializeState } from "./dyncap.mjs";
 import { makeAdvisor } from "./facilitator-advisor.mjs";
+import { answerFromKnowledge } from "./facilitator-faq.mjs";
 import { createGameRecorder, compactForPrompt, trustWeightsFromGroups } from "./game-log.mjs";
 import { ROLES, DEFAULT_ROLE, resolveRole, dutiesOf } from "./agent-roles.mjs";
 import { trustLevels, discreditedMembers, isMember, groupHasRatings, normalizeGroup, TRUST_MAX } from "./gov.mjs";
@@ -312,6 +313,9 @@ export async function run(args) {
   }
 
   const advisor = makeAdvisor({ ai: args.ai, backend: args.aiBackend, model: args.aiModel, persona: role.persona, roleName: role.name, cmd: CMD, faucetActive: !!facilKey, log: console.log });
+  const aiFailure = () => advisor.lastError
+    ? `My AI backend is unavailable right now — ${advisor.lastError.slice(0, 240)}.`
+    : "My AI backend didn't answer.";
 
   // ---- identity (stable across restarts), mirroring qos-daemon.mjs ----
   const stateDir = args.state ?? "./.qos-agent";
@@ -520,11 +524,14 @@ export async function run(args) {
     }
   }
 
-  const askHint = advisor.enabled ? "" : " (needs --ai)";
+  const aiHint = advisor.enabled ? "" : " (needs --ai)";
+  const askHint = advisor.enabled
+    ? " (QOS/decision basics or open-ended)"
+    : " (QOS/decision basics; open-ended needs --ai)";
   const faucetHint = facilKey ? ` · \`/${CMD} faucet\` (sends ${FAUCET_REV} TEST REV to your own address, which your browser fills in; pass one to override — test systems only)` : "";
-  const helpText = () => `I'm ${myName}, ${role.blurb} Commands: \`/${CMD}\` (am I here?) · \`/${CMD} help\` · \`/${CMD} ask <question>\`${askHint} · \`/${CMD} optimize <problem>\`${askHint} (facilitate an annealing-style optimization round) · \`/${CMD} chair <topic>\`${askHint} (chair a structured deliberation → define · alternatives · evaluate · disagreements · agreements · closure, then record the decision; \`/${CMD} next\`/\`back\`/\`close\`/\`cancel\` to steer) · \`/${CMD} start <label> [payoffs a,b,c,d] [stag=…] [hare=…] [predict: …]\` / \`/${CMD} stop\` (record a live game: every poll, estimate, lemma and message, timestamped and signed → a structured record; \`/${CMD} games\`, \`/${CMD} summarize\`${askHint}, \`/${CMD} publish\`) · \`/${CMD} list [n]\` (the room's screen history, oldest→newest — default 25, max 500) · \`/${CMD} trust\` (my standing) · \`/${CMD} health\` (uptime, peers, budget, CPU) · \`/${CMD} off\` / \`/${CMD} on\` (mute/unmute)${faucetHint}. I'm a full member — \`/gov trust\` me up or \`/gov censure\` me down. About this room (and how to make your own): ${ABOUT_URL}`;
+  const helpText = () => `I'm ${myName}, ${role.blurb} Commands: \`/${CMD}\` (am I here?) · \`/${CMD} help\` · \`/${CMD} ask <question>\`${askHint} · \`/${CMD} optimize <problem>\`${aiHint} (facilitate an annealing-style optimization round) · \`/${CMD} chair <topic>\`${aiHint} (chair a structured deliberation → define · alternatives · evaluate · disagreements · agreements · closure, then record the decision; \`/${CMD} next\`/\`back\`/\`close\`/\`cancel\` to steer) · \`/${CMD} start <label> [payoffs a,b,c,d] [stag=…] [hare=…] [predict: …]\` / \`/${CMD} stop\` (record a live game: every poll, estimate, lemma and message, timestamped and signed → a structured record; \`/${CMD} games\`, \`/${CMD} summarize\`${aiHint}, \`/${CMD} publish\`) · \`/${CMD} list [n]\` (the room's screen history, oldest→newest — default 25, max 500) · \`/${CMD} trust\` (my standing) · \`/${CMD} health\` (uptime, peers, budget, CPU) · \`/${CMD} off\` / \`/${CMD} on\` (mute/unmute)${faucetHint}. I'm a full member — \`/gov trust\` me up or \`/gov censure\` me down. About this room (and how to make your own): ${ABOUT_URL}`;
   const statusText = () => `👋 Yes, I'm here — ${myName} (${role.name})${muted ? ` — currently muted (\`/${CMD} on\` to wake me)` : ""}.${standing.governed ? ` Trust ${standing.level}${standing.discredited ? " — stood down" : ` (≤${standing.budget}/5min)`}.` : ""} \`/${CMD} help\` · \`/${CMD} trust\`.`;
-  const introText = () => `Hi — I'm ${myName}, ${role.blurb} Say \`/${CMD}\` or \`/${CMD} help\` to reach me${advisor.enabled ? `, or \`/${CMD} ask <q>\` to ask me anything` : ""}. I'm a full room member — \`/gov trust\`/\`/gov censure\` me; \`/${CMD} trust\` shows my standing. About this room: ${ABOUT_URL}`;
+  const introText = () => `Hi — I'm ${myName}, ${role.blurb} Say \`/${CMD}\` or \`/${CMD} help\` to reach me, or \`/${CMD} ask <q>\` for QuantumOS/decision basics${advisor.enabled ? " or anything else" : " (open-ended questions need `--ai`)"}. I'm a full room member — \`/gov trust\`/\`/gov censure\` me; \`/${CMD} trust\` shows my standing. About this room: ${ABOUT_URL}`;
   // Self-introduce to a newly-identified human peer, once per peer per run (direct
   // message, so existing members aren't re-pinged each time someone joins).
   function introduceTo(id) {
@@ -588,11 +595,24 @@ export async function run(args) {
       await handleFaucet(addrMatch ? addrMatch[0] : "", fromId);
       return;
     }
-    if (!advisor.enabled) { reply(`I'd need AI mode for that — start me with \`--ai\` (\`--ai-backend claude-code\` to use a Claude subscription, or set \`ANTHROPIC_API_KEY\`). For now, \`/${CMD} help\` lists what I do.`, "asknoai", 20_000); return; }
+    // Basic QuantumOS / decision-process questions are answered from the
+    // built-in knowledge base, so an AI outage or a Claude session limit does
+    // not turn "what is /poll?" into "I don't have a good answer."
     if (!cooled("ask", 6_000)) return;
     cooldown.set("ask", Date.now());
+    const known = answerFromKnowledge(q, { cmd: CMD });
+    if (known) { reply(known, null, 0); return; }
+    if (!advisor.enabled) {
+      reply(`I can answer basics about QuantumOS and group decisions without AI, but that one needs AI mode — start me with \`--ai\` (\`--ai-backend claude-code\` for a Claude subscription, or set \`ANTHROPIC_API_KEY\`). Try \`/${CMD} ask what is /poll\` or \`/${CMD} help\` for commands.`, "asknoai", 20_000);
+      return;
+    }
     const text = await advisor.advise("ask", { question: q, transcript: recentMsgs.slice(-12).map((mm) => ({ name: mm.name, text: mm.text })) });
-    reply(text || `Hmm, I don't have a good answer to that one. \`/${CMD} help\` for what I can do.`, null, 0);
+    if (text) { reply(text, null, 0); return; }
+    if (advisor.lastError) {
+      reply(`${aiFailure()} I can still answer basics about QuantumOS and group decisions; try \`/${CMD} ask what is /poll\` or \`/${CMD} help\`.`, null, 0);
+      return;
+    }
+    reply(`Hmm, I don't have a good answer to that one. \`/${CMD} help\` for what I can do.`, null, 0);
   }
   // Facilitate one step of a collective-optimization round (the room as a quantum-
   // annealing-style optimizer). Stateless: re-reads the recent discussion each call,
@@ -604,7 +624,7 @@ export async function run(args) {
     if (!cooled("optimize", 6_000)) return;
     cooldown.set("optimize", Date.now());
     const text = await advisor.advise("optimize", { problem, transcript: recentMsgs.slice(-16).map((mm) => ({ name: mm.name, text: mm.text })) });
-    reply(text || `Hmm, I couldn't frame that one. Try \`/${CMD} optimize <objective + constraints>\`.`, null, 0);
+    reply(text || `${advisor.lastError ? aiFailure() : "Hmm, I couldn't frame that one."} Try \`/${CMD} optimize <objective + constraints>\`.`, null, 0);
   }
 
   // ---- game recording (`/<cmd> start … | stop | status | summarize | publish | games`) ----
@@ -657,7 +677,7 @@ export async function run(args) {
     cooldown.set("gamesummary", Date.now());
     reply(`✍️ Summarizing **${latest.record.label}** (${latest.record.events} events)…`, null, 0);
     const text = await advisor.advise("gamesummary", { record: compactForPrompt(latest.record) });
-    if (!text) { reply(`Hmm, the summary didn't come back. The record is still on disk: \`${latest.entry.file}\`.`, null, 0); return; }
+    if (!text) { reply(`${advisor.lastError ? aiFailure() : "Hmm, the summary didn't come back."} The record is still on disk: \`${latest.entry.file}\`.`, null, 0); return; }
     const p = games.writeSummary(latest.record, text);
     lastSummary = { path: p, text, label: latest.record.label };
     console.log(`${TAG} game: summary → ${p}`);
