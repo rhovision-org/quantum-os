@@ -84,7 +84,21 @@ export async function readCharterIssue(nodeUrl, issueUri, charterHash) {
   if (!/^rho:id:[a-z0-9]+$/.test(issueUri)) throw new Error("invalid Issue contract URI");
   const term = rgov.readProgram(issueUri, "issueOf", [JSON.stringify(id)]);
   const result = await explore(nodeUrl, term);
-  if (result.values.length !== 1) throw new Error("Issue/4 did not return exactly one value");
+  if (result.values.length === 0) {
+    // A missing Issue is represented by Nil, whose explore result has no
+    // expressions on Rholo. Distinguish that from a missing/broken contract:
+    // only a verified Issue/4 "issues" list authorizes absence.
+    const probe = await explore(nodeUrl, rgov.readProgram(issueUri, "issues", []));
+    if (probe.values.length !== 1 || !Array.isArray(probe.values[0])) {
+      throw new Error("Issue/4 contract presence not proven; refusing absence claim");
+    }
+    if (probe.values[0].includes(id)) {
+      throw new Error("Issue id indexed but issueOf returned Nil; inconsistent read");
+    }
+    return {raw:null, readAt:result.readAt, block:result.block,
+            observedBlockHash:result.observedHash};
+  }
+  if (result.values.length !== 1) throw new Error("Issue/4 returned multiple values");
   const entry = result.values[0];
   if (Array.isArray(entry) && entry[0] === "gov-error") throw new Error("RhoGov read: " + String(entry[1]));
   const raw = entry === null || entry === "Nil" ? null : entry;
