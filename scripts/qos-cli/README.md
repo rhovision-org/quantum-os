@@ -432,7 +432,9 @@ about QuantumOS and group decisions **without** `--ai` (from the deterministic
 [`facilitator-faq.mjs`](facilitator-faq.mjs)), and sends open-ended questions to
 the AI advisor when `--ai` is on. If the AI backend is unavailable — no key, a
 Claude session limit, a logged-out CLI — the reply names that reason instead of
-claiming it has no answer. `/facil optimize
+claiming it has no answer. The FAQ also covers `/goal` and the success
+frameworks, the QOS process table, current RhoQu limits, and the AI assistant
+boundary. `/facil optimize
 <objective + constraints>` facilitates an annealing-style optimization round —
 proposes candidates and the next `/estimate`/`/poll` step (needs `--ai`; see
 [`Collective_Optimization.md`](../../Collective_Optimization.md)); `/facil chair
