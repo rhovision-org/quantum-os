@@ -79,6 +79,16 @@ jobs:
       - name: Capability macro selftest
         run: node scripts/qos-cli/rholang-macros.mjs --selftest
 
+      # `/facil ask` must answer QuantumOS/decision basics without the AI
+      # backend, and a Claude session limit must be surfaced (not swallowed
+      # into "I don't have a good answer"). The advisor test uses a fake CLI,
+      # so CI needs no `claude` login or subscription.
+      - name: Facilitator FAQ selftest
+        run: node scripts/qos-cli/facilitator-faq.mjs --selftest
+
+      - name: Facilitator advisor error selftest
+        run: node scripts/qos-cli/facilitator-advisor.selftest.mjs
+
       # The faucet's HTTP face (faucet-http.mjs) against a stub send — the
       # per-address cooldown, the per-client hourly cap, X-Forwarded-For as
       # the client, the JSON/CORS shape a wallet codes against. Dependency-
