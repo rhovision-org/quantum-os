@@ -49,6 +49,7 @@ QLF slash commands:
   /ps              — QOS process table (pid · name · state · events · owner)
   /kill <name|id>  — terminate a QOS process you own (owner-only alias)
   /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)
+  /goal [sub]      — private personal goals: add · list · done · review · share
   /probe [sub]     — joiner-local consensus probe (status|clear)
   /room [sub]      — multi-room tabs (list|join <cap>|leave|ref)
   /share <sel> to <room>  — bridge a lemma/chat/note into another tab
@@ -561,6 +562,28 @@ See [MultisigDemo.md](../MultisigDemo.md) for a worked example combining `/dynca
 ### `/ask <question>`
 
 Finds a **live** AI agent in the room and relays `/<role> ask <question>` as chat. Preference is the **facilitator** (`/facil ask …`) when one is present; otherwise the lowest-peer-id other present agent. The agent badge cache is filtered by the live peer roster, so a departed agent is not chosen. If no agent is present, it says so and sends nothing — it never pretends to have an answer locally. The chosen agent is addressed by its role prefix; the line is still room chat, so every peer sees it. The browser only picks the agent; it does not vouch for it, and the agent answers for itself.
+
+### `/goal [sub]`
+
+Private personal goals for the success framework. The store is keyed by the
+current dyncap anchor (`qos-goals:<anchor>`); a different identity sees a
+different list. `/goal` never broadcasts: `list`, `add`, `done`, `review`, and
+`remove` are local-only. `/goal share <id>` is the only network path; it sends
+one goal as a signed `goal-share` envelope, which receiving peers verify against
+the sender's dyncap before displaying.
+
+| Subcommand | Effect |
+|---|---|
+| `/goal add <text> [| priority]` | Add a private goal. Priority is `urgent-important` (alias `both`), `important` (default), `urgent`, or `neither`. |
+| `/goal list` (or just `/goal`) | Show this identity's goals with ids, status, and priority. |
+| `/goal done <id>` | Mark a goal done; the completion time stays local. |
+| `/goal review` | Show open/done counts and the open list. |
+| `/goal remove <id>` | Delete a goal. |
+| `/goal share <id>` | Explicitly share one goal into the room; no other goal is sent. |
+
+A corrupt or unavailable local store starts empty for the session rather than
+breaking the room. See [success-frameworks.md](success-frameworks.md) and
+`test/goal-store.test.mjs`.
 
 ### `/qos [sub]`
 
