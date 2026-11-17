@@ -4092,7 +4092,7 @@ function handleCommand(raw: string): string[] {
               sys("the ratification poll must contain exactly 'approve' and 'reject' options"); break;
             }
             const weights = govWeights(g, iss, poll);
-            const count = tally(poll, weights);
+            const count = tallyApproval(poll, weights);
             const y = count.counts[yes.id] ?? 0, n = count.counts[no.id] ?? 0;
             if (count.totalBallots <= 0 || y <= n || y * 2 <= count.totalBallots) {
               sys("no ratified approval: requires a closed poll with a strict approving majority"); break;
@@ -4175,7 +4175,7 @@ function handleCommand(raw: string): string[] {
                 const result = await submitCharter(cfg.url, refs.issue!, charter,
                   (term: string) => deployTerm(cfg, term));
                 addMessage("", "RhoGov handoff result: " + JSON.stringify(result), "system");
-                if (result.storedHash === charter.charterHash) {
+                if ("storedHash" in result && result.storedHash === charter.charterHash) {
                   const gg=groupStore.get(g.id);
                   if (gg) {
                     gg.chain = { ...gg.chain, charterHash:charter.charterHash,

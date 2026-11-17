@@ -43,7 +43,7 @@ function base58(bytes) {
 export function revAddressFromPublicKey(pubkey) {
   const pub = fromHex(pubkey);
   if (!HEXPUB.test(pubkey) || pub.length !== 33) throw new Error("invalid compressed secp256k1 public key");
-  const uncompressed = secp256k1.Point.fromHex(pub).toBytes(false);
+  const uncompressed = secp256k1.Point.fromHex(pubkey).toBytes(false);
   const eth = keccak_256(uncompressed.slice(1)).slice(-20);
   const payload = new Uint8Array([0, 0, 0, 0, ...keccak_256(eth)]);
   const check = blake2b(payload, { dkLen: 32 }).slice(0, 4);
