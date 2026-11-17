@@ -164,6 +164,11 @@ jobs:
       - name: QOS command test
         run: node packages/browser/test/qos-command.test.mjs
 
+      # `/ask` routes to a facilitator when present, else the lowest peer id;
+      # no agent means a clear refusal rather than a fake answer.
+      - name: Ask agent routing test
+        run: node packages/browser/test/agent-ask.test.mjs
+
       # Browser behaviour, against stubbed media. Not a rendering test — it
       # asserts which track ends up in the stream a joiner would be given.
       - name: Calls test

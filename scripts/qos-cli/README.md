@@ -204,6 +204,7 @@ which runs the real server over real sockets).
 
 ```bash
 npm install && node loopback.mjs            # two Node peers over a local relay: sealed chat over the control plane + a werift↔werift link for bulk
+node qos-cli.e2e.mjs                        # the one-shot CLI lands in the hashed room and exchanges sealed chat with a real QOSPeer
 node media-reject.selftest.mjs              # a data-only agent rejects a call's audio/video, keeps the data channel
 node turn-relay.selftest.mjs                # the default-relay auto-fetch (GET /turn) merges, falls back, and never overrides an explicit config
 node werift-patched.selftest.mjs            # RTCCertificate.getFingerprints() is memoized (issue #125) and still returns the right value

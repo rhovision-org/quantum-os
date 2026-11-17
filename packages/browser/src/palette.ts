@@ -110,6 +110,9 @@ export const CMD_HELP: Record<string, string[]> = {
   rdv: ["/rdv swap <giveCur> <giveN> <getCur> <getN> <peer> — propose an atomic N-party swap (all-or-nothing).",
         "/rdv accept <id> · reject <id> · abort <id> · counter <id> <giveCur> <giveN> <getCur> <getN> · list"],
   dyncap: ["/dyncap status — your anchor / current seq / chain depth.", "/dyncap peers — all peers' anchors and seq depths (fork/contested flags)."],
+  ask: ["/ask <question> — ask the room's AI agent.",
+        "Routes to the facilitator when one is present; otherwise the lowest-peer-id other agent.",
+        "If no agent is in the room, it says so and does not broadcast the question."],
   qos: ["/qos start <name> [| <question>] — start a named, capability-guarded process.",
         "/qos status [name|id] — list processes, or show one with its deterministic state digest.",
         "/qos suspend|resume|terminate <name|id> [| reason] — owner lifecycle transitions.",
@@ -188,6 +191,7 @@ export const SLASH_COMMANDS: SlashCmd[] = [
   { name: "forget",  template: "/forget ",    desc: "remove a poll / lemma / note / group" },
   { name: "gov",     template: "/gov ",       desc: "liquid-democracy groups + delegated voting" },
   { name: "dyncap",  template: "/dyncap ",    desc: "dynamic capabilities (status|peers)" },
+  { name: "ask",     template: "/ask ",       desc: "ask the room's AI agent (facilitator first)" },
   { name: "qos",     template: "/qos ",       desc: "named QOS processes (start|status|suspend|resume|terminate)" },
   { name: "probe",   template: "/probe ",     desc: "consensus discrepancy probe" },
   { name: "room",    template: "/room ",      desc: "multi-room tabs (list|join|leave)" },
@@ -309,9 +313,9 @@ const OTHER_ACTIONS: QuickAction[] = [
 ];
 
 const QUICK_ACTIONS: QuickAction[] = [
-  { label: "Ask", ico: "🙋", kind: "fill", cmd: "/facil ask ",
-    hint: "drops /facil ask into the box — finish typing your question and send it. "
-        + "The room's facilitator agent (if one is present) answers in chat" },
+  { label: "Ask", ico: "🙋", kind: "fill", cmd: "/ask ",
+    hint: "drops /ask into the box — routes to the facilitator when one is present, "
+        + "otherwise another AI agent; says so if no agent is in the room" },
   { label: "Call", ico: "📞", kind: "call", hint: "start or leave a call" },
   { label: "Record", ico: "⏺", kind: "record", hint: "record your screen with audio" },
   { label: "Rholang", ico: "⛓", kind: "command", cmd: "/rholang eval",
