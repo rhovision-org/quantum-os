@@ -75,6 +75,7 @@ and the source file behind it, is in [docs/commands.md](docs/commands.md)**. By 
 | Deciding | `/poll` `/estimate` `/probe` `/gov` `/channel` | [Group_Decisions.md](Group_Decisions.md) · [Governance.md](Governance.md) · [Consensus.md](Consensus.md) |
 | Processes | `/qos` `/ps` `/kill` | [docs/qos-process.md](docs/qos-process.md) · [docs/os-roadmap.md](docs/os-roadmap.md) |
 | Agents | `/ask` `/facil` `/scribe` `/skeptic` `/observer` `/greeter` | [scripts/qos-cli/README.md](scripts/qos-cli/README.md) |
+| Personal goals | `/goal` | [docs/success-frameworks.md](docs/success-frameworks.md) · [docs/success-charter.md](docs/success-charter.md) |
 | Macros & chain | `/macro` `+name` `$name` `/rhoqu` `/rholang` | [MacRhoLang.md](MacRhoLang.md) · [docs/rholang.md](docs/rholang.md) |
 | Media & files | Call bar · `/record` · `/file` · `/render` | [Media_Libraries.md](Media_Libraries.md) (design) |
 
