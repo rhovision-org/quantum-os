@@ -1,0 +1,96 @@
+name: Charter Issue/4 real-chain evidence (#291)
+
+on:
+  pull_request:
+    branches: [main, work]
+    paths:
+      - "packages/browser/src/charter-chain.js"
+      - "packages/browser/src/charter-rhogov.js"
+      - "packages/browser/src/success-charter.ts"
+      - "scripts/localnet/charter-handoff-live.mjs"
+      - "contract/success-charter-1-vector.json"
+      - ".github/workflows/charter-rhogov-live.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-disposable-rholo:
+    name: Disposable Rholo signed Issue/4 handoff and read-back (not #584)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Rust+WASM
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - name: Set up Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Verify source and install dependencies
+        run: |
+          set -euo pipefail
+          node --check scripts/localnet/charter-handoff-live.mjs
+          node --check packages/browser/src/charter-chain.js
+          node --check packages/browser/src/charter-rhogov.js
+          pnpm build:wasm
+          pnpm install --frozen-lockfile
+          npm install --prefix scripts/qos-cli --ignore-scripts --no-audit --no-fund
+          node packages/browser/test/charter-chain.test.mjs
+      - name: Launch REAL disposable Rholo and submit the signed charter
+        env:
+          QOS_291_DATA: ${{ runner.temp }}/qos291-rnode
+        run: |
+          set -euo pipefail
+          mkdir -p "$QOS_291_DATA"
+          bin/rnode --version > qos291-rnode-version.txt
+          export QOS_291_RNODE_VERSION="$(head -1 qos291-rnode-version.txt)"
+          export QOS_291_RNODE_HASH="$(sha256sum bin/rnode | cut -d' ' -f1)"
+          echo "RNode source: $QOS_291_RNODE_VERSION"
+          echo "RNode executable SHA-256: $QOS_291_RNODE_HASH"
+          QOS_RNODE_DATA="$QOS_291_DATA" bash scripts/localnet/run-node.sh             > "$RUNNER_TEMP/qos291-node.private.log" 2>&1 &
+          NODE_PID=$!
+          cleanup() {
+            kill "$NODE_PID" 2>/dev/null || true
+            wait "$NODE_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          ready=no
+          for attempt in $(seq 1 80); do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:40403/api/status                  | python3 -c 'import json,sys; assert json.load(sys.stdin)["shardId"]' 2>/dev/null; then
+              ready=yes
+              break
+            fi
+            if ! kill -0 "$NODE_PID" 2>/dev/null; then
+              echo "Disposable node exited early"; exit 1
+            fi
+            sleep 2
+          done
+          test "$ready" = yes
+          echo "Real disposable node API ready; running chain writes on THIS isolated node only"
+          node scripts/localnet/charter-handoff-live.mjs
+          sha256sum -c qos291-real-chain.SHA256SUMS
+      - name: Preserve sanitized chain evidence even after an incomplete run
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qos291-disposable-rhogov-chain-evidence
+          path: |
+            qos291-real-chain.json
+            qos291-real-chain.SHA256SUMS
+            qos291-rnode-version.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+# This job runs a real disposable node in a GitHub runner. It never contacts
+# or modifies the four public testnet validators; Issue/4 read-back is not a
+# multi-stakeholder native tally, independently finalized settlement, or UI approval.
