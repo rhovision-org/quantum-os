@@ -72,8 +72,8 @@ const RULES = [
   {
     id: "goals-success",
     test: [/\bgoal(s)?\b/, /\bsuccess (framework|action|practice)s?\b/, /\bokrs?\b/, /\bpersonal (goal|effectiveness)\b/, /\bcharter\b/, /\bretrospective\b/, /\brhogov\b/, /\bhandoff\b/],
-    answer: ({ cmd }) =>
-      `\`${C(cmd)} goal\` is the private personal goal surface: \`/goal add <text>\`, \`list\`, \`done <id>\`, \`review\`, \`remove <id>\`, and explicit \`share <id>\`. Goals are local to your dyncap identity and are not broadcast unless you share one. For a group, make the charter/objectives a \`/gov issue\`, ratify with \`/poll\` or \`/gov vote\`, and record the outcome with \`/lemma\`. The required RhoGov handoff uses the canonical \`success-charter/1\` artifact; on-chain submission/status is still tracked in quantum-os#291. Docs: https://github.com/rhovision-org/quantum-os/blob/main/docs/success-frameworks.md`,
+    answer: () =>
+      "`/goal` is the private personal goal surface: `/goal add <text>`, `list`, `done <id>`, `review`, `remove <id>`, and explicit `share <id>`. Goals are local to your dyncap identity and are not broadcast unless you share one. For a group, make the charter/objectives a `/gov issue`, ratify with `/poll` or `/gov vote`, and record the outcome with `/lemma`. The required RhoGov handoff uses the canonical `success-charter/1` artifact; on-chain submission/status is still tracked in quantum-os#291. Docs: https://github.com/rhovision-org/quantum-os/blob/main/docs/success-frameworks.md",
   },
   {
     id: "processes",
@@ -195,6 +195,7 @@ export function selftest() {
   has("what is /rholang?", /opt-in|deploy/i);
   has("what are the agents?", /facilitator|scribe|skeptic/i);
   has("what is /goal?", /private|\/goal add/i);
+  ok("the goal answer does not invent /facil goal", !answerFromKnowledge("what is /goal?")?.includes("/facil goal"));
   has("how do I track a personal goal?", /dyncap|\/goal add/i);
   has("what is the success framework?", /\/gov|success-charter/i);
   has("how does the rhogov handoff work?", /success-charter\/1|#291/i);
