@@ -45,6 +45,7 @@ QLF slash commands:
   /forget <sub>    — remove an item: poll <id> · lemma <name> · note <token|cur denom> · group <name> · list
   /rdv [sub]       — n-party atomic rendezvous (swap|counter|accept|reject|abort|list)
   /dyncap [sub]    — hash-only dynamic capabilities (status|peers)
+  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)
   /qos [sub]       — named QOS processes: start · status · suspend · resume · terminate
   /probe [sub]     — joiner-local consensus probe (status|clear)
   /room [sub]      — multi-room tabs (list|join <cap>|leave|ref)
@@ -554,6 +555,10 @@ Outbound signing is wired into the highest-value envelopes: `name` (TOFU bootstr
 Trust ceiling: this is **TOFU plus chain-tamper / replay / fork detection**, not signature-strength identity. Receivers cannot mathematically verify a witness was correctly derived from `seed` — they treat it as opaque-unique per `(anchor, seq)`. Two valid envelopes at the same `seq` under the same anchor are a fork: the peer's identity is flagged contested and the user is warned. The deliberate trade is that the QLF algebra remains the security model; identity is extended via continuity rather than borrowing a separate asymmetric primitive.
 
 See [MultisigDemo.md](../MultisigDemo.md) for a worked example combining `/dyncap` with `/rdv`.
+
+### `/ask <question>`
+
+Finds an AI agent in the room and relays `/<role> ask <question>` as chat. Preference is the **facilitator** (`/facil ask …`) when one is present; otherwise the lowest-peer-id other announced agent. If no agent has announced itself, it says so and sends nothing — it never pretends to have an answer locally. The browser only picks the agent; it does not vouch for it, and the agent answers for itself.
 
 ### `/qos [sub]`
 
