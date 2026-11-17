@@ -15,6 +15,7 @@ and the [QOS harness](../scripts/localnet/README.md#quantumos--rholo-one-command
 The `/rholang` browser endpoint should use the harness's HTTPS
 `/rnode` proxy. A room capability must not be committed or logged.
 A `/gov` off-chain result is not evidence for the on-chain `#291` handoff.
+Measured #601 PASS/INCOMPLETE/BLOCKED results and CI artifacts: [Rholo acceptance matrix](audit/qos-rholo-601-validation-20261117.md).
 
 Type these in the chat input after connecting. The `/help` list is shown automatically at
 startup. Commands marked **shared** broadcast their output to all peers in the room;
