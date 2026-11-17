@@ -53,6 +53,77 @@ export interface CallElements {
   mute: HTMLButtonElement | null;
   cam: HTMLButtonElement | null;
   share: HTMLButtonElement | null;
+  /** Switches between the thumbnail grid and speaker view. Optional. */
+  view?: HTMLButtonElement | null;
+  /** Puts the whole call — tiles and controls — full screen. Optional. */
+  full?: HTMLButtonElement | null;
+}
+
+/** `grid`: every tile the same size. `speaker`: whoever is talking, large. */
+export type CallView = "grid" | "speaker";
+
+/** How many thumbnails sit beside the main video before they go below it. */
+export const SIDE_MAX = 3;
+
+export interface Stage {
+  /** The tile shown large. */
+  main: string | null;
+  /** Beside the main video, at most `SIDE_MAX`. */
+  side: string[];
+  /** Everyone else, in a row under it. */
+  below: string[];
+}
+
+/**
+ * Who goes where in speaker view. Pure, so it can be tested without a DOM.
+ *
+ * The main tile is the one you pinned, else whoever is (or last was) talking,
+ * else the first other person, else yourself — you are only ever your own main
+ * video when you chose it or are alone. Everyone else keeps the order they
+ * arrived in, so thumbnails do not shuffle beyond the one swap a change of
+ * speaker needs.
+ */
+export function arrangeStage(
+  keys: string[],
+  opts: { pinned?: string | null; speaker?: string | null; local?: string } = {},
+): Stage {
+  const has = (k: string | null | undefined): k is string => !!k && keys.includes(k);
+  const main = has(opts.pinned) ? opts.pinned
+    : has(opts.speaker) ? opts.speaker
+    : keys.find((k) => k !== opts.local) ?? keys[0] ?? null;
+  const rest = keys.filter((k) => k !== main);
+  return { main, side: rest.slice(0, SIDE_MAX), below: rest.slice(SIDE_MAX) };
+}
+
+/**
+ * Decides who "the speaker" is from a stream of audio levels.
+ *
+ * Two things keep the main video from flickering: a newcomer has to be the
+ * loudest for `hold` consecutive readings before taking over (a cough is not a
+ * turn), and silence changes nothing — the last person to speak stays up, as
+ * in any call app.
+ */
+export function speakerTracker(threshold = 0.03, hold = 2) {
+  let current: string | null = null;
+  let cand: string | null = null;
+  let n = 0;
+  return {
+    /** Feed one reading per peer (0..1 RMS). Returns the current speaker. */
+    update(levels: Map<string, number>): string | null {
+      let loudest: string | null = null;
+      let top = threshold;
+      for (const [id, v] of levels) if (v >= top) { top = v; loudest = id; }
+      if (!loudest || loudest === current) { cand = null; n = 0; return current; }
+      if (loudest === cand) n++; else { cand = loudest; n = 1; }
+      if (n >= hold) { current = cand; cand = null; n = 0; }
+      return current;
+    },
+    drop(id: string): void {
+      if (current === id) current = null;
+      if (cand === id) { cand = null; n = 0; }
+    },
+    current: () => current,
+  };
 }
 
 export interface Calls {
@@ -70,6 +141,12 @@ export interface Calls {
   /** A peer left, or ended their call: drop their tile. */
   peerGone(peerId: string): void;
   inCall(): boolean;
+  /** Choose the layout: the thumbnail grid, or speaker view. */
+  setView(view: CallView): void;
+  view(): CallView;
+  toggleView(): void;
+  /** The whole call, controls included, full screen — or back. */
+  toggleFull(): void;
 }
 
 // Always request the browser's acoustic echo canceller (+ noise suppression /
@@ -96,7 +173,167 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
   const reachTimers: ReturnType<typeof setTimeout>[] = [];
   /** Peers already named as unreachable for this call — each is said once. */
   const reachWarned = new Set<string>();
+  let view: CallView = "grid";
+  /** Speaker view: the tile the user chose to keep large, if any. */
+  let pinned: string | null = null;
+  const speaker = speakerTracker();
+  /** Whether the call bar is filling the screen. */
+  let full = false;
 
+  // --- who is talking -------------------------------------------------------
+  // An analyser per remote stream, read a few times a second. Only remote
+  // voices are metered: you are never promoted to your own main video.
+  const newMeter = (stream: MediaStream, src: AudioNode, an: AnalyserNode) =>
+    ({ stream, src, an, buf: new Uint8Array(an.fftSize) });
+  type Meter = ReturnType<typeof newMeter>;
+  let actx: AudioContext | null = null;
+  const meters = new Map<string, Meter>();
+  let meterTimer: ReturnType<typeof setInterval> | null = null;
+  /** The peer making sound right now (not sticky, unlike the speaker). */
+  let loudNow: string | null = null;
+
+  function audioContext(): AudioContext | null {
+    const g = globalThis as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
+    const AC = g.AudioContext ?? g.webkitAudioContext;
+    if (!AC) return null;
+    try {
+      actx ??= new AC();
+      // Created outside a click it starts suspended; resuming is harmless.
+      if (actx.state === "suspended") void actx.resume().catch(() => {});
+      return actx;
+    } catch { return null; }
+  }
+
+  function watchLevel(peerId: string, stream: MediaStream): void {
+    if (meters.get(peerId)?.stream === stream) return;
+    if (stream.getAudioTracks().length === 0) return;
+    const ctx = audioContext();
+    if (!ctx) return;
+    unwatchLevel(peerId);
+    try {
+      const src = ctx.createMediaStreamSource(stream);
+      const an = ctx.createAnalyser();
+      an.fftSize = 512;
+      src.connect(an);      // never to the destination: the <video> plays it
+      meters.set(peerId, newMeter(stream, src, an));
+      meterTimer ??= setInterval(readLevels, 200);
+    } catch { /* no metering: speaker view falls back to the first peer */ }
+  }
+
+  function unwatchLevel(peerId: string): void {
+    const m = meters.get(peerId);
+    if (!m) return;
+    try { m.src.disconnect(); } catch { /* already gone */ }
+    meters.delete(peerId);
+    speaker.drop(peerId);
+    if (loudNow === peerId) loudNow = null;
+    if (meters.size === 0 && meterTimer !== null) { clearInterval(meterTimer); meterTimer = null; }
+  }
+
+  function readLevels(): void {
+    const levels = new Map<string, number>();
+    let loud: string | null = null;
+    let top = 0.03;
+    for (const [id, m] of meters) {
+      m.an.getByteTimeDomainData(m.buf);
+      let sum = 0;
+      for (const b of m.buf) { const x = (b - 128) / 128; sum += x * x; }
+      const rms = Math.sqrt(sum / m.buf.length);
+      levels.set(id, rms);
+      if (rms >= top) { top = rms; loud = id; }
+    }
+    const before = speaker.current();
+    const now = speaker.update(levels);
+    if (now !== before || loud !== loudNow) { loudNow = loud; layout(); }
+  }
+
+  // --- layout ---------------------------------------------------------------
+  const STAGE = ["stage-main", "stage-side", "stage-below", "pinned"];
+
+  /** Paint the current view onto the tiles. Nothing is reparented — a moved
+   *  <video> re-attaches and restarts — so placement is classes and grid rows. */
+  function layout(): void {
+    const speakerView = view === "speaker";
+    if (speakerView) els.tiles?.classList.add("speaker"); else els.tiles?.classList.remove("speaker");
+    const stage = speakerView
+      ? arrangeStage([...tiles.keys()], { pinned, speaker: speaker.current(), local: "__local__" })
+      : null;
+    if (stage && stage.side.length === 0) els.tiles?.classList.add("solo"); else els.tiles?.classList.remove("solo");
+    for (const key of tiles.keys()) {
+      const wrap = tileOf(key);
+      if (!wrap) continue;
+      wrap.classList.remove(...STAGE);
+      wrap.style.gridRow = "";
+      if (key === loudNow) wrap.classList.add("speaking"); else wrap.classList.remove("speaking");
+      const btn = wrap.querySelector(".call-zoom") as HTMLElement | null;
+      if (!stage) {
+        if (btn && expanded !== key) { btn.textContent = "⛶"; btn.title = "Show this big"; }
+        continue;
+      }
+      const side = stage.side.indexOf(key);
+      if (key === stage.main) {
+        wrap.classList.add("stage-main");
+        if (pinned === key) wrap.classList.add("pinned");
+        if (btn) {
+          btn.textContent = pinned === key ? "📌" : "⛶";
+          btn.title = pinned === key ? "Pinned — click to go back to whoever is talking" : "Keep this one large";
+        }
+      } else {
+        wrap.classList.add(side >= 0 ? "stage-side" : "stage-below");
+        if (side >= 0) wrap.style.gridRow = String(side + 1);
+        if (btn) { btn.textContent = "⛶"; btn.title = "Show this one large"; }
+      }
+    }
+    if (els.view) {
+      els.view.textContent = speakerView ? "▦" : "👤";
+      els.view.dataset.label = speakerView ? "Grid view" : "Speaker view";
+      els.view.title = speakerView ? "Show everyone the same size" : "Show whoever is talking large";
+    }
+    if (els.full) {
+      els.full.textContent = full ? "🗗" : "⛶";
+      els.full.dataset.label = full ? "Exit full screen" : "Full screen";
+      els.full.title = full ? "Leave full screen (Esc)" : "Full screen, with the call controls";
+    }
+  }
+
+  function setView(next: CallView): void {
+    if (next === "speaker" && expanded) setExpanded(null);
+    view = next;
+    layout();
+  }
+
+  /** A click on a tile: in speaker view it pins (or unpins) that person. */
+  function pick(key: string): void {
+    if (view === "speaker") { pinned = pinned === key ? null : key; layout(); }
+    else toggleExpand(key);
+  }
+
+  /**
+   * Full screen is the call bar itself — tiles and controls together — so
+   * mute, camera, share and leave stay within reach. The class does the work
+   * (fixed, filling the window); the Fullscreen API is asked for on top of it
+   * and is allowed to refuse, as it does on an iPhone, where the class alone
+   * still fills the page.
+   */
+  function setFull(on: boolean): void {
+    const bar = els.bar;
+    if (!bar || full === on) return;
+    full = on;
+    if (on) {
+      if (expanded) setExpanded(null);
+      bar.classList.add("call-full");
+      try { void bar.requestFullscreen?.()?.catch(() => {}); } catch { /* the class is enough */ }
+    } else {
+      bar.classList.remove("call-full");
+      if (document.fullscreenElement === bar) void document.exitFullscreen?.().catch(() => {});
+    }
+    layout();
+  }
+  // Esc inside the browser's own full screen never reaches keydown; it shows
+  // up here instead, as full screen having ended.
+  document.addEventListener("fullscreenchange", () => {
+    if (full && !document.fullscreenElement) setFull(false);
+  });
   const showBar = () => { if (els.bar) els.bar.hidden = false; };
   const hideBarIfIdle = () => {
     if (els.bar && !inCall && tiles.size === 0) els.bar.hidden = true;
@@ -121,12 +358,15 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
     const zoom = document.createElement("button");
     zoom.className = "call-zoom"; zoom.textContent = "⛶";
     zoom.title = "Show this big";
-    zoom.addEventListener("click", (e) => { e.stopPropagation(); toggleExpand(key); });
-    wrap.addEventListener("click", () => toggleExpand(key));
+    zoom.addEventListener("click", (e) => { e.stopPropagation(); pick(key); });
+    wrap.addEventListener("click", () => pick(key));
     // Double-click goes to the browser's own full screen, where a shared screen
     // is finally shown at something like its real size.
     wrap.addEventListener("dblclick", (e) => {
       e.preventDefault();
+      // In speaker view, and whenever the call is already full screen, the
+      // thing to make full screen is the call — not one tile without controls.
+      if (view === "speaker" || full) { setFull(!full); return; }
       if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
       else void wrap.requestFullscreen?.().catch(() => {});
     });
@@ -134,6 +374,7 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
     els.tiles?.appendChild(wrap);
     tiles.set(key, v);
     if (screens.has(key)) markScreen(key, true);
+    layout();
     return v;
   }
 
@@ -145,6 +386,8 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
     v.closest(".call-tile")?.remove();
     tiles.delete(key);
     screens.delete(key);
+    if (pinned === key) pinned = null;
+    layout();
   }
 
   /** Label a tile as a screen, and stop cropping it. */
@@ -179,7 +422,9 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
   // Esc shrinks whatever is big. Full screen swallows its own Esc, so this only
   // ever fires for the in-page version.
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && expanded && !document.fullscreenElement) setExpanded(null);
+    if (e.key !== "Escape" || document.fullscreenElement) return;
+    if (expanded) setExpanded(null);
+    else if (full) setFull(false);
   });
 
   /** The senders carrying our video — one per peer, all of which a share replaces. */
@@ -193,6 +438,7 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
     if (els.mute) {
       els.mute.textContent = audioOn ? "🎤" : "🔇";
       els.mute.title = audioOn ? "Mute mic" : "Unmute mic";
+      els.mute.dataset.label = audioOn ? "Mute" : "Unmute";
     }
     if (els.cam) {
       const hasVideo = (localStream?.getVideoTracks().length ?? 0) > 0;
@@ -201,12 +447,14 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
       els.cam.title = !hasVideo ? "No camera — audio-only call"
         : screenStream ? "Sharing your screen — stop sharing to use the camera"
         : videoOn ? "Turn camera off" : "Turn camera on";
+      els.cam.dataset.label = hasVideo && videoOn ? "Stop video" : "Start video";
     }
     if (els.share) {
       els.share.disabled = !inCall;
       els.share.textContent = screenStream ? "🛑" : "🖥";
       els.share.title = !inCall ? "Start a call first"
         : screenStream ? "Stop sharing your screen" : "Share your screen";
+      els.share.dataset.label = screenStream ? "Stop sharing" : "Share screen";
     }
   }
 
@@ -256,6 +504,7 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
       }
     }
     inCall = true;
+    audioContext();   // inside the click that started the call, so it may run
     const local = makeTile("__local__", "you");
     local.muted = true;
     local.srcObject = localStream;
@@ -313,6 +562,8 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
     removeTile("__local__");
     updateControls();
     hideBarIfIdle();
+    // A hidden bar must not be left covering the window.
+    if (els.bar?.hidden) setFull(false);
   }
 
   function stopScreenTracks(): void {
@@ -422,6 +673,8 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
     updateControls();
   }
 
+  layout();   // the view and full-screen buttons start out labelled
+
   return {
     toggle() { if (inCall) end(); else void start(); },
     end,
@@ -445,13 +698,21 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
       if (!v) v = makeTile(peerId, host.label(peerId));
       if (v.srcObject !== stream) v.srcObject = stream;
       remote.set(peerId, stream);
+      watchLevel(peerId, stream);
       showBar();
     },
     audioTracks() {
       return [...remote.values()].flatMap((s) => s.getAudioTracks());
     },
-    peerGone(peerId) { remote.delete(peerId); removeTile(peerId); hideBarIfIdle(); },
+    peerGone(peerId) {
+      remote.delete(peerId); unwatchLevel(peerId); removeTile(peerId); hideBarIfIdle();
+      if (els.bar?.hidden) setFull(false);
+    },
     inCall: () => inCall,
+    setView,
+    view: () => view,
+    toggleView() { setView(view === "speaker" ? "grid" : "speaker"); },
+    toggleFull() { setFull(!full); },
   };
 }
 
