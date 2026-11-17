@@ -295,7 +295,13 @@ export function makeAdvisor({ ai = false, backend = "api", apiKey = process.env.
         }
       }
       if (!text) { lastError = "advisor returned no text"; return null; }
-      if (mode !== "chair" && /^NONE\b/i.test(text)) return null;   // chair phases always render (e.g. "no disagreement")
+      if (mode !== "chair" && /^NONE\b/i.test(text)) {
+        // NONE means "nothing to say" for the nudge modes, but for a direct
+        // question it is a null answer the caller must report — otherwise
+        // `/facil ask` falls back to "I don't have a good answer" with no reason.
+        if (mode === "ask") lastError = "advisor returned NONE (no answer)";
+        return null;
+      }
       return text.slice(0, mode === "gamesummary" ? 6000 : mode === "optimize" ? 1400 : mode === "chair" ? 1200 : mode === "ask" ? 700 : 400);   // optimize/chair are multi-part; ask a few sentences; nudges terse
     },
   };

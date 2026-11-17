@@ -314,8 +314,8 @@ export async function run(args) {
 
   const advisor = makeAdvisor({ ai: args.ai, backend: args.aiBackend, model: args.aiModel, persona: role.persona, roleName: role.name, cmd: CMD, faucetActive: !!facilKey, log: console.log });
   const aiFailure = () => advisor.lastError
-    ? `My AI backend is unavailable right now — ${advisor.lastError.slice(0, 240)}.`
-    : "My AI backend didn't answer.";
+    ? `The AI backend did not answer — ${advisor.lastError.slice(0, 240)}.`
+    : "The AI backend did not answer.";
 
   // ---- identity (stable across restarts), mirroring qos-daemon.mjs ----
   const stateDir = args.state ?? "./.qos-agent";
@@ -608,11 +608,10 @@ export async function run(args) {
     }
     const text = await advisor.advise("ask", { question: q, transcript: recentMsgs.slice(-12).map((mm) => ({ name: mm.name, text: mm.text })) });
     if (text) { reply(text, null, 0); return; }
-    if (advisor.lastError) {
-      reply(`${aiFailure()} I can still answer basics about QuantumOS and group decisions; try \`/${CMD} ask what is /poll\` or \`/${CMD} help\`.`, null, 0);
-      return;
-    }
-    reply(`Hmm, I don't have a good answer to that one. \`/${CMD} help\` for what I can do.`, null, 0);
+    // Never degrade to "I don't have a good answer" with no reason: every null
+    // from the advisor is a backend/no-answer event, and aiFailure() names it
+    // (including "returned no answer" when the model literally replied NONE).
+    reply(`${aiFailure()} I can still answer basics about QuantumOS and group decisions; try \`/${CMD} ask what is /poll\` or \`/${CMD} help\`.`, null, 0);
   }
   // Facilitate one step of a collective-optimization round (the room as a quantum-
   // annealing-style optimizer). Stateless: re-reads the recent discussion each call,
@@ -813,7 +812,7 @@ export async function run(args) {
       `· up ${dur(now - startedAt)} · rss ${rss} MB · cpu ${life}%${since}`,
       `· signaling ${wsUp ? "connected" : "**down / reconnecting**"} · channels ${peer.channels.size} · present ${present.size} (${humans} human, ${present.size - humans} agent) · known ${Object.keys(known).length}`,
       `· posts ${postLog.length}/${standing.budget} this 5min${roomFor ? "" : " — **budget spent**"} · min-gap ${Math.round(MIN_GAP_MS / 1000)}s · ${muted ? "**muted**" : "unmuted"}`,
-      `· trust ${trust} · AI ${advisor.enabled ? advisor.model : "off"} · deliberation ${chair ? `**${chair.topic}** (${chair.phase})` : "none"}`,
+      `· trust ${trust} · AI ${advisor.enabled ? advisor.model : "off"} · ask faq+diagnostics${advisor.lastError ? ` · last AI error: ${advisor.lastError.slice(0, 160)}` : ""} · deliberation ${chair ? `**${chair.topic}** (${chair.phase})` : "none"}`,
       `· errors ${err}`,
     ].join("\n");
   }
@@ -1200,7 +1199,7 @@ export async function run(args) {
   }
 
   peer.connect();
-  console.log(`${TAG} running as "${myName}" [role=${role.name}]  budget=${MAX_POSTS}/5min  min-gap=${Math.round(MIN_GAP_MS / 1000)}s  silent=${Math.round(SILENT_MS / 60000)}min  AI=${advisor.enabled ? advisor.model : "off"}. Ctrl-C to stop.`);
+  console.log(`${TAG} running as "${myName}" [role=${role.name}]  budget=${MAX_POSTS}/5min  min-gap=${Math.round(MIN_GAP_MS / 1000)}s  silent=${Math.round(SILENT_MS / 60000)}min  AI=${advisor.enabled ? advisor.model : "off"}  ask=faq+diagnostics. Ctrl-C to stop.`);
 
   let faucetHttp = null;
   if (args.faucetHttp !== undefined) {
