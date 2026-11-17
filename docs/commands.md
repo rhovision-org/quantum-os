@@ -45,8 +45,8 @@ QLF slash commands:
   /forget <sub>    — remove an item: poll <id> · lemma <name> · note <token|cur denom> · group <name> · list
   /rdv [sub]       — n-party atomic rendezvous (swap|counter|accept|reject|abort|list)
   /dyncap [sub]    — hash-only dynamic capabilities (status|peers)
-  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)
   /qos [sub]       — named QOS processes: start · status · suspend · resume · terminate
+  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)
   /probe [sub]     — joiner-local consensus probe (status|clear)
   /room [sub]      — multi-room tabs (list|join <cap>|leave|ref)
   /share <sel> to <room>  — bridge a lemma/chat/note into another tab
@@ -558,7 +558,7 @@ See [MultisigDemo.md](../MultisigDemo.md) for a worked example combining `/dynca
 
 ### `/ask <question>`
 
-Finds an AI agent in the room and relays `/<role> ask <question>` as chat. Preference is the **facilitator** (`/facil ask …`) when one is present; otherwise the lowest-peer-id other announced agent. If no agent has announced itself, it says so and sends nothing — it never pretends to have an answer locally. The browser only picks the agent; it does not vouch for it, and the agent answers for itself.
+Finds a **live** AI agent in the room and relays `/<role> ask <question>` as chat. Preference is the **facilitator** (`/facil ask …`) when one is present; otherwise the lowest-peer-id other present agent. The agent badge cache is filtered by the live peer roster, so a departed agent is not chosen. If no agent is present, it says so and sends nothing — it never pretends to have an answer locally. The chosen agent is addressed by its role prefix; the line is still room chat, so every peer sees it. The browser only picks the agent; it does not vouch for it, and the agent answers for itself.
 
 ### `/qos [sub]`
 

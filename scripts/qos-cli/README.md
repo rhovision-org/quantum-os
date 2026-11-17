@@ -4,10 +4,11 @@ A standalone Node script that joins a QuantumOS room by its capability token,
 connects to the live peers over WebRTC, and broadcasts a chat message — then
 exits. Useful for announcements, bots, or scripting from outside the browser.
 
-It speaks the exact protocol of `packages/browser/src/peer.ts`:
+It uses the same `QOSPeer` transport as the browser and the agent daemons
+(`qospeer.mjs`), so it joins the same room and speaks the same wire protocol:
 
-- signaling JSON over WebSocket: `join` / `offer` / `answer` / `ice` / `leave`
-- data channel label `"qos"`
+- signaling joins `roomIdFor(cap)`, not the raw capability token
+- data channel label `"qos"`, frames sealed under `deriveRoomKey(cap)`
 - chat envelope `{ kind: "chat", text }` (plus an optional `{ kind: "name", name }`)
 - peer identity is a freshly generated `cap:peer:…` ZFA token (ported from `zfa.ts`)
 
@@ -47,10 +48,17 @@ node qos-cli.mjs --room cap:room:0521… --listen
 
 Options: `--room` (cap or URL, required), `--message`/`-m`, `--name`,
 `--signal <url>` (default `wss://quantum-os-signaling.onrender.com`),
+`--stun <url>`, `--turn <url,user,pass>` (repeatable; when neither is given,
+`QOSPeer` fetches the signaling server's short-lived relay credentials),
 `--wait <ms>` (give up if no peer reached, default 15000), `--linger <ms>`
 (stay after delivery, default 2000), `--listen`, `--help`.
 
 Exit codes: `0` delivered (or listened), `1` error, `2` no peer reached in time.
+
+In a browser, **`/ask <question>`** picks the facilitator when present, otherwise
+another live agent, and says so if none is present. `qos-cli --listen` is a useful
+headless witness for a live test; it prints all room envelopes, while a one-shot
+send prints only names and chat replies.
 
 ## Persistent "memory peer" daemon (`qos-daemon.mjs`)
 
@@ -416,7 +424,10 @@ Agents are **rated/governed, not raters** — they don't autonomously `/gov trus
 
 **Telling it's there / commands.** Because it's mostly silent, say `/facil` (or
 "anyone here?", or just "hi") and it replies — that's how you confirm it's
-present. `/facil help` lists what it does; `/facil ask <question>` answers basics
+present. In a browser, **`/ask <question>`** picks the facilitator when one is
+present and otherwise another live agent, and reports if none is present;
+`/facil ask <question>` addresses the facilitator directly. `/facil help` lists
+what it does; `/facil ask <question>` answers basics
 about QuantumOS and group decisions **without** `--ai` (from the deterministic
 [`facilitator-faq.mjs`](facilitator-faq.mjs)), and sends open-ended questions to
 the AI advisor when `--ai` is on. If the AI backend is unavailable — no key, a

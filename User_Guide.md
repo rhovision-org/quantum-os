@@ -36,7 +36,10 @@ dominate, include the silent, don't close a proposal unrefuted.
 Optional **AI agents** can join as full members to help: a `facilitator` (keeps everyone
 included, surfaces dis/agreement), a `scribe` (tracks decisions, offers to record them),
 a `greeter`, a `skeptic` (surfaces unexamined assumptions before the group closes). They
-only *nudge*, and the room governs them with the same trust as anyone.
+only *nudge*, and the room governs them with the same trust as anyone. Once one is
+present, **`/ask <question>`** routes to the facilitator when there is one, otherwise
+another live agent — and says so plainly if none is present. `/facil ask …` still
+addresses the facilitator directly.
 → **[Running agents](scripts/qos-cli/README.md)** · build your own → **[Developer Guide](Developer_Guide.md)**.
 
 ## 3. Build trust
@@ -94,6 +97,7 @@ governance to each other, so a lemma proven in one room becomes a lemma in the o
 | keep / recover your identity | `/password` · `/login <handle>` | [Security](SECURITY.md) |
 | run a good discussion | roles + turn-taking | [Room Best Practices](Room_Best_Practices.md) |
 | add an AI helper | `agent.mjs --role …` | [Agents](scripts/qos-cli/README.md) |
+| ask the room's AI helper | `/ask <question>` | [Agents](scripts/qos-cli/README.md) |
 | rate · delegate · hold to account | `/gov trust` · `/gov delegate` · `/gov censure` | [Governance](Governance.md) |
 | quick vote | `/poll` (`ranked`) | [Group Decisions](Group_Decisions.md) |
 | agree a number | `/estimate` | [Group Decisions](Group_Decisions.md) |
