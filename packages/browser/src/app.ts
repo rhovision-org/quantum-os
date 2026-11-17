@@ -904,6 +904,17 @@ function qosCommandFor(ctx: RoomContext): QosCommand | null {
   return cmd;
 }
 
+/// Run one QOS command through the signing queue. `/qos`, `/ps`, and `/kill`
+/// share this path so they cannot race a chat broadcast for a dyncap seq.
+function runQosCommand(text: string, label = "/qos"): void {
+  if (!qpeer) { addMessage("", "not connected — connect first", "system"); return; }
+  const qos = qosCommandFor(activeRoom);
+  if (!qos) { addMessage("", "identity not ready yet — try again in a moment", "system"); return; }
+  const run = signQueue.then(() => qos.handle(text));
+  signQueue = run.then(() => undefined, () => undefined);
+  void run.catch((e) => addMessage("", `⚠ ${label}: ${(e as Error)?.message ?? e}`, "system"));
+}
+
 /// Verify an inbound envelope's dyncap if present. Returns a status string for
 /// chat display (empty when no dyncap was carried). On fork detection, the
 /// affected peer is flagged contested and the user is notified.
@@ -3562,6 +3573,8 @@ function handleCommand(raw: string): string[] {
         "  /gov <sub>       — liquid-democracy groups: new · member · issue · delegate · trust · censure · vote · treasury · kudos · uri · say · status",
         "  /dyncap [sub]    — hash-only dynamic capabilities (status|peers)",
         "  /qos [sub]       — named QOS processes: start · status · suspend · resume · terminate",
+        "  /ps              — QOS process table (pid · name · state · owner)",
+        "  /kill <name|id>  — terminate a process you own (owner-only alias)",
         "  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)",
         "  /probe [sub]     — discrepancy probe window state (status|clear)",
         "  /room [sub]      — multi-room tabs (list|join <cap>|leave|ref)",
@@ -5942,15 +5955,18 @@ function handleCommand(raw: string): string[] {
       break;
     }
 
-    case "qos": {
-      if (!qpeer) { sys("not connected — connect first, then /qos start <name>"); break; }
-      const qos = qosCommandFor(activeRoom);
-      if (!qos) { sys("identity not ready yet — try again in a moment"); break; }
-      // Serialize with chat signing: QosEventSigner uses the same dyncap seq,
-      // so a concurrent chat broadcast must not take the next number.
-      const run = signQueue.then(() => qos.handle(arg));
-      signQueue = run.then(() => undefined, () => undefined);
-      void run.catch((e) => addMessage("", `⚠ /qos: ${(e as Error)?.message ?? e}`, "system"));
+    case "qos":
+      runQosCommand(arg);
+      break;
+
+    case "ps":
+      runQosCommand("ps", "/ps");
+      break;
+
+    case "kill": {
+      const ref = arg.trim();
+      if (!ref) { sys("usage: /kill <name|id>"); break; }
+      runQosCommand(`kill ${ref}`, "/kill");
       break;
     }
 
@@ -8863,7 +8879,7 @@ function send(): void {
     if (cmd !== "help" && cmd !== "dump") {
       sessionLog.push({ who: myName || "you", cmd, arg, summary: lines[0] ?? "" });
     }
-    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "ask" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
+    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "ask" && cmd !== "ps" && cmd !== "kill" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
       qpeer.broadcast({ kind: "qlf", cmd, arg, lines });
     }
     return;

@@ -34,6 +34,10 @@ interface TrackedProcess {
   id: string;
   name: string;
   start: QosEvent;
+  /** Peer id for an inbound start, or "you" for a locally started process. */
+  owner: string;
+  /** Dyncap anchor on the start event (the process's authority root). */
+  ownerAnchor: string;
 }
 
 const short = (hash: string): string => `${hash.slice(0, 12)}…`;
@@ -41,10 +45,12 @@ const short = (hash: string): string => `${hash.slice(0, 12)}…`;
 const USAGE = [
   "QOS processes — named, capability-guarded continuations in this room:",
   "  /qos start <name> [| <question>]  — start a process you own",
+  "  /qos ps                          — process table: pid · name · state · owner",
   "  /qos status [name|id]             — list, or show one process and its digest",
   "  /qos suspend <name|id> [| reason] — owner pauses it",
   "  /qos resume <name|id> [| reason]  — owner resumes it",
   "  /qos terminate <name|id> [| reason] — owner ends it",
+  "  /qos kill <name|id> [| reason]    — alias for terminate (owner only)",
   "The events are signed and broadcast; every peer recomputes the same digest.",
 ];
 
@@ -62,8 +68,10 @@ export class QosCommand {
   }
 
   /** Processes this peer has seen start, oldest first. */
-  list(): { id: string; name: string; start: QosEvent }[] {
-    return [...this.byId.values()].map((p) => ({ id: p.id, name: p.name, start: p.start }));
+  list(): { id: string; name: string; start: QosEvent; owner: string; ownerAnchor: string }[] {
+    return [...this.byId.values()].map((p) => ({
+      id: p.id, name: p.name, start: p.start, owner: p.owner, ownerAnchor: p.ownerAnchor,
+    }));
   }
 
   /** The current view of a tracked process, or null when it is unknown. */
@@ -80,7 +88,7 @@ export class QosCommand {
     if (!result.ok) return false;
     if (result.duplicate) return true;
 
-    const entry = this.track(event);
+    const entry = this.track(event, from);
     if (event.type === "process-start" && entry) {
       this.host.say(`🧩 ${this.label(from)} started **${entry.name}** — \`/qos status ${entry.name}\``);
     } else if (event.type === "process-suspend" || event.type === "process-resume" || event.type === "process-terminate") {
@@ -108,10 +116,13 @@ export class QosCommand {
       case "status":
       case "list":
         return this.status(rest);
+      case "ps":
+        return this.ps();
       case "suspend":
       case "resume":
       case "terminate":
-        return this.lifecycle(sub, rest);
+      case "kill":
+        return this.lifecycle(sub === "kill" ? "terminate" : sub, rest);
       default:
         this.host.say(`unknown /qos subcommand: ${sub}`);
         for (const line of USAGE) this.host.say(line);
@@ -132,7 +143,7 @@ export class QosCommand {
     const question = questionParts.join("|").trim() || name;
     const started = await this.room.startProcess(name, { question });
     this.host.onSigned?.();
-    this.track(started.event);
+    this.track(started.event, "you");
     const view = await this.room.view(started.processId);
     this.host.say(`🧩 started **${name}** — ${view.status} · ${started.processId} · digest ${short(view.stateDigest)}`);
   }
@@ -151,6 +162,7 @@ export class QosCommand {
       const view = await this.room.view(entry.id);
       this.host.say(`**${entry.name}** — ${view.status} · ${view.phase}`);
       this.host.say(`  process: ${entry.id}`);
+      this.host.say(`  owner: ${this.ownerLabel(entry)}`);
       this.host.say(`  events: ${view.eventCount} · quorum ${view.quorum.required}${view.quorum.met ? " met" : ` missing ${view.quorum.missing.length}`}`);
       if (view.nominations.length) {
         this.host.say(`  nominations: ${view.nominations.map((n) => `${n.text} (${n.by.length})`).join(" · ")}`);
@@ -171,6 +183,21 @@ export class QosCommand {
       const view = await this.room.view(entry.id);
       this.host.say(`  ${view.status === "running" ? "●" : view.status === "terminated" ? "✓" : "○"} ${entry.name}  ${view.status}/${view.phase}  ${view.eventCount} events  ${short(view.stateDigest)}  ${entry.id}`);
     }
+  }
+
+  /** OS-style process table: pid, name, state, events, owner. */
+  private async ps(): Promise<void> {
+    if (this.byId.size === 0) {
+      this.host.say("no QOS processes in this room — start one with `/qos start <name>`");
+      return;
+    }
+    this.host.say(`QOS process table (${this.byId.size}):`);
+    this.host.say("  PID | NAME | STATE | EVENTS | OWNER");
+    for (const entry of this.list()) {
+      const view = await this.room.view(entry.id);
+      this.host.say(`  ${short(entry.id)} | ${entry.name} | ${view.status} | ${view.eventCount} | ${this.ownerLabel(entry)}`);
+    }
+    this.host.say("  `/qos kill <name|id>` terminates (owner only).");
   }
 
   private async lifecycle(verb: "suspend" | "resume" | "terminate", rest: string): Promise<void> {
@@ -206,15 +233,18 @@ export class QosCommand {
         : await this.room.terminate(entry.id, grant, reason || undefined);
     this.host.onSigned?.();
     const after = await this.room.view(entry.id);
-    this.host.say(`✓ **${entry.name}** ${verb}d — ${after.status} · ${event.hash.slice(0, 12)}… · digest ${short(after.stateDigest)}`);
+    const done = verb === "suspend" ? "suspended" : verb === "resume" ? "resumed" : "terminated";
+    this.host.say(`✓ **${entry.name}** ${done} — ${after.status} · ${event.hash.slice(0, 12)}… · digest ${short(after.stateDigest)}`);
   }
 
-  private track(event: QosEvent): TrackedProcess | null {
+  private track(event: QosEvent, owner = event.source): TrackedProcess | null {
     if (event.type !== "process-start") return null;
     const existing = this.byId.get(event.process);
     if (existing) return existing;
     const name = typeof event.payload.name === "string" ? event.payload.name : event.process;
-    const entry: TrackedProcess = { id: event.process, name, start: event };
+    const entry: TrackedProcess = {
+      id: event.process, name, start: event, owner, ownerAnchor: event.source,
+    };
     this.byId.set(entry.id, entry);
     if (!this.byName.has(name)) this.byName.set(name, entry.id);
     return entry;
@@ -223,6 +253,10 @@ export class QosCommand {
   private resolve(ref: string): TrackedProcess | null {
     const id = this.byId.has(ref) ? ref : this.byName.get(ref);
     return id ? this.byId.get(id) ?? null : null;
+  }
+
+  private ownerLabel(entry: TrackedProcess): string {
+    return entry.owner === "you" ? "you" : this.label(entry.owner);
   }
 
   private label(source: string): string {
