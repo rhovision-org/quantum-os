@@ -66,6 +66,22 @@ try {
   const emptyText = await empty.advise("ask", { question: "what is /poll?", transcript: [] });
   ok("empty output returns no answer", emptyText === null);
   ok("empty output is reported", /no text/.test(empty.lastError ?? ""), empty.lastError);
+
+  // A literal NONE on a direct ask is a no-answer the caller must report.
+  const none = makeAdvisor({
+    ai: true,
+    backend: "claude-code",
+    claudeBin: fake("fake-claude-none.sh", 'cat >/dev/null; echo "NONE"'),
+    log: () => {},
+  });
+  const noneText = await none.advise("ask", { question: "what is /poll?", transcript: [] });
+  ok("NONE on ask returns no answer", noneText === null);
+  ok("NONE on ask is reported", /NONE/.test(none.lastError ?? ""), none.lastError);
+
+  // NONE is the expected "nothing to say" for the nudge modes.
+  const nudgeText = await none.advise("stimulate", { transcript: [] });
+  ok("NONE on a nudge stays silent", nudgeText === null);
+  ok("NONE on a nudge is not an error", none.lastError === null, none.lastError);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }
