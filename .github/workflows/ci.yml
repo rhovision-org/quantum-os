@@ -158,6 +158,12 @@ jobs:
       - name: QOS process orchestration test
         run: node packages/browser/test/qos-process.test.mjs
 
+      # The `/qos` command surface over that contract: two independent peers
+      # reach the same state digest after start / suspend / resume / terminate,
+      # and a non-owner cannot drive someone else's lifecycle.
+      - name: QOS command test
+        run: node packages/browser/test/qos-command.test.mjs
+
       # Browser behaviour, against stubbed media. Not a rendering test — it
       # asserts which track ends up in the stream a joiner would be given.
       - name: Calls test
