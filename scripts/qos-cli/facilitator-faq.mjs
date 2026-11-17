@@ -70,6 +70,30 @@ const RULES = [
       "`/gov` is the liquid-democracy layer: `/gov delegate`, `/gov trust`, `/gov censure`, and `/gov say`; voting weight follows delegation and trust. Groups and their decisions live in the room by default. Recording governance on chain is optional via `/gov chain`, which needs a deploy key but no mandatory chain.",
   },
   {
+    id: "goals-success",
+    test: [/\bgoal(s)?\b/, /\bsuccess (framework|action|practice)s?\b/, /\bokrs?\b/, /\bpersonal (goal|effectiveness)\b/, /\bcharter\b/, /\bretrospective\b/, /\brhogov\b/, /\bhandoff\b/],
+    answer: ({ cmd }) =>
+      `\`${C(cmd)} goal\` is the private personal goal surface: \`/goal add <text>\`, \`list\`, \`done <id>\`, \`review\`, \`remove <id>\`, and explicit \`share <id>\`. Goals are local to your dyncap identity and are not broadcast unless you share one. For a group, make the charter/objectives a \`/gov issue\`, ratify with \`/poll\` or \`/gov vote\`, and record the outcome with \`/lemma\`. The required RhoGov handoff uses the canonical \`success-charter/1\` artifact; on-chain submission/status is still tracked in quantum-os#291. Docs: https://github.com/rhovision-org/quantum-os/blob/main/docs/success-frameworks.md`,
+  },
+  {
+    id: "processes",
+    test: [/\bqos process(es)?\b/, /\bprocess table\b/, /^\/ps\b/, /\bwhat is \/ps\b/, /\bkill (a )?process\b/, /\bwhat is \/qos\b/],
+    answer: () =>
+      "`/qos start|status|ps|suspend|resume|terminate|kill` manages named QOS processes; `/ps` is the process table and `/kill <name|id>` is the owner-only terminate alias. Every lifecycle step is a signed `qos.event/1` broadcast, every peer recomputes the same digest, and a non-owner cannot drive someone else's process. No chain call is involved.",
+  },
+  {
+    id: "rhoqu",
+    test: [/\brhoqu\b/, /\bprocess macro\b/, /\btranspil/],
+    answer: () =>
+      "`/rhoqu <source>` is the shipped process macro layer: `process` definitions, `$arg`, `new`, raw `/commands`, transpile-time `if`, and `on <channel>(<binding>)` handlers. It lowers to ordinary commands, which keep their existing capability checks. Be honest about the limits: `parallel` is sequential today, there is no `$LAST_ID`/output binding, `if` is transpile-time only, and the formal RhoProcess IR is design, not runtime. Gaps are tracked in quantum-os#290.",
+  },
+  {
+    id: "ai-integration",
+    test: [/\bai (integration|agent|assistant)\b/, /\bclaude\b/, /\bmodel\b/, /\bllm\b/],
+    answer: ({ cmd }) =>
+      `AI is an assistant, not an authority. A model may draft a RhoQu recipe or summarize a discussion, but generated commands must be previewed and state-changing actions confirmed. It cannot sign, move funds, hand off to RhoGov, or bypass group decisions. \`${C(cmd)} ask\` uses this deterministic FAQ first, then the optional AI backend, and reports the backend error instead of faking an answer.`,
+  },
+  {
     id: "zfa",
     test: [/\bzfa\b/, /\bzero free action\b/, /\bcapability token\b/, /\bwhat is a capability\b/],
     answer: () =>
@@ -170,6 +194,15 @@ export function selftest() {
   has("how do I record a decision?", /\/lemma/);
   has("what is /rholang?", /opt-in|deploy/i);
   has("what are the agents?", /facilitator|scribe|skeptic/i);
+  has("what is /goal?", /private|\/goal add/i);
+  has("how do I track a personal goal?", /dyncap|\/goal add/i);
+  has("what is the success framework?", /\/gov|success-charter/i);
+  has("how does the rhogov handoff work?", /success-charter\/1|#291/i);
+  has("what is /ps?", /process table/i);
+  has("how do I kill a process?", /\/kill|owner-only/i);
+  has("what is /qos?", /qos start|signed/i);
+  has("what is /rhoqu?", /sequential|RhoProcess|output binding/i);
+  has("how does AI integration work?", /assistant|preview/i);
 
   ok("an unrelated question is left to the AI backend", answerFromKnowledge("what is the weather in Lisbon?") === null);
   ok("an empty question is not answered", answerFromKnowledge("") === null);
