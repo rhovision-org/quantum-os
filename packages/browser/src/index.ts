@@ -46,3 +46,7 @@ export type {
   QosQuorum,
   QosTransport,
 } from "./qos-process.js";
+
+// The room-facing `/qos` command surface over the contract above.
+export { QosCommand } from "./qos-command.js";
+export type { QosCommandHost } from "./qos-command.js";

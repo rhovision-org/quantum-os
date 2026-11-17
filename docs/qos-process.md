@@ -259,6 +259,29 @@ covers:
 
 The test is part of CI (see `.github/workflows/ci.yml`).
 
+## Browser `/qos` command
+
+The merged contract is reachable from a room with a thin command surface:
+
+```text
+/qos start <name> [| <question>]
+/qos status [name|id]
+/qos suspend <name|id> [| reason]
+/qos resume <name|id> [| reason]
+/qos terminate <name|id> [| reason]
+```
+
+`qos-command.ts` owns only the command text, process-name resolution, and the
+chat lines; `QosProcessRoom` still signs every lifecycle event with the
+browser's dyncap identity and broadcasts the same `qos.event/1` object every
+peer verifies. Only the process owner can drive its lifecycle; a peer that
+merely saw the start event can read the state but cannot suspend/resume/
+terminate it. `/qos status` reports the full deterministic `stateDigest`.
+
+`qos-command.test.mjs` starts a process on one identity, feeds the same events
+to a second identity, and asserts both reducers agree on the state digest after
+start, suspend, resume and terminate. It is part of CI.
+
 ## Gate criteria mapping
 
 | Gate | How this PR closes it |
@@ -273,7 +296,7 @@ The test is part of CI (see `.github/workflows/ci.yml`).
 
 ## Out of scope
 
-- A `/qos` browser UI or agent role (the `QosProcessRoom` adapter is the seam).
+- A full `/qos` UI or a dedicated agent role; the `/qos` command and the `QosProcessRoom` adapter are the seam.
 - Complete consensus, finality, or Byzantine fault tolerance.
 - Replacement of `/gov` or `/poll` semantics; the reducer reuses `polls.ts`.
 - Performance optimization, media, or UI.
