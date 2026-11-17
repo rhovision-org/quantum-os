@@ -1,0 +1,80 @@
+name: QOS × Rholo integration harness (#601)
+
+on:
+  pull_request:
+    branches: [main, work]
+    paths:
+      - "scripts/localnet/qos-devnet.*"
+      - "scripts/qos-cli/agent.mjs"
+      - "scripts/qos-cli/package-lock.json"
+      - "packages/signaling/src/server.ts"
+      - "packages/browser/vite.config.ts"
+      - "tests/test_qos_devnet.py"
+      - ".github/workflows/qos-rholo-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-node-smoke:
+    name: Real bundled rnode + QOS lifecycle (NOT public #584)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - name: Rust WASM toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - name: Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Harness source contract
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/localnet/qos-devnet.py
+          bash -n scripts/localnet/qos-devnet.sh
+          node --check scripts/qos-cli/agent.mjs
+          python3 -m unittest discover -s tests -p test_qos_devnet.py -v
+      - name: Start actual bundled Rholo node, QOS browser, signaling, facilitator
+        env:
+          QOS_RUN_DIR: ${{ runner.temp }}/qos601
+        run: |
+          set -euo pipefail
+          trap 'bash scripts/localnet/qos-devnet.sh down || true' EXIT
+          # Bearer room URL is intentionally suppressed: GitHub Actions logs persist.
+          bash scripts/localnet/qos-devnet.sh up --no-ai > /dev/null
+          bash scripts/localnet/qos-devnet.sh status > qos601-status.txt
+          cat qos601-status.txt
+          grep -q 'signaling_health=True' qos601-status.txt
+          grep -q 'agent: pid=.*alive=True' qos601-status.txt
+          grep -q 'node: pid=.*alive=True' qos601-status.txt
+          curl --silent --show-error --fail --max-time 10 http://127.0.0.1:40403/api/status |
+            python3 -c 'import json,sys; assert json.load(sys.stdin)["shardId"]'
+          curl --insecure --silent --show-error --fail --max-time 10 https://127.0.0.1:5173/rnode/api/status |
+            python3 -c 'import json,sys; assert json.load(sys.stdin)["shardId"]'
+          curl --insecure --silent --show-error --fail --max-time 10 --output /dev/null             https://127.0.0.1:5173/quantum-os/
+          bash scripts/localnet/qos-devnet.sh down
+          bash scripts/localnet/qos-devnet.sh status | grep -q 'STOPPED'
+          sha256sum qos601-status.txt > qos601-status.SHA256SUMS
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qos-rholo-601-status
+          path: |
+            qos601-status.txt
+            qos601-status.SHA256SUMS
+          if-no-files-found: ignore
+
+# The smoke proves lifecycle + HTTP routing of a real disposable bundled node
+# on an isolated GitHub runner. It does NOT prove two-browser WebRTC, a signed
+# deploy, RhoGov chain handoff, or public four-validator G1–G6 acceptance.

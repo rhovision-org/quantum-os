@@ -193,3 +193,47 @@ serializes the appends:
 acc!("") |
 contract log(@msg, ack) = { for (@s <- acc) { acc!(s ++ msg) | ack!(Nil) } }
 ```
+
+
+## QuantumOS × Rholo one-command integration (#601)
+
+The supported orchestration path is documented in the [Rholo operator guide](https://github.com/rhovision-org/rholo/blob/dev/docs/src/developer/quantum-os.md).
+
+On **Linux x86-64** with Node 22+, pnpm, Python 3, Rust + wasm-pack,
+and the included executable `bin/rnode`:
+
+```sh
+bash scripts/localnet/qos-devnet.sh up --no-ai
+bash scripts/localnet/qos-devnet.sh status
+bash scripts/localnet/qos-devnet.sh down
+```
+
+The harness builds QOS WASM/browser/Signaling, installs the standalone
+agent's **locked npm dependencies**, and starts only its own process groups.
+The browser URL plus a **fresh secret room cap is printed once to the terminal**;
+the cap is not persisted to state or process argv. Agent mode is deterministic
+FAQ by default. `--ai` explicitly opts in to a configured Claude CLI.
+
+To use an **already running** Rholo HTTP API instead, without operating the node:
+
+```sh
+bash scripts/localnet/qos-devnet.sh up --existing-node http://127.0.0.1:40403 --no-ai
+```
+
+For a remote API, use trusted HTTPS or a loopback SSH forward; the harness
+rejects public cleartext HTTP and the administrative 40405 port. In the
+browser, set `/rholang rnode https://127.0.0.1:5173/rnode` so the local
+TLS proxy handles CORS and mixed content. The Signaling path is
+`wss://127.0.0.1:5173/signal`. The local Vite certificate is **self-signed**
+and must be trusted explicitly on this development host.
+
+`down` never stops an existing node and never deletes state from an external
+Devnet. To launch Rholo's **own** Docker Devnet, use
+[Rholo devnet.md](https://github.com/rhovision-org/rholo/blob/dev/docs/src/node/devnet.md)
+and then choose `--existing-node`.
+
+The actual two-browser WebRTC exchange, wallet-funded signed deploy, and
+RhoGov chain status require separately recorded observations; a passing build
+or status GET is not those tests. See [QOS commands](../../docs/commands.md)
+and [success framework](../../docs/success-frameworks.md); the chain
+handoff remains [quantum-os#291](https://github.com/rhovision-org/quantum-os/issues/291).
