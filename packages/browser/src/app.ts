@@ -4152,8 +4152,23 @@ function handleCommand(raw: string): string[] {
             }
             const iss = g.issues.find((i) => i.id === charter.decisions[0]?.issueId);
             const poll = iss?.pollId ? pollStore.get(iss.pollId) : undefined;
-            if (!poll || poll.status !== "closed" || poll.id !== charter.decisions[0]?.pollId) {
+            if (!poll || poll.status !== "closed" || poll.id !== charter.decisions[0]?.pollId
+                || !iss || poll.method !== "approval") {
               sys("ratification evidence changed; prepare again"); break;
+            }
+            // The prepared charter is a snapshot. Do not allow the off-chain
+            // ballots/tally to change between preview and actual signing.
+            const original = charter.decisions[0].quorum as {yes?:number;no?:number;total?:number} | undefined;
+            const approve = poll.options.find((o) => /^(approve|adopt|yes|ratify)$/i.test(o.text.trim()));
+            const reject = poll.options.find((o) => /^(reject|no)$/i.test(o.text.trim()));
+            const current = tallyApproval(poll, govWeights(g, iss, poll));
+            const yesNow = approve ? current.counts[approve.id] ?? 0 : 0;
+            const noNow = reject ? current.counts[reject.id] ?? 0 : 0;
+            if (!original || poll.options.length !== 2 || !approve || !reject
+                || original.yes !== yesNow || original.no !== noNow
+                || original.total !== current.totalBallots
+                || current.totalBallots <= 0 || yesNow <= noNow || yesNow * 2 <= current.totalBallots) {
+              sys("ratification changed since preview; prepare again"); break;
             }
             const prompt = "Submit this EXACT signed success-charter/1 artifact to RhoGov Issue/4?\n"
               + "Group: " + g.name + "\nSHA-256: " + charter.charterHash

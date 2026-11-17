@@ -72,7 +72,10 @@ async function main() {
     fail("disposable data directory must be in GitHub runner temporary storage");
   }
   const sourceCommit=process.env.GITHUB_SHA||"unavailable";
-  report.quantumOsSource=sourceCommit;
+  report.githubWorkflowTestedMergeSha=sourceCommit;
+  report.quantumOsSource=process.env.QOS_291_HEAD_SHA||sourceCommit;
+  report.githubRunId=process.env.GITHUB_RUN_ID||null;
+  report.githubRunAttempt=process.env.GITHUB_RUN_ATTEMPT||null;
   report.nodeExecutableVersion=process.env.QOS_291_RNODE_VERSION||"unavailable";
   report.nodeExecutableSha256=process.env.QOS_291_RNODE_HASH||"unavailable";
   report.startedUtc=now();
@@ -143,6 +146,7 @@ async function main() {
     fail("signed handoff submitted but exact immutable on-chain read-back missing");
   }
   report.observedBlockHash=result.observedBlockHash;
+  report.observedBlockNumber=result.blockNumber??null;
   report.readAt=result.readAt;
   report.proposalState=result.status;
   stage("immutable-onchain-read-back","PASS",{status:result.status,readAt:result.readAt});

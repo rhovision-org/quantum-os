@@ -49,6 +49,7 @@ jobs:
       - name: Launch REAL disposable Rholo and submit the signed charter
         env:
           QOS_291_DATA: ${{ runner.temp }}/qos291-rnode
+          QOS_291_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           mkdir -p "$QOS_291_DATA"

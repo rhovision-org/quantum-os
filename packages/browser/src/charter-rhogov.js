@@ -53,15 +53,18 @@ async function explore(nodeUrl, term) {
   }
   // RhoGov uses the latest block for an immediately readable proposal;
   // this is *not* necessarily finalized. Snapshot the actual block hash.
-  let latest = null;
+  let latest = null, latestHeight = null;
   try {
     const blocks = await getJson(base + "/api/blocks/1");
     latest = Array.isArray(blocks) && blocks[0]?.blockHash ? blocks[0].blockHash : null;
+    latestHeight = Array.isArray(blocks) && Number.isSafeInteger(blocks[0]?.blockNumber)
+      ? blocks[0].blockNumber : null;
   } catch {}
   if (latest) {
     try {
       const r = await post("/api/explore-deploy-by-block-hash", {term, blockHash:latest, usePreStateHash:false});
-      return { ...r, readAt:"latest-block-unfinalized-possible", observedHash:latest };
+      return { ...r, readAt:"latest-block-unfinalized-possible", observedHash:latest,
+               observedHeight:latestHeight };
     } catch (err) {
       if (!/404|unknown route|not found/i.test(String(err))) throw err;
     }
@@ -96,14 +99,14 @@ export async function readCharterIssue(nodeUrl, issueUri, charterHash) {
       throw new Error("Issue id indexed but issueOf returned Nil; inconsistent read");
     }
     return {raw:null, readAt:result.readAt, block:result.block,
-            observedBlockHash:result.observedHash};
+            observedBlockHash:result.observedHash, observedHeight:result.observedHeight};
   }
   if (result.values.length !== 1) throw new Error("Issue/4 returned multiple values");
   const entry = result.values[0];
   if (Array.isArray(entry) && entry[0] === "gov-error") throw new Error("RhoGov read: " + String(entry[1]));
   const raw = entry === null || entry === "Nil" ? null : entry;
   return { raw, readAt: result.readAt, block: result.block,
-           observedBlockHash:result.observedHash };
+           observedBlockHash:result.observedHash, observedHeight:result.observedHeight };
 }
 export async function readCharterStatus(nodeUrl, issueUri, charter) {
   const record = await readCharterIssue(nodeUrl,issueUri,charter.charterHash);
@@ -120,7 +123,7 @@ export async function readCharterStatus(nodeUrl, issueUri, charter) {
   }
   return { ...status, issueUri, chainRef:issueUri+"/"+charterProposalId(charter.charterHash),
            observedBlockHash:record.observedBlockHash, readAt:record.readAt,
-           blockNumber:record.block?.blockNumber ?? null };
+           blockNumber:record.observedHeight ?? record.block?.blockNumber ?? null };
 }
 /**
  * Idempotent prepare+submit. Reads first. Unknown outcomes are NOT retried
