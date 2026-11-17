@@ -38,6 +38,7 @@ import { parseDefinition, parseInvocation, expandCommand, expandCallSites,
 import { createCalls, type Calls } from "./calls.js";
 import { QosCommand } from "./qos-command.js";
 import { pickAskAgent, agentAskText } from "./agent-ask.js";
+import { GoalStore, parseGoalAdd } from "./goal-store.js";
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
 import { hashBlob, entryFromWire, sortEntries, findEntry, describeEntry, shortHash,
@@ -406,6 +407,10 @@ let qpeer: QOSPeer | null = null;
 // Per-room `/qos` controller. It is created lazily once the dyncap identity is
 // ready and dropped when that identity is replaced (a /login restore).
 const qosCommands = new Map<string, QosCommand>();
+// Personal goals belong to the dyncap identity, not the room. Recreated when
+// /login replaces the identity; never written into room state.
+let goalStore: GoalStore | null = null;
+let goalStoreAnchor = "";
 let posixNet: PosixNet | null = null;
 let socketListeners: Map<string, { port: number; type: SocketType; unlisten: () => void }> = new Map();
 let socketConns: Map<string, QosSocket> = new Map();
@@ -913,6 +918,17 @@ function runQosCommand(text: string, label = "/qos"): void {
   const run = signQueue.then(() => qos.handle(text));
   signQueue = run.then(() => undefined, () => undefined);
   void run.catch((e) => addMessage("", `⚠ ${label}: ${(e as Error)?.message ?? e}`, "system"));
+}
+
+/// Lazily bind the personal goal store to the current dyncap identity. A
+/// /login restore changes the anchor, so the old store is dropped, never reused.
+function goalsForIdentity(): GoalStore | null {
+  if (!dyncapState) return null;
+  if (!goalStore || goalStoreAnchor !== dyncapState.anchor) {
+    goalStore = new GoalStore(localStorage, dyncapState.anchor);
+    goalStoreAnchor = dyncapState.anchor;
+  }
+  return goalStore;
 }
 
 /// Verify an inbound envelope's dyncap if present. Returns a status string for
@@ -3575,6 +3591,7 @@ function handleCommand(raw: string): string[] {
         "  /qos [sub]       — named QOS processes: start · status · suspend · resume · terminate",
         "  /ps              — QOS process table (pid · name · state · owner)",
         "  /kill <name|id>  — terminate a process you own (owner-only alias)",
+        "  /goal [sub]      — private personal goals: add · list · done · review · share",
         "  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)",
         "  /probe [sub]     — discrepancy probe window state (status|clear)",
         "  /room [sub]      — multi-room tabs (list|join <cap>|leave|ref)",
@@ -5932,6 +5949,60 @@ function handleCommand(raw: string): string[] {
       break;
     }
 
+    case "goal": {
+      if (!dyncapState) { sys("identity not ready yet — try again in a moment"); break; }
+      const body = arg.trim();
+      const sp = body.indexOf(" ");
+      const sub = (sp < 0 ? body : body.slice(0, sp)).toLowerCase() || "list";
+      const rest = sp < 0 ? "" : body.slice(sp + 1).trim();
+      const goals = goalsForIdentity();
+      if (!goals) { sys("identity not ready yet — try again in a moment"); break; }
+
+      if (sub === "add") {
+        const parsed = parseGoalAdd(rest);
+        if (!parsed) {
+          sys("usage: /goal add <text> [| urgent-important|important|urgent|neither]");
+          break;
+        }
+        const goal = goals.add(parsed.text, parsed.priority);
+        sys(`🎯 added **${goal.id}** — ${goal.text} · ${goal.priority}`);
+        break;
+      }
+      if (sub === "done") {
+        if (!rest) { sys("usage: /goal done <id>"); break; }
+        const goal = goals.complete(rest);
+        sys(goal ? `✓ ${goal.id} done — ${goal.text}` : `no goal ${rest} — /goal list`);
+        break;
+      }
+      if (sub === "remove") {
+        if (!rest) { sys("usage: /goal remove <id>"); break; }
+        sys(goals.remove(rest) ? `removed ${rest}` : `no goal ${rest} — /goal list`);
+        break;
+      }
+      if (sub === "share") {
+        if (!rest) { sys("usage: /goal share <id>"); break; }
+        const shared = goals.share(rest);
+        if (!shared) { sys(`no goal ${rest} — /goal list`); break; }
+        if (!qpeer) { sys("not connected — connect first"); break; }
+        // Explicit, signed, one goal only. Personal state never syncs implicitly.
+        signedBroadcast({ kind: "goal-share", goal: shared, by: myName || "a peer" });
+        sys(`→ shared ${shared.id} into the room — this one goal only`);
+        break;
+      }
+      if (sub === "review") {
+        const r = goals.review();
+        sys(`personal goals: ${r.open.length} open · ${r.done.length} done`);
+        for (const g of r.open) sys(`  ○ ${g.id} · ${g.text} · ${g.priority}`);
+        break;
+      }
+
+      const list = goals.list();
+      if (list.length === 0) { sys("no personal goals yet — /goal add <text>"); break; }
+      sys(`personal goals (${list.length}) — private to this identity:`);
+      for (const g of list) sys(`  ${g.status === "done" ? "✓" : "○"} ${g.id} · ${g.text} · ${g.priority}`);
+      break;
+    }
+
     case "ask": {
       const question = arg.trim();
       if (!question) {
@@ -6505,6 +6576,7 @@ function handleCommand(raw: string): string[] {
         if (!restored) { addMessage("", "recovery string is corrupt (bad seed)", "system"); return; }
         dyncapState = restored;
         qosCommands.clear();   // old controllers hold the previous identity
+        goalStore = null; goalStoreAnchor = "";   // personal goals are identity-scoped
         saveDyncap();
         if (typeof parsed.name === "string" && parsed.name.trim()) {
           myName = parsed.name.trim();
@@ -8582,6 +8654,17 @@ async function connect(): Promise<void> {
           if (added) addMessage("", `+${added} librar${added === 1 ? "y entry" : "y entries"} via sync`, "system");
           return;
         }
+        if (d.kind === "goal-share") {
+          if (!d.dyncap || typeof d.dyncap !== "object") return;   // share is signed by construction
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
+          const g = d.goal as Record<string, unknown> | undefined;
+          const text = g && typeof g.text === "string" ? g.text.trim() : "";
+          if (!text) return;
+          const priority = g && typeof g.priority === "string" ? ` · ${g.priority}` : "";
+          addMessage(from, `🎯 shared goal: ${text}${priority}`, "peer", peerLabel(from));
+          return;
+        }
         if (d.kind === "record") {
           addMessage("", `${d.on ? "⏺" : "⏹"} ${peerLabel(from)} ${d.on ? "is recording their screen" : "stopped recording"}`, "system");
           return;
@@ -8879,7 +8962,7 @@ function send(): void {
     if (cmd !== "help" && cmd !== "dump") {
       sessionLog.push({ who: myName || "you", cmd, arg, summary: lines[0] ?? "" });
     }
-    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "ask" && cmd !== "ps" && cmd !== "kill" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
+    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "ask" && cmd !== "goal" && cmd !== "ps" && cmd !== "kill" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
       qpeer.broadcast({ kind: "qlf", cmd, arg, lines });
     }
     return;

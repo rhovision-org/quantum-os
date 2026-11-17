@@ -59,3 +59,23 @@ export type {
   QosErrno, QosHandle, QosHandleInfo, QosProcess, QosProcessInfo, QosProcessState,
   QosResult, QosRightName, QosSignal, QosSyscallName,
 } from "./qos-kernel.js";
+
+// Personal success-framework goals — identity-scoped, local-only by default.
+export { GoalStore, GOAL_PRIORITIES, parseGoalAdd } from "./goal-store.js";
+export type {
+  Goal, GoalPriority, GoalStatus, GoalStorage, SharedGoal,
+} from "./goal-store.js";
+
+// Canonical group charter artifact for the required RhoGov/Rholo handoff.
+export {
+  SUCCESS_CHARTER_SCHEMA, SUCCESS_CHARTER_VERSION,
+  buildSuccessCharter, successCharterHash, validateSuccessCharter,
+} from "./success-charter.js";
+export type {
+  CharterDecision, CharterGroup, CharterMember, CharterObjective, CharterRole,
+  CharterValidation, CharterValidationOptions, SuccessCharter, SuccessCharterInput,
+} from "./success-charter.js";
+
+// RhoQu success recipes using only the shipped subset (see #290 for gaps).
+export { SUCCESS_RECIPES, recipeById } from "./success-recipes.js";
+export type { SuccessRecipe } from "./success-recipes.js";
