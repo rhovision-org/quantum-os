@@ -11,6 +11,7 @@ Detail pages hang off this one:
 | [connection.md](connection.md) | signaling trust model, room capacity, the bounded-degree overlay, leased peer ids, `/ice`, the default TURN relay, reconnect fixes |
 | [rholang.md](rholang.md) | the `$`/`+` macro language, the `%` capability-macro registry, the `/rholang` chain client |
 | [commands.md](commands.md) | every slash command |
+| [qos-process.md](qos-process.md) | named QOS processes: the finite event contract, signed lifecycle, deterministic orchestration, failure modes, and the chain boundary (gate quantum-os#264) |
 | [../Consensus.md](../Consensus.md) | the `/probe` protocol and threat model |
 | [../SECURITY.md](../SECURITY.md) | the full threat model, known issues, reporting |
 | [../scripts/qos-cli/README.md](../scripts/qos-cli/README.md) | the headless Node peer, memory daemon, agents, bridge |

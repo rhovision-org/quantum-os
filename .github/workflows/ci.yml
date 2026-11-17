@@ -151,6 +151,13 @@ jobs:
       - name: Exchange 2PC recovery test
         run: node packages/browser/test/exchange-2pc.test.mjs
 
+      # QOS process orchestration (gate quantum-os#264): the finite event
+      # contract, signed lifecycle, the full nominations -> ranked poll ->
+      # lemma -> optional anchor composition, independent peers in opposite
+      # arrival orders, failure/fork handling, and both chain modes.
+      - name: QOS process orchestration test
+        run: node packages/browser/test/qos-process.test.mjs
+
       # Browser behaviour, against stubbed media. Not a rendering test — it
       # asserts which track ends up in the stream a joiner would be given.
       - name: Calls test
