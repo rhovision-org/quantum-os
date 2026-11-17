@@ -42,7 +42,7 @@ Everything linked from the first four rows is **running code or a verified proof
 9. Use `/grant [label]` to mint a random ZFA capability token and share it as a proof object.
 10. Use `/request name` to signal you need a named lemma; the holder sees a prompt and can `/pass name peer` to transfer it directly — no token strings to copy.
 
-Beyond evaluation, a room is a full collaboration space: take **group decisions** (`/poll`, `/estimate`, the `/probe` consensus check, trust-weighted `/gov` liquid democracy); invite **AI agent members** — a trust-governed *facilitator*, *scribe*, and *skeptic* that join as full peers and run on a Claude subscription ([Developer Guide](Developer_Guide.md)); and run the room as a **quantum problem solver** (below). New here? Start with the **[User Guide](User_Guide.md)**.
+Beyond evaluation, a room is a full collaboration space: take **group decisions** (`/poll`, `/estimate`, the `/probe` consensus check, trust-weighted `/gov` liquid democracy); invite **AI agent members** — a trust-governed *facilitator*, *scribe*, and *skeptic* that join as full peers and run on a Claude subscription ([Developer Guide](Developer_Guide.md)) — and ask the room with **`/ask <question>`**, which picks the facilitator when present, otherwise another live agent ([Agents](scripts/qos-cli/README.md)); and run the room as a **quantum problem solver** (below). New here? Start with the **[User Guide](User_Guide.md)**.
 
 The room URL encodes a ZFA capability token in the hash (`#room=cap:room:…`). Anyone with the link can join — no account needed. The public signaling server (`wss://quantum-os-signaling.onrender.com`) is used by default; edit the field to point at a self-hosted server.
 

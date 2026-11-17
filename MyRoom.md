@@ -39,7 +39,7 @@ attract the drive-by chaos a published room does.
 
 Type **`/render`** in the room to open an animation of it — your perspectives (everyone connected)
 bound to the shared room closure, plus your closures (lemmas) and groups. Not sure what a command
-does? Ask a room agent: **`/facil ask "how do I …"`** — it knows QuantumOS and will name the command.
+does? Ask a room agent: **`/ask "how do I …"`** — it picks the facilitator when present, otherwise another live agent, and tells you if none is in the room. To address the facilitator directly, use `/facil ask "how do I …"`; it knows QuantumOS and will name the command.
 To share information *between* rooms, see [Room Bridges](Room_Bridges.md).
 
 ## Get a test REV address (for `/rholang`)

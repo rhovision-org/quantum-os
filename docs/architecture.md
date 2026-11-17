@@ -32,7 +32,8 @@ packages/
   browser/           TypeScript — WebRTC peer, loads ZFA WASM
 
 scripts/
-  qos-cli/           Node — headless room peer: one-shot CLI + persistent
+  qos-cli/           Node — headless room peer: one-shot CLI on QOSPeer
+                     (hashed room id, sealed frames) + persistent
                      memory-peer daemon. Standalone (outside the workspace).
 ```
 
