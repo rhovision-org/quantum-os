@@ -57,6 +57,7 @@ jobs:
           grep -q 'signaling_health=True' qos601-status.txt
           grep -q 'agent: pid=.*alive=True' qos601-status.txt
           grep -q 'node: pid=.*alive=True' qos601-status.txt
+          grep -q 'shardId' qos601-status.txt
           curl --silent --show-error --fail --max-time 10 http://127.0.0.1:40403/api/status |
             python3 -c 'import json,sys; assert json.load(sys.stdin)["shardId"]'
           curl --insecure --silent --show-error --fail --max-time 10 https://127.0.0.1:5173/rnode/api/status |

@@ -1,5 +1,8 @@
 """Contract tests for the #601 harness. No network, process launch, or devnet."""
 import importlib.util
+from contextlib import redirect_stdout
+import io
+from unittest.mock import patch
 import os
 from pathlib import Path
 import unittest
@@ -41,6 +44,21 @@ class OperatorContract(unittest.TestCase):
 
     def test_proc_start_marker(self):
         self.assertIsNotNone(HARNESS.proc_birth(os.getpid()))
+
+    def test_status_keeps_node_info_when_finality_is_unavailable(self):
+        def endpoint(url):
+            if url.endswith("/api/status"):
+                return {"version": {"node": "rholo node test"}, "shardId": "/testnet"}
+            raise OSError("finality not available")
+        out = io.StringIO()
+        fake = {"mode": "existing", "node_url": "http://127.0.0.1:40403",
+                "services": {}, "quantum_os_revision": "ci-test"}
+        with patch.object(HARNESS, "load_state", return_value=fake), patch.object(
+            HARNESS, "http_json", side_effect=endpoint), patch.object(
+            HARNESS, "http_ok", return_value=True), redirect_stdout(out):
+            HARNESS.cmd_status(None)
+        self.assertIn('"shardId": "/testnet"', out.getvalue())
+        self.assertIn("last_finalized=UNAVAILABLE (OSError)", out.getvalue())
 
 
 if __name__ == "__main__":

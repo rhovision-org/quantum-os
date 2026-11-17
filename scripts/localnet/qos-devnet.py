@@ -321,12 +321,16 @@ def cmd_status(_: argparse.Namespace) -> None:
     url = state.get("node_url", "")
     try:
         node = http_json(url + "/api/status")
-        last = http_json(url + "/api/last-finalized-block")
         print("node_status=" + json.dumps({"version": node.get("version"), "shardId": node.get("shardId"),
-                                            "networkId": node.get("networkId"), "lastFinalized": last.get("blockInfo")},
-                                           default=str)[:2000])
+                                            "networkId": node.get("networkId")}, default=str)[:2000])
     except Exception as exc:
         print(f"node_status=UNAVAILABLE ({type(exc).__name__})")
+    # On a fresh devnet, finality may be unavailable even when /api/status is live.
+    try:
+        last = http_json(url + "/api/last-finalized-block")
+        print("last_finalized=" + json.dumps(last.get("blockInfo"), default=str)[:1000])
+    except Exception as exc:
+        print(f"last_finalized=UNAVAILABLE ({type(exc).__name__})")
     print(f"signaling_health={http_ok(f'http://127.0.0.1:{SIGNAL_PORT}/')}")
     print("Room capability deliberately not stored; use original terminal URL or generate a fresh room.")
 
