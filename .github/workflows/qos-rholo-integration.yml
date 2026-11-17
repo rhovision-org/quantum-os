@@ -5,6 +5,8 @@ on:
     branches: [main, work]
     paths:
       - "scripts/localnet/qos-devnet.*"
+      - "scripts/localnet/qos-signed-smoke.mjs"
+      - "scripts/qos-cli/signal-smoke.mjs"
       - "scripts/qos-cli/agent.mjs"
       - "scripts/qos-cli/package-lock.json"
       - "packages/signaling/src/server.ts"
@@ -43,6 +45,8 @@ jobs:
           python3 -m py_compile scripts/localnet/qos-devnet.py
           bash -n scripts/localnet/qos-devnet.sh
           node --check scripts/qos-cli/agent.mjs
+          node --check scripts/localnet/qos-signed-smoke.mjs
+          node --check scripts/qos-cli/signal-smoke.mjs
           python3 -m unittest discover -s tests -p test_qos_devnet.py -v
       - name: Start actual bundled Rholo node, QOS browser, signaling, facilitator
         env:
@@ -63,9 +67,13 @@ jobs:
           curl --insecure --silent --show-error --fail --max-time 10 https://127.0.0.1:5173/rnode/api/status |
             python3 -c 'import json,sys; assert json.load(sys.stdin)["shardId"]'
           curl --insecure --silent --show-error --fail --max-time 10 --output /dev/null             https://127.0.0.1:5173/quantum-os/
+          # Actual isolated CI node: a known disposable key signs one small
+          # deploy; no validator/testnet key or room cap is logged.
+          node scripts/qos-cli/signal-smoke.mjs
+          node scripts/localnet/qos-signed-smoke.mjs
           bash scripts/localnet/qos-devnet.sh down
           bash scripts/localnet/qos-devnet.sh status | grep -q 'STOPPED'
-          sha256sum qos601-status.txt > qos601-status.SHA256SUMS
+          sha256sum qos601-status.txt qos601-signaling.json qos601-signed-deploy.json > qos601-status.SHA256SUMS
       - name: Upload sanitized evidence
         if: always()
         uses: actions/upload-artifact@v6
@@ -73,9 +81,12 @@ jobs:
           name: qos-rholo-601-status
           path: |
             qos601-status.txt
+            qos601-signaling.json
+            qos601-signed-deploy.json
             qos601-status.SHA256SUMS
           if-no-files-found: ignore
 
 # The smoke proves lifecycle + HTTP routing of a real disposable bundled node
-# on an isolated GitHub runner. It does NOT prove two-browser WebRTC, a signed
-# deploy, RhoGov chain handoff, or public four-validator G1–G6 acceptance.
+# on an isolated GitHub runner, plus a separate real signed disposable deploy
+# and two WebSocket peers. It does NOT prove two-browser WebRTC, finalized
+# settlement, RhoGov chain handoff, or public G1–G6 acceptance.
