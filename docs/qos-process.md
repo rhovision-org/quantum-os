@@ -11,9 +11,10 @@ the reproducible two-peer exercise is
 [`packages/browser/test/qos-process.test.mjs`](../packages/browser/test/qos-process.test.mjs).
 
 **Scope status:** the event model, lifecycle, reducer, failure behaviour, and
-security checks are implemented and tested. The browser app does not yet expose
-a `/qos` UI; `QosProcessRoom` is the room-facing adapter a UI or agent would
-use. No chain RPC is added anywhere.
+security checks are implemented and tested. The browser exposes
+`/qos start|status|suspend|resume|terminate` (`qos-command.ts`) over
+`QosProcessRoom`; a full process card and an agent-role wrapper remain
+follow-ups. No chain RPC is added anywhere.
 
 ---
 

@@ -86,7 +86,10 @@ Full kinds + payload shapes: [README](scripts/qos-cli/README.md) · [Group Decis
 - **AI (optional).** [`facilitator-advisor.mjs`](scripts/qos-cli/facilitator-advisor.mjs)'s
   `makeAdvisor({ persona, cmd, backend })` gives an advisor with two backends — `api`
   (`ANTHROPIC_API_KEY`) or `claude-code` (a Claude subscription, no credits). Advisory only,
-  gated by your own budget.
+  gated by your own budget. In the browser, **`/ask <question>`** routes to the live
+  facilitator when one is present, otherwise the lowest-peer-id other live agent, and
+  reports if none is present; it relays the normal `/<role> ask` chat form, so an agent
+  needs no new protocol.
 
 ## Test without a room
 ```

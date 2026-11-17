@@ -107,9 +107,9 @@ Known-live-bug rows link the fix so a regression is recognised, not rediscovered
 | | |
 |---|---|
 | Participants | P1, P2; facilitator (+ scribe or skeptic as needed) |
-| Drives | `run-agents.sh`, `stop-agents.sh`; `/facil help` · `/facil ask …` · `/scribe list 5` · `/skeptic verify @lemma`; `node pushlemma.mjs` |
-| Steps | P1 `/facil ask` a question; P2 `/scribe list 5`. P1 `/lemma Live test @works \| ^v`. **Stop the agents, restart them**, P2 leaves and rejoins. From a shell `node pushlemma.mjs --room … --select works`. |
-| Pass | Each agent replies **as itself** (signed name, not through another). After the restart the rejoining P2 receives the lemma from the agent's `sync-lemmas` (memory survived). `pushlemma` lands the lemma on peers that were already connected. |
+| Drives | `run-agents.sh`, `stop-agents.sh`; `/ask …` · `/facil help` · `/facil ask …` · `/scribe list 5` · `/skeptic verify @lemma`; `node pushlemma.mjs` |
+| Steps | P1 `/ask` a question and confirm the `→ asked the facilitator` line; P1 `/facil ask` again to address it directly. P2 `/scribe list 5`. P1 `/lemma Live test @works \| ^v`. **Stop the agents, restart them**, P2 leaves and rejoins. From a shell `node pushlemma.mjs --room … --select works`. |
+| Pass | `/ask` names the facilitator it chose; each agent replies **as itself** (signed name, not through another). After the restart the rejoining P2 receives the lemma from the agent's `sync-lemmas` (memory survived). `pushlemma` lands the lemma on peers that were already connected. |
 | Reference | [scripts/qos-cli/README.md § Agents](scripts/qos-cli/README.md#agents-facilitator-scribe-greeter-) and § memory daemon |
 
 ### L6 — Deciding together
