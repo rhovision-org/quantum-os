@@ -192,18 +192,45 @@ function callClaudeCLI({ claudeBin, model, system, prompt, log, timeoutMs = 45_0
     let child;
     try {
       child = spawn(claudeBin, args, { stdio: ["pipe", "pipe", "pipe"] });
-    } catch (e) { log(`[facil] claude CLI spawn failed: ${e?.message ?? e}`); return resolve(null); }
+    } catch (e) {
+      const error = `claude CLI spawn failed: ${e?.message ?? e}`;
+      log(`[facil] ${error}`);
+      return resolve({ text: null, error });
+    }
     let out = "", err = "", done = false;
-    const finish = (v) => { if (done) return; done = true; clearTimeout(timer); resolve(v); };
-    const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch {} log("[facil] claude CLI timed out"); finish(null); }, timeoutMs);
-    child.on("error", (e) => { log(`[facil] claude CLI error: ${e?.message ?? e} (is the \`claude\` CLI installed + logged in?)`); finish(null); });
+    const finish = (result) => { if (done) return; done = true; clearTimeout(timer); resolve(result); };
+    const fail = (error) => { log(`[facil] ${error}`); finish({ text: null, error }); };
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch {}
+      fail(`claude CLI timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }, timeoutMs);
+    child.on("error", (e) => fail(`claude CLI error: ${e?.message ?? e} (is the \`claude\` CLI installed + logged in?)`));
     child.stdout?.on("data", (d) => { out += d; });
     child.stderr?.on("data", (d) => { err += d; });
-    child.on("close", (code) => {
-      if (code !== 0) { log(`[facil] claude CLI exit ${code}${err ? ": " + err.trim().slice(0, 200) : ""}`); return finish(null); }
-      finish(out.trim());
+    // A CLI that exits before reading the prompt (a session limit does exactly
+    // that) makes the stdin socket emit EPIPE. That is not the failure to
+    // report — the close handler has the CLI's own message. Ignore EPIPE and
+    // let close/timeout decide; anything else is a real stdin failure.
+    child.stdin?.on("error", (e) => {
+      if (e?.code !== "EPIPE") fail(`claude CLI stdin error: ${e?.message ?? e}`);
     });
-    try { child.stdin.write(prompt); child.stdin.end(); } catch (e) { log(`[facil] claude CLI stdin error: ${e?.message ?? e}`); finish(null); }
+    child.on("close", (code) => {
+      const text = out.trim();
+      const stderr = err.trim();
+      if (code !== 0) {
+        // Claude Code puts its subscription/session-limit message on stdout,
+        // not stderr (e.g. "You've hit your session limit · resets 3:10pm").
+        // Keep both so the room hears the real cause instead of a generic
+        // "I don't have a good answer."
+        const why = stderr || text || "no output";
+        return fail(`claude CLI exit ${code}: ${why.slice(0, 300)}`);
+      }
+      if (!text) return fail(`claude CLI returned no text${stderr ? `: ${stderr.slice(0, 300)}` : ""}`);
+      finish({ text, error: null });
+    });
+    try {
+      if (child.stdin?.writable) { child.stdin.write(prompt); child.stdin.end(); }
+    } catch (e) { fail(`claude CLI stdin error: ${e?.message ?? e}`); }
   });
 }
 
@@ -224,19 +251,27 @@ export function makeAdvisor({ ai = false, backend = "api", apiKey = process.env.
   if (!ai) { enabled = false; label = "off"; }
   else if (backend === "claude-code") { enabled = true; label = `claude-code${cliModel ? " " + cliModel : ""}`; }
   else { enabled = !!apiKey; label = enabled ? apiModel : "off"; if (!apiKey) log("[facil] --ai (api backend) set but ANTHROPIC_API_KEY missing — running deterministic only (try --ai-backend claude-code)"); }
+  let lastError = null;
   return {
     enabled,
     backend,
     model: label,
+    /// Why the last advise() call returned null, when the backend itself
+    /// failed. The caller can surface this instead of a generic fallback.
+    get lastError() { return lastError; },
+    clearError() { lastError = null; },
     /** mode: "ask" | "stimulate" | "synthesize" | "optimize" | "chair" | "gamesummary". Returns a short string, or null. */
     async advise(mode, ctx) {
+      lastError = null;
       if (!enabled) return null;
       const system = sysFor(mode);
       const prompt = userPrompt(mode, ctx);
       const max_tokens = mode === "gamesummary" ? 1200 : mode === "optimize" ? 400 : mode === "chair" ? (ctx?.phase === "closure" ? 400 : 256) : mode === "ask" ? 256 : 160;
       let text = null;
       if (backend === "claude-code") {
-        text = await callClaudeCLI({ claudeBin, model: cliModel, system, prompt, log, timeoutMs: mode === "gamesummary" ? 120_000 : 45_000 });
+        const out = await callClaudeCLI({ claudeBin, model: cliModel, system, prompt, log, timeoutMs: mode === "gamesummary" ? 120_000 : 45_000 });
+        if (out.error) { lastError = out.error; return null; }
+        text = out.text;
       } else {
         try {
           const res = await fetch(ANTHROPIC_URL, {
@@ -244,12 +279,29 @@ export function makeAdvisor({ ai = false, backend = "api", apiKey = process.env.
             headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
             body: JSON.stringify({ model: apiModel, max_tokens, system, messages: [{ role: "user", content: prompt }] }),
           });
-          if (!res.ok) { log(`[facil] advisor HTTP ${res.status}`); return null; }
+          if (!res.ok) {
+            let body = "";
+            try { body = (await res.text()).slice(0, 300); } catch { /* body is optional */ }
+            lastError = `advisor HTTP ${res.status}${body ? `: ${body}` : ""}`;
+            log(`[facil] ${lastError}`);
+            return null;
+          }
           const j = await res.json();
           text = (j?.content?.[0]?.text ?? "").trim();
-        } catch (e) { log(`[facil] advisor error: ${e?.message ?? e}`); return null; }
+        } catch (e) {
+          lastError = `advisor error: ${e?.message ?? e}`;
+          log(`[facil] ${lastError}`);
+          return null;
+        }
       }
-      if (!text || (mode !== "chair" && /^NONE\b/i.test(text))) return null;   // chair phases always render (e.g. "no disagreement")
+      if (!text) { lastError = "advisor returned no text"; return null; }
+      if (mode !== "chair" && /^NONE\b/i.test(text)) {
+        // NONE means "nothing to say" for the nudge modes, but for a direct
+        // question it is a null answer the caller must report — otherwise
+        // `/facil ask` falls back to "I don't have a good answer" with no reason.
+        if (mode === "ask") lastError = "advisor returned NONE (no answer)";
+        return null;
+      }
       return text.slice(0, mode === "gamesummary" ? 6000 : mode === "optimize" ? 1400 : mode === "chair" ? 1200 : mode === "ask" ? 700 : 400);   // optimize/chair are multi-part; ask a few sentences; nudges terse
     },
   };

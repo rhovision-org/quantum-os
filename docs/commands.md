@@ -45,6 +45,7 @@ QLF slash commands:
   /forget <sub>    — remove an item: poll <id> · lemma <name> · note <token|cur denom> · group <name> · list
   /rdv [sub]       — n-party atomic rendezvous (swap|counter|accept|reject|abort|list)
   /dyncap [sub]    — hash-only dynamic capabilities (status|peers)
+  /qos [sub]       — named QOS processes: start · status · suspend · resume · terminate
   /probe [sub]     — joiner-local consensus probe (status|clear)
   /room [sub]      — multi-room tabs (list|join <cap>|leave|ref)
   /share <sel> to <room>  — bridge a lemma/chat/note into another tab
@@ -553,6 +554,20 @@ Outbound signing is wired into the highest-value envelopes: `name` (TOFU bootstr
 Trust ceiling: this is **TOFU plus chain-tamper / replay / fork detection**, not signature-strength identity. Receivers cannot mathematically verify a witness was correctly derived from `seed` — they treat it as opaque-unique per `(anchor, seq)`. Two valid envelopes at the same `seq` under the same anchor are a fork: the peer's identity is flagged contested and the user is warned. The deliberate trade is that the QLF algebra remains the security model; identity is extended via continuity rather than borrowing a separate asymmetric primitive.
 
 See [MultisigDemo.md](../MultisigDemo.md) for a worked example combining `/dyncap` with `/rdv`.
+
+### `/qos [sub]`
+
+Named QOS processes over the finite `qos.event/1` contract. A process is a capability-guarded continuation; start, suspend, resume and terminate are signed events, and every peer recomputes the same deterministic `stateDigest` from the same envelopes. No chain RPC is involved.
+
+| Subcommand | Effect |
+|---|---|
+| `/qos start <name> [| <question>]` | Start a process you own. The returned process id and initial digest are shown. |
+| `/qos status [name|id]` | List known processes, or show one with status, phase, event count, quorum, poll result and full state digest. |
+| `/qos suspend <name|id> [| reason]` | Owner pauses a running process. |
+| `/qos resume <name|id> [| reason]` | Owner resumes a suspended process. |
+| `/qos terminate <name|id> [| reason]` | Owner ends a running or suspended process. |
+
+The command is a thin adapter (`qos-command.ts`); `QosProcessRoom` signs and broadcasts the same object every peer verifies. A peer that only saw the start event can read the state but cannot drive someone else's lifecycle. See [qos-process.md](qos-process.md).
 
 ### `/probe [sub]`
 

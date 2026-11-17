@@ -79,6 +79,16 @@ jobs:
       - name: Capability macro selftest
         run: node scripts/qos-cli/rholang-macros.mjs --selftest
 
+      # `/facil ask` must answer QuantumOS/decision basics without the AI
+      # backend, and a Claude session limit must be surfaced (not swallowed
+      # into "I don't have a good answer"). The advisor test uses a fake CLI,
+      # so CI needs no `claude` login or subscription.
+      - name: Facilitator FAQ selftest
+        run: node scripts/qos-cli/facilitator-faq.mjs --selftest
+
+      - name: Facilitator advisor error selftest
+        run: node scripts/qos-cli/facilitator-advisor.selftest.mjs
+
       # The faucet's HTTP face (faucet-http.mjs) against a stub send — the
       # per-address cooldown, the per-client hourly cap, X-Forwarded-For as
       # the client, the JSON/CORS shape a wallet codes against. Dependency-
@@ -140,6 +150,19 @@ jobs:
       # status pair, not shape-only.
       - name: Exchange 2PC recovery test
         run: node packages/browser/test/exchange-2pc.test.mjs
+
+      # QOS process orchestration (gate quantum-os#264): the finite event
+      # contract, signed lifecycle, the full nominations -> ranked poll ->
+      # lemma -> optional anchor composition, independent peers in opposite
+      # arrival orders, failure/fork handling, and both chain modes.
+      - name: QOS process orchestration test
+        run: node packages/browser/test/qos-process.test.mjs
+
+      # The `/qos` command surface over that contract: two independent peers
+      # reach the same state digest after start / suspend / resume / terminate,
+      # and a non-owner cannot drive someone else's lifecycle.
+      - name: QOS command test
+        run: node packages/browser/test/qos-command.test.mjs
 
       # Browser behaviour, against stubbed media. Not a rendering test — it
       # asserts which track ends up in the stream a joiner would be given.

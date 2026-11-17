@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
   <meta name="description" content="QuantumOS (QOS): an intelligent gateway to each other and everything — the rho ZFA peer-to-peer layer, proven secure. No server, no accounts: possessing a capability token is authorization." />
   <title>QuantumOS — P2P Room</title>
+  <!-- Geek level (src/geek.ts), applied before first paint so a "low" page
+       never flashes the full one. -->
+  <script>
+    try {
+      var g = localStorage.getItem("qos-geek-level");
+      document.documentElement.dataset.geek = (g === "low" || g === "high") ? g : "medium";
+    } catch (e) { document.documentElement.dataset.geek = "medium"; }
+  </script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -414,12 +422,127 @@
     .call-tile.expanded video { object-fit:contain; }
     .call-tile.expanded .call-name { font-size:0.8rem; left:8px; bottom:8px; padding:0.1rem 0.5rem; }
     .call-tile:fullscreen { inset:0; width:100%; height:100%; border:0; border-radius:0; box-shadow:none; }
-    .call-controls { display:flex; gap:0.5rem; }
+    .call-controls { display:flex; flex-wrap:wrap; gap:0.5rem; }
     .call-ctl { background:#141414; border:1px solid #2a2a2a; border-radius:5px; color:#cfe9e2; font-size:0.85rem; padding:0.3rem 0.7rem; cursor:pointer; }
     .call-ctl:disabled { opacity:0.4; cursor:default; }
     .call-ctl:hover { background:#1e2e2e; }
     .call-ctl.hangup { color:#ff9d4a; border-color:#5a2a2a; }
     .call-ctl.hangup:hover { background:#3a1e1e; }
+
+    /* ── Speaker view (calls.ts `setView("speaker")`) ─────────────────────────
+       Whoever is talking, large; up to three others beside it; anyone past
+       that in a row underneath. Tiles are placed by class and grid row, never
+       moved in the DOM — a reparented <video> restarts its stream. */
+    .call-tiles.speaker {
+      /* Tall enough to see a face, short enough that the chat keeps a share of
+         the window; full screen is there for more. */
+      --stage-h: clamp(220px, 40vh, 480px);
+      display:grid; gap:0.5rem;
+      grid-template-columns:repeat(12, minmax(0, 1fr));
+      grid-template-rows:repeat(3, calc((var(--stage-h) - 1rem) / 3));
+      grid-auto-rows:80px;
+    }
+    .call-tiles.speaker .call-tile { width:auto; height:auto; min-height:0; cursor:pointer; }
+    .call-tiles.speaker .stage-main { grid-column:1 / span 9; grid-row:1 / span 3; }
+    .call-tiles.speaker.solo .stage-main { grid-column:1 / -1; }
+    .call-tiles.speaker .stage-main video { object-fit:contain; }
+    .call-tiles.speaker .stage-main .call-name { font-size:0.8rem; left:8px; bottom:8px; padding:0.1rem 0.5rem; }
+    .call-tiles.speaker .stage-main.pinned .call-zoom { opacity:1; }
+    .call-tiles.speaker .stage-side { grid-column:10 / span 3; }
+    .call-tiles.speaker .stage-below { grid-column:span 2; }
+    /* Making sound right now. */
+    .call-tile.speaking { border-color:#3fbf7f; box-shadow:0 0 0 2px #3fbf7f; }
+    @media (max-width: 640px) {
+      /* No room for a side strip: everyone else goes under the main video. */
+      .call-tiles.speaker { --stage-h: 38vh; grid-auto-rows:72px; }
+      .call-tiles.speaker .stage-main { grid-column:1 / -1; }
+      .call-tiles.speaker .stage-side,
+      .call-tiles.speaker .stage-below { grid-column:span 4; grid-row:auto !important; }
+      .call-bar.call-full .call-ctl, html[data-geek="low"] .call-ctl { min-width:3.6rem; padding:0.35rem 0.4rem; }
+    }
+
+    /* ── The call, full screen (calls.ts `toggleFull`) ────────────────────────
+       The bar itself fills the window, so the controls come with it. The class
+       does the filling; the Fullscreen API, where it exists, only removes the
+       browser's own chrome on top. */
+    .call-bar.call-full { position:fixed; inset:0; z-index:300; background:#000; border:0; padding:0.75rem; }
+    .call-bar.call-full .call-tiles { flex:1; min-height:0; }
+    .call-bar.call-full .call-tiles.speaker { grid-template-rows:repeat(3, minmax(0, 1fr)); grid-auto-rows:110px; }
+    .call-bar.call-full .call-tiles:not(.speaker) {
+      display:grid; grid-template-columns:repeat(auto-fit, minmax(min(320px, 100%), 1fr)); grid-auto-rows:minmax(0, 1fr);
+    }
+    .call-bar.call-full .call-tiles:not(.speaker) .call-tile:not(.expanded) { width:auto; height:auto; min-height:0; }
+    .call-bar.call-full .call-controls { justify-content:center; }
+    .call-bar.call-full .call-ctl, html[data-geek="low"] .call-ctl {
+      display:flex; flex-direction:column; align-items:center; gap:0.15rem;
+      min-width:4.6rem; padding:0.4rem 0.6rem; font-size:1.05rem; border-radius:8px;
+    }
+    /* The word under the icon: calls.ts keeps `data-label` current. */
+    .call-bar.call-full .call-ctl[data-label]::after, html[data-geek="low"] .call-ctl[data-label]::after {
+      content:attr(data-label); font-size:0.62rem; color:#b9c4c1; white-space:nowrap;
+    }
+
+    /* ── Geek level (src/geek.ts) ─────────────────────────────────────────────
+       `.geek-med` needs medium or above; `.geek-low` is shown only at low. */
+    html[data-geek="low"] .geek-med { display:none !important; }
+    html:not([data-geek="low"]) .geek-low { display:none !important; }
+
+    .geek-toggle { margin-left:auto; display:flex; align-items:stretch; border:1px solid #2a2a2a; border-radius:6px; overflow:hidden; font-size:0.65rem; flex:none; }
+    .geek-cap { color:#777; padding:0.3rem 0.55rem; white-space:nowrap; }
+    .geek-opt { background:none; border:0; border-left:1px solid #2a2a2a; color:#888; font-family:inherit; font-size:inherit; padding:0.3rem 0.6rem; cursor:pointer; text-transform:capitalize; }
+    .geek-opt:hover { color:#ccc; background:#151515; }
+    .geek-opt.on { background:#1e3a3a; color:#7fdbca; }
+    @media (max-width: 640px) {
+      .geek-cap { font-size:0; padding:0.3rem 0.4rem; }
+      .geek-cap::before { content:"🤓"; font-size:0.8rem; }
+      .geek-opt { padding:0.3rem 0.45rem; }
+    }
+
+    /* Low: the same room, dressed as somewhere you talk. Nothing below removes
+       a capability — every command still works when typed. */
+    html[data-geek="low"] body { font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; background:#1a1d21; color:#d1d2d3; }
+    html[data-geek="low"] header { background:#121016; border-bottom-color:#2c2d30; padding:0.7rem 1.2rem; }
+    html[data-geek="low"] header h1 { font-size:1.05rem; letter-spacing:0; }
+    html[data-geek="low"] .geek-toggle { font-size:0.72rem; }
+    html[data-geek="low"] .tab-bar { background:#121016; border-bottom-color:#2c2d30; }
+    html[data-geek="low"] .tab { font-size:0.8rem; }
+    html[data-geek="low"] .sidebar { background:#19171d; border-right-color:#2c2d30; gap:1.4rem; }
+    html[data-geek="low"] .sidebar h2 { font-size:0.8rem; color:#9a9b9e; text-transform:none; letter-spacing:0; font-weight:600; margin-bottom:0.35rem; }
+    html[data-geek="low"] #my-name { font-size:0.85rem !important; padding:0.5rem 0.6rem !important; border-radius:6px !important; }
+    html[data-geek="low"] .signal-row button { flex:1; font-size:0.85rem; padding:0.5rem; border-radius:6px; background:#1f6f5f; border-color:#2a8a76; color:#fff; font-weight:600; }
+    html[data-geek="low"] .signal-row button:hover { background:#258471; }
+    html[data-geek="low"] #status-text { font-size:0.75rem; }
+    html[data-geek="low"] #peer-list li { font-size:0.88rem; color:#d1d2d3; border-bottom:none; padding:0.25rem 0; word-break:normal; }
+    html[data-geek="low"] #peer-list li::before { content:""; display:inline-block; width:8px; height:8px; border-radius:50%; background:#2bac76; margin-right:0.5rem; }
+    html[data-geek="low"] #peer-list li.unreachable::before { background:none; border:1.5px solid #8a7550; }
+    html[data-geek="low"] .lib-row, html[data-geek="low"] #poll-list { font-size:0.82rem; }
+    html[data-geek="low"] .lib-drop { font-size:0.72rem; color:#6b6c70; border-color:#3a3b3f; }
+    html[data-geek="low"] .share-row { background:#1a1d21; border-bottom-color:#2c2d30; font-size:0.8rem; padding:0.55rem 1.2rem; }
+    html[data-geek="low"] .share-row span { color:#9a9b9e; }
+    html[data-geek="low"] #invite-btn { background:#222529; border:1px solid #3a3b3f; border-radius:6px; color:#d1d2d3; font-family:inherit; font-size:0.8rem; padding:0.35rem 0.75rem; cursor:pointer; }
+    html[data-geek="low"] #invite-btn:hover { border-color:#2a8a76; color:#7fdbca; }
+    /* The toolbar keeps what a conversation needs; the rest is still a `/` away. */
+    html[data-geek="low"] .action-btn[data-action="rholang"],
+    html[data-geek="low"] .action-btn[data-action="estimate"],
+    html[data-geek="low"] .action-btn[data-action="commands"],
+    html[data-geek="low"] .action-btn[data-action="other"] { display:none; }
+    html[data-geek="low"] .actions-row { background:#1a1d21; border-bottom-color:#2c2d30; padding:0.55rem 1.2rem; gap:0.5rem; }
+    html[data-geek="low"] .action-btn { font-size:0.82rem; padding:0.4rem 0.85rem; border-radius:999px; background:#222529; border-color:#3a3b3f; color:#d1d2d3; }
+    html[data-geek="low"] #messages { padding:1rem 1.2rem; gap:0.5rem; }
+    html[data-geek="low"] .msg { font-size:0.94rem; }
+    html[data-geek="low"] .msg .from { font-weight:700; color:#fff; }
+    html[data-geek="low"] .msg .from.self { color:#7fdbca; }
+    html[data-geek="low"] .msg .text { color:#d1d2d3; }
+    html[data-geek="low"] .msg.system-line { font-size:0.8rem; }
+    html[data-geek="low"] .msg.system-line .text { color:#8b8c90; }
+    html[data-geek="low"] .welcome { font-size:0.92rem; border-style:solid; border-color:#2c2d30; background:#222529; color:#c4c5c7; }
+    html[data-geek="low"] .welcome h3 { font-size:1.05rem; color:#fff; }
+    html[data-geek="low"] .input-row { border-top-color:#2c2d30; padding:0.8rem 1.2rem; }
+    html[data-geek="low"] #msg-input { font-size:0.95rem; padding:0.65rem 0.9rem; border-radius:8px; background:#222529; border-color:#565856; }
+    html[data-geek="low"] #send-btn { font-size:0.9rem; border-radius:8px; background:#1f6f5f; border-color:#2a8a76; color:#fff; font-weight:600; }
+    html[data-geek="low"] #attach-btn { border-radius:8px; background:#222529; border-color:#3a3b3f; }
+    html[data-geek="low"] .call-bar { background:#0b0c0e; border-bottom-color:#2c2d30; }
+    html[data-geek="low"] .call-controls { justify-content:center; }
 
     /* Polls */
     .msg.poll-msg { display:block; }
@@ -471,15 +594,16 @@
   <header>
     <button id="sidebar-toggle" aria-label="Toggle sidebar">☰</button>
     <h1>⬡ QuantumOS</h1>
-    <span class="tag" title="An intelligent gateway to each other and everything — the rho ZFA p2p layer, proven secure.">gateway to each other and everything · rho ZFA p2p, proven secure</span>
-    <a href="https://github.com/rhovision-org/quantum-os#readme"
+    <span class="tag geek-med" title="An intelligent gateway to each other and everything — the rho ZFA p2p layer, proven secure.">gateway to each other and everything · rho ZFA p2p, proven secure</span>
+    <a href="https://github.com/rhovision-org/quantum-os#readme" class="geek-med"
        target="_blank" rel="noopener"
        style="font-size:0.65rem;color:#555;text-decoration:none;white-space:nowrap;"
        onmouseover="this.style.color='#7fdbca'" onmouseout="this.style.color='#555'">readme ↗</a>
-    <a href="https://github.com/rhovision-org/quantum-os/issues/new"
+    <a href="https://github.com/rhovision-org/quantum-os/issues/new" class="geek-med"
        target="_blank" rel="noopener"
        style="font-size:0.65rem;color:#555;text-decoration:none;white-space:nowrap;margin-left:0.6rem;"
        onmouseover="this.style.color='#7fdbca'" onmouseout="this.style.color='#555'">new issue ↗</a>
+    <div id="geek-toggle" class="geek-toggle"></div>
   </header>
 
   <div class="sidebar-overlay" id="sidebar-overlay"></div>
@@ -498,23 +622,23 @@
                       color:#e0e0e0;font-family:inherit;font-size:0.7rem;padding:0.4rem 0.5rem;" />
       </div>
 
-      <div>
+      <div class="geek-med">
         <h2>Your ID</h2>
         <div class="id-box" id="my-id">generating…</div>
       </div>
 
-      <div>
+      <div class="geek-med">
         <h2>Room</h2>
         <div class="id-box" id="room-id">—</div>
       </div>
 
       <div>
-        <h2>Signaling</h2>
+        <h2 class="geek-med">Signaling</h2>
         <div class="signal-row">
-          <input id="signal-url" type="text" value="wss://quantum-os-signaling.onrender.com" />
+          <input id="signal-url" class="geek-med" type="text" value="wss://quantum-os-signaling.onrender.com" />
           <button id="connect-btn">Connect</button>
         </div>
-        <div style="margin-top:0.4rem; font-size:0.65rem; display:flex; align-items:center; gap:0.4rem;">
+        <div class="geek-med" style="margin-top:0.4rem; font-size:0.65rem; display:flex; align-items:center; gap:0.4rem;">
           <span style="color:#555; white-space:nowrap;">STUN:</span>
           <input id="stun-url" type="text" value="stun:stun.l.google.com:19302"
             style="flex:1; font-size:0.65rem; background:#111; color:#ccc; border:1px solid #333; border-radius:3px; padding:2px 4px;" />
@@ -526,27 +650,27 @@
       </div>
 
       <div>
-        <h2>Peers (<span id="peer-count">0</span>)</h2>
+        <h2><span class="geek-med">Peers</span><span class="geek-low">People here</span> (<span id="peer-count">0</span>)</h2>
         <ul id="peer-list"></ul>
       </div>
 
       <div id="library-block">
-        <h2>Library (<span id="library-count">0</span>)</h2>
+        <h2><span class="geek-med">Library</span><span class="geek-low">Files</span> (<span id="library-count">0</span>)</h2>
         <ul id="library-list" style="list-style:none; max-height:10rem; overflow-y:auto;"></ul>
         <div class="lib-drop" id="library-drop">drop files here to add them</div>
       </div>
 
-      <div>
+      <div class="geek-med">
         <h2>Lemmas (<span id="lemma-count">0</span>)</h2>
         <ul id="lemma-list" style="list-style:none; max-height:8rem; overflow-y:auto;"></ul>
       </div>
 
-      <div>
+      <div class="geek-med">
         <h2>Currencies (<span id="currency-count">0</span>)</h2>
         <ul id="currency-list" style="list-style:none; max-height:6rem; overflow-y:auto;"></ul>
       </div>
 
-      <div>
+      <div class="geek-med">
         <h2>Notes (<span id="note-count">0</span>)</h2>
         <ul id="note-list" style="list-style:none; max-height:8rem; overflow-y:auto;"></ul>
       </div>
@@ -556,22 +680,22 @@
         <ul id="poll-list" style="list-style:none; max-height:8rem; overflow-y:auto;"></ul>
       </div>
 
-      <div>
+      <div class="geek-med">
         <h2>Commands (<span id="macro-count">0</span>)</h2>
         <ul id="macro-list" style="list-style:none; max-height:8rem; overflow-y:auto;"></ul>
       </div>
 
-      <div>
+      <div class="geek-med">
         <h2>Governance (<span id="gov-count">0</span>)</h2>
         <ul id="gov-list" style="list-style:none; max-height:8rem; overflow-y:auto;"></ul>
       </div>
 
-      <div>
+      <div class="geek-med">
         <h2>Room Process</h2>
         <div class="id-box" id="room-process" style="white-space:pre;">—</div>
       </div>
 
-      <div class="app-version">
+      <div class="app-version geek-med">
         <a href="https://github.com/rhovision-org/quantum-os" target="_blank" rel="noopener"
            >rhovision-org/quantum-os</a><span id="app-version">—</span>
       </div>
@@ -579,10 +703,12 @@
 
     <div class="main">
       <div class="share-row">
-        <span>Share room:</span>
-        <a id="share-link" href="#">—</a>
-        <button id="copy-btn">copy</button>
-        <button id="hide-btn" title="Show or hide the room capability">👁</button>
+        <span class="geek-med">Share room:</span>
+        <a id="share-link" class="geek-med" href="#">—</a>
+        <button id="copy-btn" class="geek-med">copy</button>
+        <button id="hide-btn" class="geek-med" title="Show or hide the room capability">👁</button>
+        <span class="geek-low">Invite people:</span>
+        <button id="invite-btn" class="geek-low" title="Anyone with this link can join the room">🔗 Copy invite link</button>
       </div>
 
       <div id="actions-row" class="actions-row"></div>
@@ -593,6 +719,8 @@
           <button id="call-mute" class="call-ctl" title="Mute mic">🎤</button>
           <button id="call-cam" class="call-ctl" title="Turn camera off">🎥</button>
           <button id="call-share" class="call-ctl" title="Share your screen">🖥</button>
+          <button id="call-view" class="call-ctl" title="Switch between speaker and grid view">👤</button>
+          <button id="call-full" class="call-ctl" title="Full screen, with the call controls">⛶</button>
           <button id="call-hangup" class="call-ctl hangup" title="Leave call">📵 Leave</button>
         </div>
       </div>

@@ -36,6 +36,8 @@ import { parseDefinition, parseInvocation, expandCommand, expandCallSites,
          formatDefinition, findMacros, bodyKind, MacroError,
          MACRO_NAME_RE, MAX_BODY } from "./macro-lang.js";
 import { createCalls, type Calls } from "./calls.js";
+import { QosCommand } from "./qos-command.js";
+import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
 import { hashBlob, entryFromWire, sortEntries, findEntry, describeEntry, shortHash,
          putBytes, getBytes, dropBytes, heldHashes, availabilityOf, AVAILABILITY_MARK, atRisk,
@@ -400,6 +402,9 @@ function markUnread(ctx: RoomContext): void {
 // active room. JavaScript looks up `let` bindings at call time, so all
 // references see the active room's data automatically.
 let qpeer: QOSPeer | null = null;
+// Per-room `/qos` controller. It is created lazily once the dyncap identity is
+// ready and dropped when that identity is replaced (a /login restore).
+const qosCommands = new Map<string, QosCommand>();
 let posixNet: PosixNet | null = null;
 let socketListeners: Map<string, { port: number; type: SocketType; unlisten: () => void }> = new Map();
 let socketConns: Map<string, QosSocket> = new Map();
@@ -866,6 +871,36 @@ function signedSend(peerId: string, envelope: Record<string, unknown>): boolean 
     qpeer.send(peerId, { ...envelope, dyncap });
   }).catch(() => { /* swallow */ });
   return true;
+}
+
+/// The per-room `/qos` controller. Its transport reads the room context's peer
+/// at call time, so a reconnect does not leave it pointed at a dead socket;
+/// `say` switches to the room that produced the line before writing it.
+function qosCommandFor(ctx: RoomContext): QosCommand | null {
+  if (!dyncapState) return null;
+  const existing = qosCommands.get(ctx.roomId);
+  if (existing) return existing;
+  const cmd = new QosCommand({
+    roomId: ctx.roomId,
+    identity: dyncapState,
+    transport: {
+      broadcast: (data, opts) => { ctx.qpeer?.broadcast(data, opts); },
+      send: (target, data, opts) => ctx.qpeer ? ctx.qpeer.send(target, data, opts) : false,
+    },
+    say: (text) => {
+      const prev = activeRoom;
+      setActiveRoom(ctx);
+      try { addMessage("", text, "system"); } finally { setActiveRoom(prev); }
+    },
+    label: (source) => peerLabel(source),
+    onSigned: () => {
+      const prev = activeRoom;
+      setActiveRoom(ctx);
+      try { saveDyncap(); } finally { setActiveRoom(prev); }
+    },
+  });
+  qosCommands.set(ctx.roomId, cmd);
+  return cmd;
 }
 
 /// Verify an inbound envelope's dyncap if present. Returns a status string for
@@ -3525,6 +3560,7 @@ function handleCommand(raw: string): string[] {
         "  /forget <sub>    — remove an item: poll <id> · lemma <name> · note <token|cur denom> · group <name> · list",
         "  /gov <sub>       — liquid-democracy groups: new · member · issue · delegate · trust · censure · vote · treasury · kudos · uri · say · status",
         "  /dyncap [sub]    — hash-only dynamic capabilities (status|peers)",
+        "  /qos [sub]       — named QOS processes: start · status · suspend · resume · terminate",
         "  /probe [sub]     — discrepancy probe window state (status|clear)",
         "  /room [sub]      — multi-room tabs (list|join <cap>|leave|ref)",
         "  /share <sel> to <room>  — bridge a lemma/chat/note into another tab",
@@ -5881,6 +5917,18 @@ function handleCommand(raw: string): string[] {
       break;
     }
 
+    case "qos": {
+      if (!qpeer) { sys("not connected — connect first, then /qos start <name>"); break; }
+      const qos = qosCommandFor(activeRoom);
+      if (!qos) { sys("identity not ready yet — try again in a moment"); break; }
+      // Serialize with chat signing: QosEventSigner uses the same dyncap seq,
+      // so a concurrent chat broadcast must not take the next number.
+      const run = signQueue.then(() => qos.handle(arg));
+      signQueue = run.then(() => undefined, () => undefined);
+      void run.catch((e) => addMessage("", `⚠ /qos: ${(e as Error)?.message ?? e}`, "system"));
+      break;
+    }
+
     case "persist": {
       // /persist <selector> to <peer>   — ask peer to also store this item
       // /persist accept <id>            — accept a pending inbound request
@@ -6415,6 +6463,7 @@ function handleCommand(raw: string): string[] {
         const restored = await deserializeState(parsed.state, activeRoom.roomId);
         if (!restored) { addMessage("", "recovery string is corrupt (bad seed)", "system"); return; }
         dyncapState = restored;
+        qosCommands.clear();   // old controllers hold the previous identity
         saveDyncap();
         if (typeof parsed.name === "string" && parsed.name.trim()) {
           myName = parsed.name.trim();
@@ -8445,6 +8494,13 @@ async function connect(): Promise<void> {
           if (changed) { saveGroups(); renderGroups(); }
           return;
         }
+        if (d.kind === "qos-event") {
+          const qos = qosCommandFor(ctx);
+          if (!qos) return;
+          const accepted = await qos.ingest(from, d);
+          if (!accepted) addMessage("", `⚠ refused a QOS event from ${peerLabel(from)}`, "system");
+          return;
+        }
         if (d.kind === "file-start") { attachments.fileStart(d); return; }
         if (d.kind === "file-chunk") { attachments.fileChunk(from, d); return; }
         if (d.kind === "call-start") {
@@ -8689,14 +8745,17 @@ async function connect(): Promise<void> {
  * earlier lines live until it is sent.
  */
 let pendingLines: string[] = [];
-const MSG_PLACEHOLDER = msgInput.placeholder;
+const MSG_PLACEHOLDER_FULL = msgInput.placeholder;
+/** What the empty composer says — plainer at geek level "low". */
+const msgPlaceholder = (): string =>
+  readGeekLevel() === "low" ? "Message the room…" : MSG_PLACEHOLDER_FULL;
 
 /** Show how many lines are held, so a half-entered message is never invisible. */
 function paintPending(): void {
   const n = pendingLines.length;
   msgInput.placeholder = n
     ? `${n} line${n === 1 ? "" : "s"} held · Shift+Enter for another · Enter sends · Esc discards`
-    : MSG_PLACEHOLDER;
+    : msgPlaceholder();
   msgInput.classList.toggle("continued", n > 0);
 }
 
@@ -8779,7 +8838,7 @@ function send(): void {
     if (cmd !== "help" && cmd !== "dump") {
       sessionLog.push({ who: myName || "you", cmd, arg, summary: lines[0] ?? "" });
     }
-    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
+    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
       qpeer.broadcast({ kind: "qlf", cmd, arg, lines });
     }
     return;
@@ -8823,6 +8882,17 @@ function updateShareLink(): void {
     ? "Reveal the room capability (it goes back into the address bar)"
     : "Hide the room capability — keep it off screen shares and recordings";
 }
+
+// Geek level "low" shows one button in place of the share row's link, copy and
+// reveal controls. It copies the same URL the copy button does.
+const inviteBtn = document.getElementById("invite-btn") as HTMLButtonElement | null;
+inviteBtn?.addEventListener("click", () => {
+  const label = inviteBtn.textContent;
+  navigator.clipboard.writeText(roomUrl()).then(() => {
+    inviteBtn.textContent = "✓ Link copied — send it to someone";
+    setTimeout(() => { inviteBtn.textContent = label; }, 2000);
+  });
+});
 
 copyBtn.addEventListener("click", () => {
   navigator.clipboard.writeText(roomUrl()).then(() => {
@@ -8982,7 +9052,22 @@ function showWelcome(): void {
     "<li>Use the <strong>action buttons</strong> above, or type <code>/</code> to browse every command.</li>" +
     "</ol>" +
     "<div class=\"tip\">Capabilities, lemmas, promissory notes and atomic swaps are all one click — or one slash — away.</div>";
+  div.classList.add("geek-med");
   messagesEl.appendChild(div);
+  // The same welcome for geek level "low": both are in the page and CSS shows
+  // the one that matches, so switching level needs no re-render.
+  const plain = document.createElement("div");
+  plain.className = "welcome geek-low";
+  plain.innerHTML =
+    "<h3>👋 Welcome</h3>" +
+    "This is a private room. Nothing is stored on a server — it lives with the people in it." +
+    "<ol>" +
+    "<li>Type <strong>your name</strong> on the left.</li>" +
+    "<li>Press <strong>Connect</strong>.</li>" +
+    "<li>Press <strong>Copy invite link</strong> above and send it to whoever you want here.</li>" +
+    "<li>Chat below, or press <strong>Call</strong> to talk face to face.</li>" +
+    "</ol>";
+  messagesEl.appendChild(plain);
 }
 
 function initUx(): void {
@@ -9105,6 +9190,8 @@ function initUx(): void {
       mute:  document.getElementById("call-mute")  as HTMLButtonElement | null,
       cam:   document.getElementById("call-cam")   as HTMLButtonElement | null,
       share: document.getElementById("call-share") as HTMLButtonElement | null,
+      view:  document.getElementById("call-view")  as HTMLButtonElement | null,
+      full:  document.getElementById("call-full")  as HTMLButtonElement | null,
     },
   );
   recorder = createRecorder(
@@ -9155,6 +9242,17 @@ function initUx(): void {
   document.getElementById("call-mute")?.addEventListener("click", () => calls.toggleMute());
   document.getElementById("call-cam")?.addEventListener("click", () => calls.toggleCam());
   document.getElementById("call-share")?.addEventListener("click", () => calls.toggleScreen());
+  document.getElementById("call-view")?.addEventListener("click", () => calls.toggleView());
+  document.getElementById("call-full")?.addEventListener("click", () => calls.toggleFull());
+
+  // Geek level: CSS does most of it (index.html, keyed on <html data-geek>);
+  // this is the part CSS cannot reach. "low" opens calls in speaker view —
+  // the view button still switches, the level only sets where it starts.
+  const applyGeek = (level: GeekLevel) => {
+    calls.setView(level === "low" ? "speaker" : "grid");
+    paintPending();
+  };
+  applyGeek(mountGeekToggle(document.getElementById("geek-toggle"), applyGeek).level());
 }
 
 // ---------------------------------------------------------------------------

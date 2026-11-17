@@ -12,7 +12,7 @@ Peer-to-peer QuantumOS running in the browser. ZFA kernel in Rust/WASM, WebRTC d
 
 **[Open a room →](https://rhovision-org.github.io/quantum-os/)** · **[My room →](MyRoom.md)** · **[Syllogism Demo →](SyllogismDemo.md)** · **[Promissory Note Demo →](PromissoryNoteDemo.md)** · **[Atomic Swap Demo →](AtomicSwapDemo.md)** · **[Token Exchange Demo →](ExchangeDemo.md)** · **[Multisig Demo →](MultisigDemo.md)** · **[Dining Philosophers Demo →](DiningPhilosophersDemo.md)** · **[RhoQu Macro Demo →](RhoQuDemo.md)** · **[Optimization Demo →](OptimizationDemo.md)** · **[Consensus →](Consensus.md)** · **[EIES legacy →](EIES_Legacy.md)** · **[Security →](SECURITY.md)** · **[New issue →](https://github.com/rhovision-org/quantum-os/issues/new)**
 
-**Group processes:** **[User Guide →](User_Guide.md)** · **[Developer Guide (build agents) →](Developer_Guide.md)** · **[MacRhoLang — write your own commands →](MacRhoLang.md)** · **[Group Decisions →](Group_Decisions.md)** · **[Quantum Problem Solver →](Collective_Optimization.md)** · **[Governance (liquid democracy) →](Governance.md)** · **[Room Best Practices →](Room_Best_Practices.md)** · **[Live Testing (2+ people) →](Live_Testing.md)** · **[RhoQuCalc Macros — protocols as verified ρ-processes →](RhoQuCalc_Macros.md)**
+**Group processes:** **[User Guide →](User_Guide.md)** · **[Developer Guide (build agents) →](Developer_Guide.md)** · **[MacRhoLang — write your own commands →](MacRhoLang.md)** · **[Group Decisions →](Group_Decisions.md)** · **[QOS process orchestration (gate #264) →](docs/qos-process.md)** · **[Quantum Problem Solver →](Collective_Optimization.md)** · **[Governance (liquid democracy) →](Governance.md)** · **[Room Best Practices →](Room_Best_Practices.md)** · **[Live Testing (2+ people) →](Live_Testing.md)** · **[RhoQuCalc Macros — protocols as verified ρ-processes →](RhoQuCalc_Macros.md)**
 
 **Case studies:** **[Multi-Stakeholder Governance →](GovernanceCaseStudy.md)** · **[Collaborative Learning →](CollaborativeLearningCaseStudy.md)** · **[Specialist Closure Room →](SpecialistRoomCaseStudy.md)** · **[Framework Self-Inquiry (draft) →](SelfInquiryCaseStudy.md)**
 
@@ -73,6 +73,7 @@ and the source file behind it, is in [docs/commands.md](docs/commands.md)**. By 
 | QLF kernel | `/braket` `/qucalc` `/conj` `/coupling` `/zfa` `/cap` `/search` `/solve` | [Collective_Optimization.md](Collective_Optimization.md) |
 | Claims & value | `/lemma` `/grant` `/request` `/pass` `/note` `/rdv` `/persist` `/forget` | [PromissoryNoteDemo.md](PromissoryNoteDemo.md) · [AtomicSwapDemo.md](AtomicSwapDemo.md) |
 | Deciding | `/poll` `/estimate` `/probe` `/gov` `/channel` | [Group_Decisions.md](Group_Decisions.md) · [Governance.md](Governance.md) · [Consensus.md](Consensus.md) |
+| Processes | `/qos` | [docs/qos-process.md](docs/qos-process.md) |
 | Agents | `/facil` `/scribe` `/skeptic` `/observer` `/greeter` | [scripts/qos-cli/README.md](scripts/qos-cli/README.md) |
 | Macros & chain | `/macro` `+name` `$name` `/rhoqu` `/rholang` | [MacRhoLang.md](MacRhoLang.md) · [docs/rholang.md](docs/rholang.md) |
 | Media & files | Call bar · `/record` · `/file` · `/render` | [Media_Libraries.md](Media_Libraries.md) (design) |
