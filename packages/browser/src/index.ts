@@ -50,3 +50,12 @@ export type {
 // The room-facing `/qos` command surface over the contract above.
 export { QosCommand } from "./qos-command.js";
 export type { QosCommandHost } from "./qos-command.js";
+
+// QOS/1 kernel ABI v0 — pure capability-handle/process model (docs/os-abi.md).
+export {
+  QOS_ABI_VERSION, QOS_ALL_RIGHTS, QOS_RIGHTS, QOS_SIGNALS, QOS_SYSCALLS, QosKernel,
+} from "./qos-kernel.js";
+export type {
+  QosErrno, QosHandle, QosHandleInfo, QosProcess, QosProcessInfo, QosProcessState,
+  QosResult, QosRightName, QosSignal, QosSyscallName,
+} from "./qos-kernel.js";

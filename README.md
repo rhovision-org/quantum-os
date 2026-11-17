@@ -73,7 +73,7 @@ and the source file behind it, is in [docs/commands.md](docs/commands.md)**. By 
 | QLF kernel | `/braket` `/qucalc` `/conj` `/coupling` `/zfa` `/cap` `/search` `/solve` | [Collective_Optimization.md](Collective_Optimization.md) |
 | Claims & value | `/lemma` `/grant` `/request` `/pass` `/note` `/rdv` `/persist` `/forget` | [PromissoryNoteDemo.md](PromissoryNoteDemo.md) · [AtomicSwapDemo.md](AtomicSwapDemo.md) |
 | Deciding | `/poll` `/estimate` `/probe` `/gov` `/channel` | [Group_Decisions.md](Group_Decisions.md) · [Governance.md](Governance.md) · [Consensus.md](Consensus.md) |
-| Processes | `/qos` | [docs/qos-process.md](docs/qos-process.md) |
+| Processes | `/qos` `/ps` `/kill` | [docs/qos-process.md](docs/qos-process.md) · [docs/os-roadmap.md](docs/os-roadmap.md) |
 | Agents | `/ask` `/facil` `/scribe` `/skeptic` `/observer` `/greeter` | [scripts/qos-cli/README.md](scripts/qos-cli/README.md) |
 | Macros & chain | `/macro` `+name` `$name` `/rhoqu` `/rholang` | [MacRhoLang.md](MacRhoLang.md) · [docs/rholang.md](docs/rholang.md) |
 | Media & files | Call bar · `/record` · `/file` · `/render` | [Media_Libraries.md](Media_Libraries.md) (design) |
@@ -235,6 +235,7 @@ issue, and a design document says so in its first lines:
 
 | Design | Doc | Issue |
 |---|---|---|
+| QOS/1 — QuantumOS as a full operating system (kernel ABI, scheduler, VFS, shell, devices) | [docs/os-roadmap.md](docs/os-roadmap.md) · [docs/os-abi.md](docs/os-abi.md) | [#276](https://github.com/rhovision-org/quantum-os/issues/276) |
 | Libraries of audio and video built in a room | [Media_Libraries.md](Media_Libraries.md) | [#99](https://github.com/rhovision-org/quantum-os/issues/99) |
 | Cross-shard CapTP: revocable proxies, promise pipelining (Layer 2; Layer 1 in draft) | [CapabilityTransport.md](CapabilityTransport.md) | [#173](https://github.com/rhovision-org/quantum-os/issues/173) · [#107](https://github.com/rhovision-org/quantum-os/issues/107) |
 | Group-process protocols as verified ρ-processes | [RhoQuCalc_Macros.md](RhoQuCalc_Macros.md) (design spec + case studies) | — |

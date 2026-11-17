@@ -46,6 +46,8 @@ QLF slash commands:
   /rdv [sub]       — n-party atomic rendezvous (swap|counter|accept|reject|abort|list)
   /dyncap [sub]    — hash-only dynamic capabilities (status|peers)
   /qos [sub]       — named QOS processes: start · status · suspend · resume · terminate
+  /ps              — QOS process table (pid · name · state · events · owner)
+  /kill <name|id>  — terminate a QOS process you own (owner-only alias)
   /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)
   /probe [sub]     — joiner-local consensus probe (status|clear)
   /room [sub]      — multi-room tabs (list|join <cap>|leave|ref)
@@ -573,6 +575,14 @@ Named QOS processes over the finite `qos.event/1` contract. A process is a capab
 | `/qos terminate <name|id> [| reason]` | Owner ends a running or suspended process. |
 
 The command is a thin adapter (`qos-command.ts`); `QosProcessRoom` signs and broadcasts the same object every peer verifies. A peer that only saw the start event can read the state but cannot drive someone else's lifecycle. See [qos-process.md](qos-process.md).
+
+### `/ps`
+
+The OS-style process table over the same tracked QOS processes: pid (short), name, status, event count, and owner. It is the same view as `/qos ps`. A locally started process shows `you`; a peer sees the signed owner label it received. The kernel ABI underneath is described in [os-roadmap.md](os-roadmap.md) and [os-abi.md](os-abi.md).
+
+### `/kill <name|id>`
+
+Owner-only alias for `/qos terminate`. It emits the same signed lifecycle event; a non-owner is refused, and a process that is already terminated cannot be killed again. It is not a remote DOS primitive: there is no ambient process namespace, only processes this peer has observed and for which it holds the owner grant.
 
 ### `/probe [sub]`
 

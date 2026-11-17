@@ -12,6 +12,7 @@ Detail pages hang off this one:
 | [rholang.md](rholang.md) | the `$`/`+` macro language, the `%` capability-macro registry, the `/rholang` chain client |
 | [commands.md](commands.md) | every slash command |
 | [qos-process.md](qos-process.md) | named QOS processes: the finite event contract, signed lifecycle, deterministic orchestration, failure modes, and the chain boundary (gate quantum-os#264) |
+| [os-roadmap.md](os-roadmap.md) · [os-abi.md](os-abi.md) | QOS/1 — the OS layer model, invariants, milestones, and the v0 handle/syscall ABI (design + first slice) |
 | [../Consensus.md](../Consensus.md) | the `/probe` protocol and threat model |
 | [../SECURITY.md](../SECURITY.md) | the full threat model, known issues, reporting |
 | [../scripts/qos-cli/README.md](../scripts/qos-cli/README.md) | the headless Node peer, memory daemon, agents, bridge |

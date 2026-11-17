@@ -49,7 +49,7 @@ async function peer(name) {
     identity,
     transport: { broadcast: (data) => outbox.push(data) },
     say: (text) => said.push(text),
-    label: () => name,
+    label: (source) => (source === "Alice" || source === "Bob" ? source : name),
     onSigned: () => {},
   });
   return { name, cmd, outbox, said, identity };
@@ -85,10 +85,19 @@ await alice.cmd.handle("status");
 ok("status lists the process", alice.said.some((l) => l.includes("QOS processes")) && alice.said.some((l) => l.includes("Alpha")));
 await alice.cmd.handle(`status ${id}`);
 ok("status detail carries the full digest", alice.said.some((l) => l.includes("state digest") && l.includes(av.stateDigest)));
+ok("status detail names the owner", alice.said.some((l) => l.includes("owner: you")));
+
+// --- ps --------------------------------------------------------------------
+await alice.cmd.handle("ps");
+ok("ps shows the process table", alice.said.some((l) => l.includes("QOS process table")) && alice.said.some((l) => l.includes("PID | NAME | STATE | EVENTS | OWNER")));
+ok("ps names the process and owner", alice.said.some((l) => l.includes("Alpha") && l.includes("running") && l.includes("you")));
+await bob.cmd.handle("ps");
+ok("a peer sees the signed owner label", bob.said.some((l) => l.includes("Alpha") && l.includes("Alice")), JSON.stringify(bob.said.slice(-3)));
 
 // --- suspend ---------------------------------------------------------------
 await alice.cmd.handle("suspend Alpha | resting");
 ok("suspend says so", alice.said.some((l) => l.includes("suspended")));
+ok("suspend is past tense", !alice.said.some((l) => l.includes("suspendd")));
 await drain(alice, bob);
 av = await alice.cmd.room.view(id);
 bv = await bob.cmd.room.view(id);
@@ -108,6 +117,21 @@ av = await alice.cmd.room.view(id);
 bv = await bob.cmd.room.view(id);
 ok("status is running again", av.status === "running", av.status);
 ok("both peers agree after resume", av.stateDigest === bv.stateDigest, `${av.stateDigest} != ${bv.stateDigest}`);
+
+// --- kill alias ------------------------------------------------------------
+await alice.cmd.handle("start Killme | temporary");
+await drain(alice, bob);
+const killEntry = alice.cmd.list().find((p) => p.name === "Killme");
+ok("a second process can be started", !!killEntry);
+const beforeKill = bob.outbox.length;
+await bob.cmd.handle("kill Killme");
+ok("a non-owner kill is refused", bob.said.some((l) => l.includes("only the process owner")));
+ok("a refused kill emits no event", bob.outbox.length === beforeKill, `${bob.outbox.length} vs ${beforeKill}`);
+await alice.cmd.handle("kill Killme");
+ok("kill is terminate's owner-only alias", alice.said.some((l) => l.includes("Killme") && l.includes("terminated")));
+await drain(alice, bob);
+const kv = killEntry ? await alice.cmd.room.view(killEntry.id) : null;
+ok("kill leaves the process terminated", kv?.status === "terminated", kv?.status);
 
 // --- terminate -------------------------------------------------------------
 await alice.cmd.handle("terminate Alpha | done");

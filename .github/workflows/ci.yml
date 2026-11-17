@@ -158,6 +158,11 @@ jobs:
       - name: QOS process orchestration test
         run: node packages/browser/test/qos-process.test.mjs
 
+      # QOS/1 kernel ABI v0: rights attenuation, close/revoke, signals, wait/exit,
+      # and two independent kernels replaying the same operations to one digest.
+      - name: QOS kernel ABI test
+        run: node packages/browser/test/qos-kernel.test.mjs
+
       # The `/qos` command surface over that contract: two independent peers
       # reach the same state digest after start / suspend / resume / terminate,
       # and a non-owner cannot drive someone else's lifecycle.

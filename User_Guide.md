@@ -98,6 +98,7 @@ governance to each other, so a lemma proven in one room becomes a lemma in the o
 | run a good discussion | roles + turn-taking | [Room Best Practices](Room_Best_Practices.md) |
 | add an AI helper | `agent.mjs --role …` | [Agents](scripts/qos-cli/README.md) |
 | ask the room's AI helper | `/ask <question>` | [Agents](scripts/qos-cli/README.md) |
+| see or stop a room process | `/ps` · `/kill <name|id>` | [QOS processes](docs/qos-process.md) |
 | rate · delegate · hold to account | `/gov trust` · `/gov delegate` · `/gov censure` | [Governance](Governance.md) |
 | quick vote | `/poll` (`ranked`) | [Group Decisions](Group_Decisions.md) |
 | agree a number | `/estimate` | [Group Decisions](Group_Decisions.md) |
