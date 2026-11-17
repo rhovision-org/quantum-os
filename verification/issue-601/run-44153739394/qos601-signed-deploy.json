@@ -1,0 +1,16 @@
+{
+  "record_type": "qos601_ci_disposable_signed_deploy",
+  "start_utc": "2026-11-17T19:00:10.828Z",
+  "end_utc": "2026-11-17T19:00:12.873Z",
+  "node_origin": "loopback-bundled-rholo-on-isolated-gh-runner",
+  "shard_id": "/root",
+  "network_id": "testnet",
+  "admitted": true,
+  "execution_stage": "PROCESSED_WITH_SUCCESS",
+  "result_summary": {
+    "deployResultPresent": true,
+    "resultLength": 0
+  },
+  "finality_or_settlement_verified": false,
+  "scope": "CI-hosted disposable development chain; NOT public testnet or #584 G1–G6"
+}

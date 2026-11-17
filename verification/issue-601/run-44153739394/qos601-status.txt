@@ -1,0 +1,9 @@
+mode=bundled QOS_SHA=a2f49b2df912bd42cd272db9a1d3463899a35ddb
+agent: pid=3133 alive=True owned_by_harness=true
+browser: pid=3080 alive=True owned_by_harness=true
+node: pid=3031 alive=True owned_by_harness=true
+signaling: pid=3052 alive=True owned_by_harness=true
+node_status={"version": {"api": "1", "node": "RChain Node 0.1.0 (bc80abbba42661f0252c04f931e6a4ac58bb6737)"}, "shardId": "/root", "networkId": "testnet"}
+last_finalized=UNAVAILABLE (HTTPError)
+signaling_health=True
+Room capability deliberately not stored; use original terminal URL or generate a fresh room.
