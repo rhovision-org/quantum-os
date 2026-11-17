@@ -197,8 +197,12 @@ def prerequisites(mode: str, ai: bool) -> None:
         fail("Node.js 22+ required")
     if ai and not shutil.which("claude"):
         fail("--ai requires an installed, configured Claude CLI")
-    if mode == "bundled" and not os.access(ROOT / "bin" / "rnode", os.X_OK):
-        fail("missing executable bin/rnode; use --existing-node or provide RNODE")
+    if mode == "bundled":
+        selected = Path(os.environ.get("RNODE", str(ROOT / "bin" / "rnode"))).expanduser()
+        if not selected.is_absolute():
+            fail("RNODE override must be an absolute path")
+        if not os.access(selected, os.X_OK):
+            fail(f"selected Rholo executable is missing or not executable: {selected}")
     if mode == "bundled" and shutil.which("bash") is None:
         fail("bash is required for bundled Rholo")
 

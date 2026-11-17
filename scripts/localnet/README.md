@@ -210,6 +210,20 @@ bash scripts/localnet/qos-devnet.sh down
 
 The harness builds QOS WASM/browser/Signaling, installs the standalone
 agent's **locked npm dependencies**, and starts only its own process groups.
+
+**Binary provenance:** the committed `bin/rnode` is a convenience development
+binary, *not* an automatically updated copy of the current Rholo `dev` head.
+The #601 GitHub runner reported `bc80abbba42661f0252c04f931e6a4ac58bb6737`
+from the bundled executable. To exercise a newly built, explicitly pinned Rholo
+revision on a disposable isolated store, override with an **absolute** path:
+
+```sh
+RNODE=/absolute/path/to/pinned/rnode bash scripts/localnet/qos-devnet.sh up --no-ai
+```
+
+Never point `RNODE` at a binary that will reopen an existing public-validator
+store. The harness's bundled mode uses a separate `QOS_RUN_DIR/rnode-data` path;
+updating executable bytes does *not* prove store compatibility or #584 acceptance.
 The browser URL plus a **fresh secret room cap is printed once to the terminal**;
 the cap is not persisted to state or process argv. Agent mode is deterministic
 FAQ by default. `--ai` explicitly opts in to a configured Claude CLI.
