@@ -37,6 +37,7 @@ import { parseDefinition, parseInvocation, expandCommand, expandCallSites,
          MACRO_NAME_RE, MAX_BODY } from "./macro-lang.js";
 import { createCalls, type Calls } from "./calls.js";
 import { QosCommand } from "./qos-command.js";
+import { pickAskAgent, agentAskText } from "./agent-ask.js";
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
 import { hashBlob, entryFromWire, sortEntries, findEntry, describeEntry, shortHash,
@@ -3561,6 +3562,7 @@ function handleCommand(raw: string): string[] {
         "  /gov <sub>       — liquid-democracy groups: new · member · issue · delegate · trust · censure · vote · treasury · kudos · uri · say · status",
         "  /dyncap [sub]    — hash-only dynamic capabilities (status|peers)",
         "  /qos [sub]       — named QOS processes: start · status · suspend · resume · terminate",
+        "  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)",
         "  /probe [sub]     — discrepancy probe window state (status|clear)",
         "  /room [sub]      — multi-room tabs (list|join <cap>|leave|ref)",
         "  /share <sel> to <room>  — bridge a lemma/chat/note into another tab",
@@ -5914,6 +5916,29 @@ function handleCommand(raw: string): string[] {
         sys("  /dyncap [status]  — show your anchor, current seq, tracked peer count");
         sys("  /dyncap peers     — list tracked peers with their pinned anchors");
       }
+      break;
+    }
+
+    case "ask": {
+      const question = arg.trim();
+      if (!question) {
+        sys("usage: /ask <question> — routes to the room's facilitator, or another AI agent if no facilitator is present");
+        break;
+      }
+      if (!qpeer) { sys("not connected — connect first"); break; }
+      // peerAgents is a sticky badge cache and may still hold a departed
+      // agent's role; eligibility is the live `peers` roster, not the cache.
+      const presentAgents = [...peerAgents].filter(([id]) => peers.has(id));
+      const agent = pickAskAgent(presentAgents);
+      if (!agent) {
+        sys("no AI agent is in this room right now — /ask needs a facilitator, scribe, skeptic, or other agent present.");
+        sys("  Start one with scripts/qos-cli/run-agents.sh, then try /ask again.");
+        break;
+      }
+      const text = agentAskText(agent, question);
+      qpeer.broadcast({ kind: "chat", text });
+      const role = agent.role === "facilitator" ? "facilitator" : agent.role;
+      sys(`→ asked the ${role} (${peerLabel(agent.peerId)}) — ${text}`);
       break;
     }
 
@@ -8838,7 +8863,7 @@ function send(): void {
     if (cmd !== "help" && cmd !== "dump") {
       sessionLog.push({ who: myName || "you", cmd, arg, summary: lines[0] ?? "" });
     }
-    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
+    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "ask" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
       qpeer.broadcast({ kind: "qlf", cmd, arg, lines });
     }
     return;
