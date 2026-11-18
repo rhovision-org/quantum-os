@@ -212,6 +212,8 @@ def cmd_up(args: argparse.Namespace) -> None:
     prerequisites(mode, args.ai)
     if STATE_DIR.is_symlink():
         fail("refusing symlinked state directory")
+    if STATE_DIR.exists() and STATE_DIR.stat().st_uid != os.getuid():
+        fail("refusing state directory owned by another user")
     STATE_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(STATE_DIR, 0o700)
     if load_state():
