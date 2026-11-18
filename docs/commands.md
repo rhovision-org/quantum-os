@@ -563,6 +563,8 @@ See [MultisigDemo.md](../MultisigDemo.md) for a worked example combining `/dynca
 
 Finds a **live** AI agent in the room and relays `/<role> ask <question>` as chat. Preference is the **facilitator** (`/facil ask …`) when one is present; otherwise the lowest-peer-id other present agent. The agent badge cache is filtered by the live peer roster, so a departed agent is not chosen. If no agent is present, it says so and sends nothing — it never pretends to have an answer locally. The chosen agent is addressed by its role prefix; the line is still room chat, so every peer sees it. The browser only picks the agent; it does not vouch for it, and the agent answers for itself.
 
+Direct addressing is not limited to the built-in roles. If a live peer announced a custom role such as `heckler`, `/heckler help` (or any `/heckler …` line) is relayed exactly like `/skeptic …`. If `heckler` is the agent's display name but its role is `skeptic`, the browser relays `/skeptic …` to that agent instead. The lookup uses the live `peers` roster, not the sticky badge cache, so a departed agent does not become a phantom command.
+
 ### `/goal [sub]`
 
 Private personal goals for the success framework. The store is keyed by the

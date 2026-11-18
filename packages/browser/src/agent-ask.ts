@@ -41,3 +41,47 @@ export function pickAskAgent(agents: Iterable<[string, string]>): AskAgent | nul
 export function agentAskText(agent: AskAgent, question: string): string {
   return `/${agentCommand(agent.role)} ask ${question}`;
 }
+
+export interface LiveAgentTarget {
+  peerId: string;
+  role: string;
+  /** The command prefix the agent answers to (facilitator → facil). */
+  command: string;
+  /** Display name, when the caller knows it. */
+  name?: string;
+}
+
+/**
+ * Resolve a typed command to a live agent.
+ *
+ * The browser has dedicated cases for the built-in roles, but an agent may
+ * announce a custom role (for example `heckler`). `/ask` already uses that
+ * announcement; direct `/<role>` commands should too. A display-name alias is
+ * also accepted, in which case the relay uses the agent's role prefix (a peer
+ * named "heckler" with role "skeptic" is addressed as `/skeptic …`).
+ *
+ * Callers pass only the live roster, so a stale `peerAgents` cache cannot
+ * resurrect a departed agent.
+ */
+export function liveAgentTarget(
+  agents: Iterable<[string, string]>,
+  names: ReadonlyMap<string, string>,
+  command: string,
+): LiveAgentTarget | null {
+  const cmd = String(command ?? "").trim().toLowerCase();
+  if (!cmd) return null;
+  const list: LiveAgentTarget[] = [];
+  for (const [peerId, rawRole] of agents) {
+    if (!peerId) continue;
+    const role = String(rawRole ?? "").trim().toLowerCase();
+    if (!role) continue;
+    const name = names.get(peerId)?.trim();
+    list.push({
+      peerId, role, command: agentCommand(role),
+      ...(name ? { name } : {}),
+    });
+  }
+  const byRole = list.find((a) => a.role === cmd);
+  if (byRole) return byRole;
+  return list.find((a) => a.name?.toLowerCase() === cmd) ?? null;
+}
