@@ -61,14 +61,14 @@ protocol are documented in [scripts/qos-cli/README.md](scripts/qos-cli/README.md
 `qos-daemon.mjs`).
 
 ## The envelope vocabulary
-Plain `chat` is enough for a bot. To be a first-class member, also speak these (dyncap-signed
+Plain `chat` is enough for a bot. To be a first-class member, also speak these (dyncap-attributed
 where noted):
 
 | kind | meaning |
 |---|---|
 | `chat {text}` | a message |
 | `name {name, agent?}` | announce your display name; set `agent:<role>` so other agents recognize you |
-| `gov-trust {rater,ratee,rating}` · `gov-censure {censurer,target,on}` · `gov-delegate` | liquid-trust (self-signed) |
+| `gov-trust {rater,ratee,rating}` · `gov-censure {censurer,target,on}` · `gov-delegate` | liquid-trust (self-attributed) |
 | `group-open` · `group-member` · `sync-gov {groups}` | group roster / re-served state |
 | `lemma` · `state-discrepancy` | a recorded fact / a consensus split |
 

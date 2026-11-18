@@ -33,7 +33,7 @@ be handed the raw token on `join`**, i.e. the capability to join any room it
 relayed. Now holding the room's name is not holding the room. Symmetric only,
 no keypair: nothing here is exposed to Shor (see [SECURITY.md](../SECURITY.md)).
 What it does *not* do is stop the relay replaying a frame under its original
-`from` — the dyncap-signed kinds carry a monotonic `seq` and catch that; plain
+`from` — the dyncap-attributed kinds carry a monotonic `seq` and catch that; plain
 chat does not.
 
 **Membership is the server's roster, held across a blip.** A socket that dies
@@ -115,9 +115,9 @@ Full mesh means every peer opens N−1 connections, and the join cost is worse t
 
 **Bulk relay over the overlay is flooding, not routing** — this whole mechanism now carries only `{bulk:true}` traffic (attachments, `/file get`), since the control plane rides the signaling socket (see the transport section above). No routing table, a deliberate simplicity tradeoff. `broadcast(data, {bulk:true})` tags the payload with `_relayId` (unique per broadcast), `_hops` (a remaining budget, `max(4, ceil((roster.size+1)/2))` — roughly 2x the true ring+skip diameter, erring generous since dedupe bounds the cost of over-relaying but an undersized budget means a genuine delivery failure), and `_from` (the true originator — without it a relayed message would be attributed to whichever neighbor forwarded it last, the wrong name in chat and the wrong dyncap-anchor cross-check), then sends to every open channel. `send(targetPeerId, data)` stays **raw and untagged** when a direct channel is open — byte-identical to before, so anyone already directly connected (old build or new) sees no format change at all; only when there's no direct link does it flood, additionally tagged `_relayTo`. On receipt, a tagged message dedupes against a bounded `Set` (`seenRelay`, cleared past 5000 — mirroring `bridge.mjs`'s own durable dedupe `firstState`, not its transient `firstTime`, since this must survive the message's full multi-hop lifetime), strips the tag fields before delivery (`delete`, not `undefined` — `bridge.mjs`'s `stripMeta` idiom) so `onMessage` callers see the exact original payload unchanged, delivers only if untargeted or addressed to this peer, and **always** relays onward to every other neighbor if hops remain regardless of whether this hop was the target — that's what lets a directed send reach through peers who aren't the recipient. The `_hops` field name is deliberately reused from `bridge.mjs`'s own cross-room relay tagging, but counts in the opposite direction (down from a budget here, up to a ceiling there) — by the time a message reaches `bridge.mjs`'s handler this file's own `_hops` has already been stripped, so there's no collision, just a naming echo worth knowing about. **Originating a broadcast/send also marks its own `_relayId` seen immediately** (not just on receipt) — otherwise a flood that loops all the way around the ring back to its own originator would be delivered to `onMessage` twice.
 
-**Dyncap signatures are unaffected**: `signedBroadcast`/`signedSend` (app.ts) sign a `dyncap`-stripped canonical form *before* calling `qpeer.broadcast`/`send`; the relay fields are added after signing and stripped again before `onMessage` fires, so `verifyEnvelope` downstream always hashes exactly what was signed.
+**Dyncap attribution is unaffected**: `signedBroadcast`/`signedSend` (app.ts) derive a dyncap witness over a `dyncap`-stripped canonical form *before* calling `qpeer.broadcast`/`send`; the relay fields are added after the witness and stripped again before `onMessage` fires, so `verifyEnvelope` downstream always hashes exactly what was attributed.
 
-**New trust consideration, honestly flagged, not a blocker**: an unsigned direct-send kind (`rdv-propose`, `note-pass`) routed through ≥2 hops could now be dropped or tampered with by an intermediate relay peer — not possible when every send was a direct DTLS link. Signed kinds are unaffected (tampering invalidates the signature at the true recipient). Existing timeout/retry (rendezvous's 60s proposal timeout) already covers "the message didn't arrive"; nothing new was built for this.
+**New trust consideration, honestly flagged, not a blocker**: an unattributed direct-send kind (`rdv-propose`, `note-pass`) routed through ≥2 hops could now be dropped or tampered with by an intermediate relay peer — not possible when every send was a direct DTLS link. Dyncap-attributed kinds are unaffected (tampering breaks the witness at the true recipient). Existing timeout/retry (rendezvous's 60s proposal timeout) already covers "the message didn't arrive"; nothing new was built for this.
 
 **`isReachable(peerId)`** is "the server lists them" — the relay reaches everyone in the roster — or a direct channel, or bulk-relay traffic seen from them (`lastHeardVia`, keyed off `_from`) within `REACHABLE_WINDOW_MS` (45s). The periodic `{kind:"presence"}` flood that used to keep this honest is gone: presence is the server's word now. `hasChannel`/`connectionReport` are unchanged and stay meaningful on their own for `/conn`'s direct-link diagnostics — "am I directly linked to X" (a call, a file) is a different question from "can I reach X at all."
 
@@ -221,7 +221,7 @@ generic `qlf` rebroadcast (`send()`'s exclusion list) — its output is local
 diagnostic/data, not room chat. **No capability gating yet** — anyone can
 `/socket listen` or `connect`; gating `bind`/`connect` behind a
 `cap:socket:<port>`-style token (consistent with everything else in the
-ZFA model — see `note-declare`/`gov-*`'s dyncap-signed-envelope pattern) is
+ZFA model — see `note-declare`/`gov-*`'s dyncap-attributed-envelope pattern) is
 the next step, tracked but not built.
 
 **Same TURN dependency as calls, for the same reason.** A socket has no

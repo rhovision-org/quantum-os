@@ -67,7 +67,7 @@ the wrong thing. (`%` is rholang's modulo operator, so it carries no such guaran
 module-level `const` — **not** in `RoomContext` — persisted `qos-macros` (one
 key, not per room; a one-time migration folds any legacy `qos-macros-<room>`),
 loaded once at startup. A macro you write or pick up follows you into every room
-you join. It is still a dyncap-signed `macro-define` broadcast, replayed to a
+you join. It is still a dyncap-attributed `macro-define` broadcast, replayed to a
 room's joiners via `sync-macros`, so peers get it and it persists for them too.
 Removal tombstones are per-browser as well (`macroTombstones` /
 `qos-macro-tombstones`, `isMacroTombstoned` / `tombstoneMacro`), so a
