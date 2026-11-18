@@ -3,7 +3,7 @@
 // Personal goals are supplied by the identity-scoped GoalStore. Group entries
 // are projections of the active room's existing /gov state, not an alternative
 // governance store. Nothing here sends messages, signs, or writes to the chain.
-import type { Goal, GoalPriority } from "./goal-store.js";
+import type { Goal, GoalPriority, Habit, GoalReview, HabitCadence } from "./goal-store.js";
 import type { Group } from "./gov.js";
 
 export const SUCCESS_PRIORITIES: readonly GoalPriority[] = [
@@ -24,15 +24,22 @@ export interface SuccessSnapshot {
   done: Goal[];
   buckets: { priority: GoalPriority; goals: Goal[] }[];
   groups: SuccessGroupOverview[];
+  habits: Habit[];
+  reviews: GoalReview[];
 }
 
-export function successSnapshot(goals: readonly Goal[], groups: readonly Group[]): SuccessSnapshot {
+export function successSnapshot(
+  goals: readonly Goal[], groups: readonly Group[],
+  habits: readonly Habit[] = [], reviews: readonly GoalReview[] = [],
+): SuccessSnapshot {
   const safeGoals = goals.map(g => ({ ...g }));
   const open = safeGoals.filter(g => g.status === "open");
   const done = safeGoals.filter(g => g.status === "done");
   return {
     open,
     done,
+    habits: habits.map(h => ({ ...h, checkIns: [...h.checkIns] })),
+    reviews: reviews.map(r => ({ ...r })),
     buckets: SUCCESS_PRIORITIES.map(priority => ({
       priority,
       goals: open.filter(g => g.priority === priority),
@@ -54,6 +61,9 @@ export interface SuccessPanelActions {
   addGoal(text: string, priority: GoalPriority): void;
   completeGoal(id: string): void;
   openGroup(id: string): void;
+  addHabit?(text: string, cadence: HabitCadence): void;
+  tickHabit?(id: string): void;
+  recordReview?(text: string): void;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -162,5 +172,74 @@ export function renderSuccessPanel(
     card.appendChild(view);
     groupSection.appendChild(card);
   }
-  host.replaceChildren(personal, groupSection);
+  const journal = element("section", "success-section");
+  journal.appendChild(element("h3", "success-heading", "Private habits & review log"));
+  journal.appendChild(element("p", "success-muted",
+    "Personal check-ins remain local to this identity; nothing is shared automatically."));
+  if (actions.addHabit) {
+    const form = element("form", "success-add");
+    const label = element("input", "success-input");
+    label.type = "text";
+    label.maxLength = 240;
+    label.required = true;
+    label.placeholder = "New habit";
+    label.setAttribute("aria-label", "New habit");
+    const cadence = element("select", "success-select");
+    cadence.setAttribute("aria-label", "Habit frequency");
+    for (const c of ["daily", "weekly"] as const) {
+      const option = element("option", "", c === "daily" ? "Daily" : "Weekly");
+      option.value = c;
+      cadence.appendChild(option);
+    }
+    const add = element("button", "success-action", "Add habit");
+    add.type = "submit";
+    form.append(label, cadence, add);
+    form.addEventListener("submit", e => {
+      e.preventDefault();
+      if (label.value.trim()) actions.addHabit?.(label.value.trim(), cadence.value as HabitCadence);
+    });
+    journal.appendChild(form);
+  }
+  const utcToday = new Date().toISOString().slice(0, 10);
+  for (const habit of snapshot.habits) {
+    const item = element("div", "success-goal");
+    item.appendChild(element("span", "success-goal-text",
+      habit.text + " · " + habit.cadence + " · " + habit.checkIns.length + " check-ins"));
+    const done = habit.checkIns.includes(utcToday);
+    const btn = element("button", "success-minor", done ? "✓ Today" : "Check in");
+    btn.type = "button";
+    btn.disabled = done || !actions.tickHabit;
+    btn.setAttribute("aria-label", "Check in " + habit.id);
+    btn.addEventListener("click", () => actions.tickHabit?.(habit.id));
+    item.appendChild(btn);
+    journal.appendChild(item);
+  }
+  if (!snapshot.habits.length) journal.appendChild(element("p", "success-muted", "No habits yet."));
+  journal.appendChild(element("h4", "success-bucket-title", "Review history"));
+  if (actions.recordReview) {
+    const form = element("form", "success-add");
+    const note = element("input", "success-input");
+    note.type = "text";
+    note.maxLength = 2000;
+    note.placeholder = "Short review note";
+    note.setAttribute("aria-label", "Personal review note");
+    const save = element("button", "success-action", "Record review");
+    save.type = "submit";
+    form.append(note, save);
+    form.addEventListener("submit", e => {
+      e.preventDefault();
+      actions.recordReview?.(note.value.trim());
+    });
+    journal.appendChild(form);
+  }
+  for (const review of [...snapshot.reviews].reverse().slice(0, 12)) {
+    journal.appendChild(element("p", "success-issue",
+      new Date(review.at).toISOString().slice(0, 10) +
+      " · " + review.open + " open / " + review.done + " done" +
+      " · " + review.habitsChecked + " habits checked" +
+      (review.text ? " — " + review.text : "")));
+  }
+  if (!snapshot.reviews.length) journal.appendChild(element("p", "success-muted", "No reviews recorded."));
+
+  host.replaceChildren(personal, groupSection, journal);
 }

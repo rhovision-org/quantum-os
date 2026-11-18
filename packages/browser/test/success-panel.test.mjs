@@ -64,4 +64,34 @@ nodes.find(n=>n.tag==="button"&&n.textContent==="Complete").events.click();
 assert.deepEqual(actions.pop(),["done","g-1"]);
 nodes.find(n=>n.tag==="button"&&n.textContent==="View group").events.click();
 assert.deepEqual(actions.pop(),["group","a"]);
+const habits=[{id:"h-1",text:"Private ritual",cadence:"daily",checkIns:[],createdAt:1}];
+const reviews=[{id:"r-1",at:Date.UTC(2026,10,19),text:"<b>Private notes</b>",
+  open:1,done:1,habitsChecked:0}];
+const expanded=successSnapshot(goals,groups,habits,reviews);
+expanded.habits[0].checkIns.push("2000-01-01");
+assert.equal(habits[0].checkIns.length,0,"habit snapshot is detached");
+assert.equal(expanded.reviews[0].text,reviews[0].text);
+const host2=new E("main"),actions2=[];
+renderSuccessPanel(host2,successSnapshot(goals,groups,habits,reviews),{
+  addGoal:()=>{}, completeGoal:()=>{},openGroup:()=>{},
+  addHabit:(t,c)=>actions2.push(["habit",t,c]),
+  tickHabit:id=>actions2.push(["tick",id]),
+  recordReview:t=>actions2.push(["review",t]),
+});
+const nodes2=walk(host2);
+assert.ok(nodes2.some(n=>n.textContent.includes("<b>Private notes</b>")),"journal text is safe DOM text");
+assert.ok(!nodes2.some(n=>"innerHTML" in n));
+const habitForm=nodes2.find(n=>n.tag==="form" &&
+  n.children.some(c=>c.tag==="button"&&c.textContent==="Add habit"));
+habitForm.children.find(n=>n.tag==="input").value=" Walk ";
+habitForm.children.find(n=>n.tag==="select").value="weekly";
+habitForm.events.submit({preventDefault(){}});
+assert.deepEqual(actions2.pop(),["habit","Walk","weekly"]);
+nodes2.find(n=>n.tag==="button"&&n.textContent==="Check in").events.click();
+assert.deepEqual(actions2.pop(),["tick","h-1"]);
+const reviewForm=nodes2.find(n=>n.tag==="form"&&
+  n.children.some(c=>c.tag==="button"&&c.textContent==="Record review"));
+reviewForm.children.find(n=>n.tag==="input").value=" Reflect ";
+reviewForm.events.submit({preventDefault(){}});
+assert.deepEqual(actions2.pop(),["review","Reflect"]);
 console.log("PASS: #289 success panel model, privacy, safe DOM, and actions");
