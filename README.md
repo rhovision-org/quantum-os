@@ -212,7 +212,7 @@ is the room's persistence layer, not a server. Full docs: **[scripts/qos-cli/REA
 | Multisig (2-of-2) | ✓ `/dyncap`-anchored identity + `/rdv` atomic agreement; see MultisigDemo.md |
 | Joiner-local consensus probe | ✓ `/probe` — chain-weighted supermajority resolution on join; losing peers ignored for sync; see Consensus.md |
 | Lemma immutability | ✓ once `@name` is declared, re-declaration with different twists is refused locally and on inbound broadcast |
-| Multi-room tabs | ✓ `/room join/leave/list/ref` — one browser session, N joined rooms; per-room state and signaling; unread indicator on background tabs |
+| Multi-room tabs | ✓ `/room new/join/leave/list/ref` — mint a fresh room or join one; one browser session, N joined rooms; per-room state and signaling; unread indicator on background tabs |
 | Per-room dyncap chain | ✓ same anchor across rooms (`H(seed)`), independent `seq` per room; `H(seed ‖ seq ‖ room_id ‖ payload_hash)` witnesses algebraically independent |
 | Markov-blanket isolation | ✓ rooms are independent ZFA processes; no cross-room signaling, sync, or consensus; bridge peers are application-level only |
 | Bridge primitive | ✓ `/share <selector> to <room>` — explicit bridge of lemma/chat/note into another joined tab |
