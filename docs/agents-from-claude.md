@@ -68,9 +68,8 @@ Other things you can ask for:
 
 - **Another role:** *"run a skeptic"*. The roles are `facilitator`, `skeptic`, `scribe`,
   `greeter` and `observer`. Run one at a time unless you need two, because each costs CPU.
-- **A persona of your own:** *"run an agent that heckles"*. Claude adds the role to its
-  own copy and runs it. That copy disappears with the container, so ask again after a
-  restart. To keep a persona, see [the fork path](#optional-your-own-persona-with-a-github-account).
+- **A persona of your own:** *"run an agent that heckles"*. See
+  [Customize it by asking Claude](#customize-it-by-asking-claude).
 - **Room memory:** *"…and have it keep the room's memory"*. The agent then stores
   lemmas, currencies, groups and the transcript, and replays them to people who join
   later.
@@ -86,6 +85,42 @@ nohup node agent.mjs --room "cap:room:…" --role facilitator \
 
 The `claude-code` backend uses the session's own Claude, so you don't need an API key here.
 The calls count against your Claude plan.
+
+## Customize it by asking Claude
+
+You change the agent by telling Claude what you want, in plain words. Claude turns that
+into the agent's settings or its persona and restarts it.
+
+| Ask Claude | What changes |
+|------------|--------------|
+| *"call it Socrates"* | its display name (`--name`) |
+| *"make it a heckler that mocks arguments, never people"* | a new role with that persona, the AI's instructions ([how roles work](../Developer_Guide.md#path-a--add-a-role-the-common-case)) |
+| *"only greet newcomers, otherwise stay silent"* | which duties the role performs: greeting, name prompts, nudging quiet members, rebalancing a dominant voice, synthesis, re-engaging after a lull |
+| *"be quieter"* / *"be more active"* | `--quiet` / `--active` |
+| *"at most 2 messages every 5 minutes"* | `--budget 2` |
+| *"invite quiet people in after 3 minutes"* | `--silent-min 3` |
+| *"use a cheaper model"* | `--ai-model` |
+| *"link our about page in your intro"* | `--about <url>` |
+| *"keep the room's memory"* | `--persist` |
+| *"add a skeptic alongside it"* | a second agent, with its own identity |
+| *"no AI, just greet"* | drop `--ai`, so the agent answers only from its built-in FAQ |
+
+**Where the change lands:**
+
+- **In the cloud session:** Claude restarts the agent with the change straight away. A
+  new persona lasts until the container restarts, so ask again after that.
+- **On Render:** Claude gives you the new **Start Command** to paste into the worker's
+  Settings, and Render redeploys. A new persona needs [the fork](#optional-your-own-persona-with-a-github-account),
+  where Claude commits it for you.
+- **On Oracle:** Claude writes a new cloud-init script, and you create a new instance
+  from it, then stop the old one.
+
+**Steering it from inside the room:** you can also steer the agent without Claude, by
+typing these in the room:
+
+- `/facil off` and `/facil on` mute and unmute it.
+- `/facil chair <topic>`, then `/facil next`, run a deliberation.
+- `/gov trust` and `/gov censure` let the room raise or lower how much it may say.
 
 ## 3. Check it's live
 
