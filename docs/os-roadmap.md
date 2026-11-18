@@ -74,6 +74,7 @@ capability is the boot image.
 | 5 | Shell: spawn/exec/wait, pipes, env | partial — commands, `/script`, `/ps`; no pipelines/jobs | [#281](https://github.com/rhovision-org/quantum-os/issues/281) |
 | 6 | Users, groups, capability permissions | partial — dyncap/ZFA/groups; no unified rights | [#282](https://github.com/rhovision-org/quantum-os/issues/282) |
 | 7 | Device model and drivers | partial — media/OPFS/WASM/rholang/sockets; no device ABI | [#283](https://github.com/rhovision-org/quantum-os/issues/283) |
+| 7a | Quantum hardware backend (device extension) | design — `/solve`/`/braket`/`/qucalc` are local only; no `/solve --qpu`, `/qpu` driver, vendor API, or `anchor` persistence | [#316](https://github.com/rhovision-org/quantum-os/issues/316) |
 | 8 | Init, services, package manager | partial — agents, daemon, bridge; no init/pkg | [#284](https://github.com/rhovision-org/quantum-os/issues/284) |
 | 9 | Observability, snapshots, recovery | partial — `/qos status`, `/ps`, logs; no `/top`/trace/restore | [#285](https://github.com/rhovision-org/quantum-os/issues/285) |
 | 10 | Native runtime and boot image | design | [#286](https://github.com/rhovision-org/quantum-os/issues/286) |
@@ -88,10 +89,16 @@ capability is the boot image.
 - **Transport:** `QOSPeer` with sealed frames, hashed room ids, relay overlay, keepalive;
   POSIX-style stream/dgram sockets in `posix-net.ts`.
 - **Persistence:** OPFS-backed library/record storage; `qos-daemon.mjs` and
-  `agent.mjs --persist` hold and re-serve room memory.
+  `agent.mjs --persist` hold and re-serve room memory. `/rholang deploy` writes a
+  deploy's answer to the key's signed registry slot, and `/channel chain` keeps
+  durable on-chain records; M6's `--anchor` / `/qpu anchor` reuses that path for quantum results.
 - **Services:** facilitator, scribe, skeptic, greeter, observer, bridge, memory daemon.
 - **Shell:** slash commands, `/script` sequencing, `/macro` definitions, `/rhoqu` macros,
   `/ask` agent routing.
+- **Quantum surface:** `/braket`, `/qucalc`, `/search`, and `/solve` evaluate bra-ket states,
+  twist histories, next closures, and the chosen closure locally in the peer; there is no
+  `/solve --qpu`, `/qpu` driver, vendor-API backend, or `anchor` chain-persistence path yet
+  (see M6 / [#316](https://github.com/rhovision-org/quantum-os/issues/316)).
 
 ## Milestones
 
@@ -129,6 +136,49 @@ macros, and contracts.
 `/top`, `/dmesg`, `/trace`, snapshots/restore, quotas. Then a `qos.boot/1` image and a
 Node/WASM runtime that reaches the same digest as a browser peer.
 
+### M6 — quantum hardware backend — **design** · [M6 milestone](https://github.com/rhovision-org/quantum-os/milestone/1)
+
+A capability-guarded device driver (Layer 7a) that lets `/solve` run the closure it selected
+through QLF's Rho→circuit transpilation on a real QPU vendor API, and records the signed job
+and result as `qos.event/1` room events. `/solve` without `--qpu` stays local and deterministic;
+hardware is opt-in, and the vendor key is a capability, never ambient authority. A deterministic
+mock backend lands first, then one live adapter (IBM Quantum/Qiskit Runtime, Amazon Braket, or
+Azure Quantum). Tracked in [#316](https://github.com/rhovision-org/quantum-os/issues/316).
+
+Command surface, with no separate `/qsolve`: `/solve <position> --qpu <handle> [--shots N]
+[--no-wait] [--dry-run] [--anchor]`; `/qpu list|probe|status|result|cancel|anchor` handles
+device and job lifecycle. `--all` stays local and cannot combine with `--qpu`; `/search` stays
+local. The chain verb is `anchor`, not `persist` — `/persist` already means peer replication.
+
+The QOS→rholo event bridge is automatic — `qos.event/1` is the same JSON a rholo/rholalc
+consumer ingests, with no translation layer. Anchoring a result to rholo is a **requirement**,
+but it is one explicit command, not an out-of-band deploy: `/solve --qpu … --anchor` or
+`/qpu anchor <job>` canonicalizes the result, deploys it through the existing
+`deployTerm`/`deployVerdict` path (an `insertArbitrary` result URI or a chain Channel post),
+waits for the block, and then emits the capability-authorized `anchor` event with
+`{chain, deployId, blockHash?, recordHash}`. Room-local state stays cheap; the chain write is
+user-triggered because it costs phlo and is permanent. No job completion writes to chain
+automatically (see [`qos-process.md`](qos-process.md) for the `anchor` contract).
+
+Repo references: [`docs/commands.md`](commands.md) (`/braket`, `/qucalc`, `/solve`),
+[`packages/browser/src/app.ts`](../packages/browser/src/app.ts),
+[`rholang.ts`](../packages/browser/src/rholang.ts) (`deployTerm`/`deployVerdict`, chain Channel writes),
+[`qucalc-enum.ts`](../packages/browser/src/qucalc-enum.ts),
+[`qucalc-search.ts`](../packages/browser/src/qucalc-search.ts),
+[`RhoQuCalc_Macros.md`](../RhoQuCalc_Macros.md), and [`RhoQuDemo.md`](../RhoQuDemo.md).
+
+QLF references: [`QuantumOS.md` §1a](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QuantumOS.md)
+(control plane for real quantum hardware),
+[`quantum-computation-optimization.md` §3.5/§5](https://github.com/rhovision-org/quantum-logical-framework/blob/main/quantum-computation-optimization.md)
+(the Rho→gate-pulse bridge is open work),
+[`quantum_simulator.py`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/quantum_simulator.py),
+[`qucalc_engine.py`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/qucalc_engine.py),
+[`rho_transpiler.py`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/rho_transpiler.py), and
+[`braket_rho.py`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/braket_rho.py);
+semantics in [`BraKetRhoQuCalc.md`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/BraKetRhoQuCalc.md)
+and Lean [`BraKetRhoQuCalc.lean`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/BraKetRhoQuCalc.lean) /
+[`RhoQuCalc.lean`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/RhoQuCalc.lean).
+
 ## Definition of done for QOS/1
 
 A new peer can boot from a room capability and, without any additional server:
@@ -165,3 +215,5 @@ in [`CLAUDE.md`](../CLAUDE.md#documentation-prs).
 - [Connection](connection.md) — transport, overlay, TURN, reconnect.
 - [Commands](commands.md) — the shell surface as it exists today.
 - [Security](../SECURITY.md) — ZFA/dyncap threat model.
+- [QLF QuantumOS](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QuantumOS.md) — QLF as the kernel for real quantum hardware.
+- [QLF quantum-computation-optimization](https://github.com/rhovision-org/quantum-logical-framework/blob/main/quantum-computation-optimization.md) — the Rho→gate-pulse bridge tracked in M6.
