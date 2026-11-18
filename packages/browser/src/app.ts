@@ -157,6 +157,9 @@ const pollListEl      = document.getElementById("poll-list")!;
 const pollCountEl     = document.getElementById("poll-count")!;
 const tabListEl       = document.getElementById("tab-list")!;
 const tabAddBtn       = document.getElementById("tab-add") as HTMLButtonElement;
+const tabMenuEl       = document.getElementById("tab-menu") as HTMLDivElement;
+const tabNewBtn       = document.getElementById("tab-new") as HTMLButtonElement;
+const tabJoinBtn      = document.getElementById("tab-join") as HTMLButtonElement;
 
 // ---------------------------------------------------------------------------
 // State
@@ -1658,6 +1661,21 @@ function promptJoinRoom(): void {
   // real room — the public room is one — so warn rather than refuse.
   if (!validateCapability(roomId)) addMessage("", `⚠ room cap is not ZFA-closed (a legacy token?) — joining anyway: ${roomId}`, "system");
   openRoomTab(roomId);
+}
+
+/// Mint a fresh room capability and open it as a tab. A room is a bearer
+/// capability, so this is local generation only; inviting someone still means
+/// sharing the URL from the room panel.
+function newRoomTab(): void {
+  const roomId = generateCapability("room");
+  openRoomTab(roomId);
+  addMessage("", "created a new room tab — use the share link to invite someone", "system");
+}
+
+function setTabMenuOpen(open: boolean): void {
+  tabMenuEl.hidden = !open;
+  tabAddBtn.setAttribute("aria-expanded", String(open));
+  if (open) tabNewBtn.focus();
 }
 
 function renderRoomProcess(): void {
@@ -3594,7 +3612,7 @@ function handleCommand(raw: string): string[] {
         "  /goal [sub]      — private personal goals: add · list · done · review · share",
         "  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)",
         "  /probe [sub]     — discrepancy probe window state (status|clear)",
-        "  /room [sub]      — multi-room tabs (list|join <cap>|leave|ref)",
+        "  /room [sub]      — multi-room tabs (new|list|join <cap>|leave|ref)",
         "  /share <sel> to <room>  — bridge a lemma/chat/note into another tab",
         "  /channel [sub]   — tagged messages (listen|unlisten|send <name> <text>|list)",
         "  /render          — animate this room (perspectives, closures, groups)",
@@ -6430,6 +6448,10 @@ function handleCommand(raw: string): string[] {
         if (!validateCapability(roomId)) sys(`⚠ room cap is not ZFA-closed (a legacy token?) — joining anyway: ${roomId}`);
         openRoomTab(roomId);
         sys(`joined room ${shortId(roomId)} (switched to new tab)`);
+      } else if (sub === "new") {
+        const newId = generateCapability("room");
+        openRoomTab(newId);
+        sys(`created room ${shortId(newId)} (new tab — share its link to invite someone)`);
       } else if (sub === "leave") {
         if (rooms.size <= 1) { sys("cannot leave the last room"); break; }
         const leavingId = activeRoom.roomId;
@@ -6448,6 +6470,7 @@ function handleCommand(raw: string): string[] {
         sys(`  share URL: ${window.location.origin}${window.location.pathname}#room=${roomId}`);
       } else {
         sys(`unknown subcommand: /room ${sub}`);
+        sys("  /room new                        — mint a fresh room and open it in a new tab");
         sys("  /room list                       — list joined rooms");
         sys("  /room join <cap:room:…|url>      — open a new tab for the named room");
         sys("  /room leave                      — close the active tab");
@@ -10764,8 +10787,22 @@ async function init(): Promise<void> {
   renderLibrary();
   renderNotes();
 
-  // The tab-add button prompts for a cap:room:… URL or token.
-  tabAddBtn.addEventListener("click", () => promptJoinRoom());
+  // The tab-add button opens the add-room menu: mint a fresh room or join one.
+  tabAddBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setTabMenuOpen(tabMenuEl.hidden);
+  });
+  tabNewBtn.addEventListener("click", () => { setTabMenuOpen(false); newRoomTab(); });
+  tabJoinBtn.addEventListener("click", () => { setTabMenuOpen(false); promptJoinRoom(); });
+  document.addEventListener("click", (e) => {
+    if (tabMenuEl.hidden) return;
+    const target = e.target as Element | null;
+    if (target?.closest?.(".tab-add-wrap")) return;
+    setTabMenuOpen(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !tabMenuEl.hidden) setTabMenuOpen(false);
+  });
 
   const cap = generateCapability("peer");
   myIdEl.textContent = cap;

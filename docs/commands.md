@@ -51,7 +51,7 @@ QLF slash commands:
   /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)
   /goal [sub]      — private personal goals: add · list · done · review · share
   /probe [sub]     — joiner-local consensus probe (status|clear)
-  /room [sub]      — multi-room tabs (list|join <cap>|leave|ref)
+  /room [sub]      — multi-room tabs (new|list|join <cap>|leave|ref)
   /share <sel> to <room>  — bridge a lemma/chat/note into another tab
   /channel [sub]   — tagged messages (listen|unlisten|send <name> <text>|list)
   /script <c1>;…   — sequential command chain (// to skip a segment)
@@ -651,18 +651,19 @@ Multi-room tabs. A single browser session can be joined to N rooms simultaneousl
 
 | Subcommand | Effect |
 |---|---|
+| `/room new` | Mint a fresh room capability and open it as a new tab. The capability is generated locally; share the tab's link to invite someone. The new tab does not auto-connect. |
 | `/room` or `/room list` | Show the active room's cap-token + twist stats, plus a list of joined rooms with their connection (`●`) and active (`←`) markers. |
 | `/room join <cap:room:…\|url>` | Open a new tab joined to the named room. Accepts a raw cap-token or a share URL. The new tab is created but does not auto-connect — click Connect to bring up signaling. |
 | `/room leave` | Close the active tab. The room's state stays in `localStorage` so re-joining picks up where you left off; the connection is dropped. Can't close the last remaining tab. |
 | `/room ref [cap:room:…]` | Print a shareable URL for the active room (or the given cap). |
 
-Joined rooms persist across reloads (`qos-joined-rooms` in `localStorage`); on next launch the same tabs are restored, with the URL-hash room re-activated. The `+` button on the tab bar prompts for a room cap or URL.
+Joined rooms persist across reloads (`qos-joined-rooms` in `localStorage`); on next launch the same tabs are restored, with the URL-hash room re-activated. The `+` button on the tab bar opens a menu with **New room** (mint a fresh capability) and **Join room…** (paste a cap or URL).
 
 **Markov-blanket constraints** (deliberate):
 - No cross-room signaling backchannel — each room has its own `QOSPeer` and signaling WebSocket.
 - No cross-room state sync — a lemma declared in one room doesn't auto-propagate to others.
 - No cross-room consensus — the probe runs per-room.
-- Cross-room information flow is mediated by a peer who's in both rooms (a "bridge peer"); they consciously re-broadcast in each room. There's no automatic `/share` command yet — manual re-declaration is the bridge primitive today.
+- Cross-room information flow is mediated by `/share <selector> to <room>` or by a peer who is in both rooms; nothing propagates automatically.
 
 A peer in N rooms has the same dyncap *anchor* across rooms (it's `H(seed)` where seed is per-device), but each room maintains an independent chain trajectory via per-room `seq` in `DynCapState.seqByRoom`. The witness binding `H(seed ‖ seq ‖ room_id ‖ payload_hash)` produces algebraically independent witnesses across rooms.
 

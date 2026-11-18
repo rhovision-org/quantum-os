@@ -110,6 +110,42 @@
       line-height: 1;
     }
     .tab-add:hover { background: #111; color: #aae0d5; }
+    .tab-add-wrap { position: relative; display: flex; }
+    .tab-menu {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      z-index: 60;
+      min-width: 14rem;
+      display: flex;
+      flex-direction: column;
+      padding: 0.25rem;
+      background: #111;
+      border: 1px solid #2a2a2a;
+      box-shadow: 0 0.5rem 1.2rem rgba(0, 0, 0, 0.45);
+    }
+    .tab-menu[hidden] { display: none; }
+    .tab-menu-item {
+      background: none;
+      border: none;
+      color: #ddd;
+      text-align: left;
+      padding: 0.5rem 0.65rem;
+      cursor: pointer;
+      font-size: 0.72rem;
+      line-height: 1.2;
+    }
+    .tab-menu-item span {
+      display: block;
+      margin-top: 0.15rem;
+      color: #777;
+      font-size: 0.62rem;
+    }
+    .tab-menu-item:hover, .tab-menu-item:focus-visible {
+      background: #1a1a1a;
+      color: #aae0d5;
+      outline: none;
+    }
 
     .layout {
       display: flex;
@@ -610,7 +646,13 @@
 
   <div id="tab-bar" class="tab-bar">
     <div id="tab-list" class="tab-list"></div>
-    <button id="tab-add" class="tab-add" title="Join another room…">+</button>
+    <div class="tab-add-wrap">
+      <button id="tab-add" class="tab-add" title="Add a room tab" aria-haspopup="menu" aria-expanded="false">+</button>
+      <div id="tab-menu" class="tab-menu" role="menu" hidden>
+        <button id="tab-new" class="tab-menu-item" role="menuitem">New room<span>create a fresh room tab</span></button>
+        <button id="tab-join" class="tab-menu-item" role="menuitem">Join room…<span>paste a room link or capability</span></button>
+      </div>
+    </div>
   </div>
 
   <div class="layout">
