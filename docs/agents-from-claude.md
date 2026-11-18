@@ -214,6 +214,26 @@ A role you add in your own clone, without pushing it, runs wherever that clone r
 a cloud session (until the container restarts), on Fly, or on a Linux box. Render builds
 from the public repo, so it only runs the roles already there.
 
+### Optional: with a GitHub account
+
+Nothing above needs one. A GitHub account adds one thing: a **custom persona that
+redeploys itself** on a managed host.
+
+1. Fork `rhovision-org/quantum-os` to your account. A fork is your copy: you can write to
+   it without any access to the original.
+2. Add your role to `scripts/qos-cli/agent-roles.mjs` in the fork, as the Developer Guide
+   describes, and commit it. You can edit on github.com, or ask Claude (below).
+3. On Render, create the Background Worker from **your fork** instead of the public URL,
+   with the settings above and `--role <your role>`. With auto-deploy on, every commit
+   to the fork redeploys the agent.
+4. To have Claude make those edits, [connect GitHub](https://claude.ai/connect-github),
+   install the Claude GitHub App on the fork, and add the fork to your project under
+   Project settings → Repositories. A thread then gets the fork checked out and can push
+   to it. "Make the heckler ruder" becomes a commit, and Render redeploys it.
+
+To pick up upstream changes, use **Sync fork** on the fork's GitHub page. If you leave
+auto-deploy on, the agent only changes when you sync or commit.
+
 ## Stopping it
 
 ```bash
