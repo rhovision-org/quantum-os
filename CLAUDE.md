@@ -227,7 +227,8 @@ Cross-room state (not in `RoomContext`):
 - `myName`, `dyncapState` (with `seqByRoom: Record<roomId, number>`), `signQueue`, `sessionLog`. Per-device, shared across all rooms.
 
 Tab UI:
-- HTML: `#tab-bar` with `#tab-list` and the `#tab-add` menu (`+` opens `#tab-menu` with **New room** `#tab-new` and **Join room…** `#tab-join`). CSS classes `.tab`, `.tab.active`, `.tab.unread`, `.tab-menu`.
+- HTML: `#tab-bar` with `#tab-list` and the `#tab-add` menu (`+ ROOM` opens `#tab-menu` with **New room…** `#tab-new` and **Join room…** `#tab-join`). CSS classes `.tab`, `.tab.active`, `.tab.unread`, `.tab-menu`.
+- **Room names** (`room-names.ts`, pure, `test/room-names.test.mjs`): New room opens `roomNameDialog` (live check, inline error, one-click suggestion). `roomNames: Map<roomId, name>` persisted per browser under `qos-room-names`; unique by slug among joined rooms (`checkRoomName` → error + `suggestRoomName` "Name 2"); freed when the tab is closed. The tab shows the full name (no truncation; the list scrolls). The hash is `#/slug` (cap hidden) or `#/slug?name=…&room=cap:…` (revealed, and `roomUrl()` / Copy invite link); legacy `#room=cap:…` still parses. `syncRoomHash` uses `replaceState`, so a switch never reloads; a `hashchange` listener (`onRoomHashChange`) switches to a typed `#/slug` or opens a pasted invite. `adoptInviteName` takes the link's `name=` on join, or a suggested variant if taken here. A name is a label, not an authority, and is not synced between peers beyond the invite link.
 - `renderTabs()` paints from `rooms.values()`; the unread indicator is an orange `●` prefix on tabs where `ctx.hasUnread && ctx !== uiActiveRoom`. Tab clicks call `switchToRoom`.
 - `switchToRoom(roomId)` calls `setActiveRoom(next)`, sets `uiActiveRoom = next`, clears `next.hasUnread`, and calls `applyActiveRoomToUI()` which re-renders everything from the new active room (replays `chatLog`, updates sidebar, syncs URL hash via `history.replaceState`).
 

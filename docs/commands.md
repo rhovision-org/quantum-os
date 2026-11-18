@@ -51,7 +51,7 @@ QLF slash commands:
   /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)
   /goal [sub]      — private personal goals: add · list · done · review · share
   /probe [sub]     — joiner-local consensus probe (status|clear)
-  /room [sub]      — multi-room tabs (new|list|join <cap>|leave|ref)
+  /room [sub]      — multi-room tabs (new [name]|name [name]|list|join <cap>|leave|ref)
   /share <sel> to <room>  — bridge a lemma/chat/note into another tab
   /channel [sub]   — tagged messages (listen|unlisten|send <name> <text>|list)
   /script <c1>;…   — sequential command chain (// to skip a segment)
@@ -653,7 +653,8 @@ Multi-room tabs. A single browser session can be joined to N rooms simultaneousl
 
 | Subcommand | Effect |
 |---|---|
-| `/room new` | Mint a fresh room capability and open it as a new tab. The capability is generated locally; share the tab's link to invite someone. The new tab does not auto-connect. |
+| `/room new [name]` | Mint a fresh room capability under a name and open it as a new tab. With no name, a dialog asks for one (the same dialog as **+ ROOM → New room…**). The capability is generated locally; share the tab's link to invite someone. The new tab does not auto-connect. |
+| `/room name [name]` | Rename the active room; no name opens the dialog. Names are unique among the rooms this browser has joined (a taken name is refused with a suggested alternative), shown in full on the tab, and carried by the invite link (`#/my-room?name=…&room=cap:room:…`). With the cap hidden the address bar shows just `#/my-room`; switching tabs rewrites it without a reload. A name is a label, not a capability: `#/my-room` only opens a room this browser has already joined. |
 | `/room` or `/room list` | Show the active room's cap-token + twist stats, plus a list of joined rooms with their connection (`●`) and active (`←`) markers. |
 | `/room join <cap:room:…\|url>` | Open a new tab joined to the named room. Accepts a raw cap-token or a share URL. The new tab is created but does not auto-connect — click Connect to bring up signaling. |
 | `/room leave` | Close the active tab. The room's state stays in `localStorage` so re-joining picks up where you left off; the connection is dropped. Can't close the last remaining tab. |
