@@ -202,17 +202,10 @@ sudo systemctl enable --now qos-agent
 
 ### Custom personas
 
-Roles live in `ROLES` in `scripts/qos-cli/agent-roles.mjs`: a name, a `cmd` prefix, a
-`persona` (the AI's instructions) and which `duties` it performs. To make your own, edit
-that file **in your own clone**, add an entry, and pass `--role <name>`. You don't push
-anything, but the persona lives only in that copy:
-
-- **A cloud session:** the edit is lost when the container restarts. Ask Claude to
-  re-apply it along with the restart.
-- **Fly or a Linux box:** deployed from your clone, so the edit carries over. Re-apply it
-  after a `git pull` if the file changed upstream.
-- **Render from the public repo:** builds the upstream file, so a custom persona can't be
-  set there today. Use Fly or a box instead.
+How to add a role is in the [Developer Guide](../Developer_Guide.md#path-a--add-a-role-the-common-case).
+A role you add in your own clone, without pushing it, runs wherever that clone runs: in
+a cloud session (until the container restarts), on Fly, or on a Linux box. Render builds
+from the public repo, so it only runs the roles already there.
 
 ## Stopping it
 
