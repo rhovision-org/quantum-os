@@ -161,3 +161,12 @@ requires an independently verified vote/tally; no implicit promotion is
 implemented here. See
 [RhoGov handoff protocol](https://github.com/rhovision-org/rhogov/blob/main/docs/success-charter-handoff.md)
 for cross-repo source and exact evidence requirements.
+
+
+### Mandatory trust classification (QOS/1 review)
+
+- `walletSignature = secp256k1-wallet-verified`: the `sc1` authorization proves control of the matching REV wallet key for the domain-separated charter hash and claimed anchor.
+- `dyncapAttribution = hash-only-tofu-unverified`: the room anchor is hash/TOFU attribution, **not** a dyncap seed signature or proof of seed possession.
+- `pollRatification = not-independently-verified`: a room poll and Issue/4 record are not independent council ratification.
+
+Reserve "signed" for the verified secp256k1 wallet authorization and on-chain deploy. Never label the room journal or dyncap anchor cryptographically signed.

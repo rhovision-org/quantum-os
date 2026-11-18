@@ -47,3 +47,10 @@ assert.equal(decodeRhoExpr({ExprMap:{data:[[{ExprString:{data:"gid"}},{ExprStrin
 assert.equal(decodeRhoExpr({ExprTuple:{data:[{ExprString:{data:"opened"}},{ExprString:{data:fixture.proposalId}}]}})[0],"opened");
 // Zero network calls made in this test. No status claim from a nonexistent chain.
 console.log("PASS: charter-chain #291 signer, canonical payload, maps, collision/tamper/authorization");
+
+
+// Regression: TOFU attribution must never be promoted to a signature.
+const trustBoundary = await import("../src/charter-chain.js");
+assert.equal(trustBoundary.CHARTER_AUTHORIZATION_TRUST.walletSignature, "secp256k1-wallet-verified");
+assert.equal(trustBoundary.CHARTER_AUTHORIZATION_TRUST.dyncapAttribution, "hash-only-tofu-unverified");
+assert.equal(trustBoundary.CHARTER_AUTHORIZATION_TRUST.pollRatification, "not-independently-verified");

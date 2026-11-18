@@ -49,6 +49,12 @@ export function revAddressFromPublicKey(pubkey) {
   const check = blake2b(payload, { dkLen: 32 }).slice(0, 4);
   return base58(new Uint8Array([...payload, ...check]));
 }
+// A dyncap anchor is hash/TOFU attribution, not a seed signature.
+export const CHARTER_AUTHORIZATION_TRUST = Object.freeze({
+  walletSignature: "secp256k1-wallet-verified",
+  dyncapAttribution: "hash-only-tofu-unverified",
+  pollRatification: "not-independently-verified",
+});
 /** Deterministic domain-separated wallet signature bound to one dyncap anchor. */
 export function signCharterAuthorization(hash, anchor, privateKeyHex) {
   if (!HEX64.test(privateKeyHex)) throw new Error("invalid secp256k1 secret");
@@ -82,7 +88,7 @@ export function verifyCharterAuthorizations(charter, members) {
     if (member.role === "admin") adminCount++;
   }
   if (!adminCount) throw new Error("charter requires an admin wallet authorization");
-  return { valid: true, approvals: unique.size, adminApprovals: adminCount };
+  return { valid: true, approvals: unique.size, adminApprovals: adminCount, ...CHARTER_AUTHORIZATION_TRUST };
 }
 export function charterIssueTitle(charter) {
   if (!charter || charter.schema !== "success-charter/1" || charter.version !== 1
