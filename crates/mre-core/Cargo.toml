@@ -10,7 +10,13 @@ description = "Deterministic exact-rational binary MrE/Bayesian update (QLF Prof
 num-bigint = "0.4"
 num-rational = "0.4"
 num-traits = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[[bin]]
+name = "mre-profile-a"
+path = "src/bin/mre-profile-a.rs"
