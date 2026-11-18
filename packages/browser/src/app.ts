@@ -1669,7 +1669,7 @@ function promptJoinRoom(): void {
 function newRoomTab(): void {
   const roomId = generateCapability("room");
   openRoomTab(roomId);
-  addMessage("", "created a new room tab — use the share link to invite someone", "system");
+  addMessage("", "created a new room tab — use the Copy Invite Link to invite someone", "system");
 }
 
 function setTabMenuOpen(open: boolean): void {
