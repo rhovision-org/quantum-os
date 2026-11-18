@@ -298,6 +298,10 @@ without spending a peer on a separate daemon. `NO_MEMORY=1` turns it off, `PERSI
 moves the store. Logs/pids under `.agents/`; `bash stop-agents.sh` stops everything with
 a pidfile.
 
+**From Claude (a cloud session or project thread):** see
+[docs/agents-from-claude.md](../../docs/agents-from-claude.md) for the cloud environment
+setting the signaling host needs, the exact command, and how long the agent lasts.
+
 Why those two roles, and not `scribe`: a scribe's duties are a strict subset of the
 facilitator's (compare `duties` in `agent-roles.mjs` — scribe sets nothing the
 facilitator does not), so it needs no peer of its own, and a facilitator carrying

@@ -17,6 +17,7 @@ Detail pages hang off this one:
 | [../Consensus.md](../Consensus.md) | the `/probe` protocol and threat model |
 | [../SECURITY.md](../SECURITY.md) | the full threat model, known issues, reporting |
 | [../scripts/qos-cli/README.md](../scripts/qos-cli/README.md) | the headless Node peer, memory daemon, agents, bridge |
+| [agents-from-claude.md](agents-from-claude.md) | running a facilitator (or another agent) in a live room from a Claude cloud session: the environment's network setting, the commands, how long it lasts |
 | [../CLAUDE.md](../CLAUDE.md) | per-feature module map (`app.ts` + `notes.ts` + …) and the development workflow |
 
 ---
