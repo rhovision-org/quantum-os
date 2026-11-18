@@ -105,6 +105,20 @@ into the agent's settings or its persona and restarts it.
 | *"add a skeptic alongside it"* | a second agent, with its own identity |
 | *"no AI, just greet"* | drop `--ai`, so the agent answers only from its built-in FAQ |
 
+**Naming it.** An agent has two names, and only one of them is free to choose:
+
+- **Its display name** is how it appears in the roster and in chat. Ask *"call it
+  Socrates"* and it can be anything. It defaults to the role (`facilitator`). The name
+  is kept with the agent's identity, so say it again whenever you ask for a restart or a
+  new host, or the agent goes back to the role name.
+- **Its command** is what people type to address it, such as `/facil help`. The browser
+  passes only these prefixes on to agents: `/facil` (or `/facilitator`), `/scribe`,
+  `/skeptic`, `/greeter` and `/observer`. A custom persona should keep one of them. For
+  example, ask *"make the facilitator a heckler named Snark"*, and people type
+  `/facil …` to reach Snark. A new prefix such as `/heckler` gets no answer from the
+  browser until it is added to the app. `/ask <question>` reaches whichever agent is
+  present, whatever its name.
+
 **Where the change lands:**
 
 - **In the cloud session:** Claude restarts the agent with the change straight away. A
