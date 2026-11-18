@@ -12,6 +12,13 @@ works from a read-only clone: nothing is committed, forked or pushed. Your setti
 room, the AI credentials, the persona) live in the command line, environment variables
 or files in your own copy.
 
+**You don't need a GitHub account either.** The clone is anonymous, over HTTPS. The Claude
+session doesn't need this repository attached, because it clones the repo itself, so
+don't connect GitHub for this. Render's *Public Git Repository* option and Fly's local
+deploy also work without one. The accounts you do need are a Claude account, an
+account with whichever host you choose, and, for `--ai-backend api`, an Anthropic API
+key.
+
 Verified 2026-11-18: a facilitator joined a live room from a cloud session and greeted a
 new peer within seconds.
 
