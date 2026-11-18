@@ -89,16 +89,109 @@ In the room, try `/facil` (is it present?), `/facil help`, `/ask <question>`,
 
 ## 4. How long it stays up
 
-**Only as long as the cloud container does.** A cloud session's container is
-reclaimed after a period of inactivity, or when the session ends, and nothing is
-persistent. When that happens the agent leaves the room with no warning. To bring it
-back, ask in the same thread ("the facilitator dropped, restart it"). Claude re-runs
-step 2. Its identity comes back only if `--state` survived, so a reclaimed container
-means a new peer id.
+**Minutes, not hours, once the thread goes quiet.** Observed 2026-11-18: the cloud
+container is restarted soon after Claude's turn ends (`uptime` read 2 minutes on the
+next message), and every process in it, the agent included, goes with it. The
+`--state` directory did survive, so a restarted agent came back as the same peer. A
+cloud session is therefore good for trying an agent out, or for running one during a
+session you are actively working in. It is not a host. Ask "restart the agent" to bring
+it back. For an agent that stays, use one of the hosts in the next section.
 
-For an agent that is always on, run `bash scripts/qos-cli/run-agents.sh "<room>"` on a
-machine you control (with the `claude` CLI installed and logged in), under tmux or a
-service manager.
+## 5. Keeping an agent up: low-cost hosts
+
+An agent is one small Node process: it makes outbound connections only (signaling over
+WebSocket, WebRTC), serves no port, and uses about 150 MB of memory. Any always-on box
+that runs Node 18+ will do. Two settings come with it wherever it runs.
+
+**The room cap is a secret.** Whoever holds it can join the room. Put it in the host's
+secret or environment-variable store as `ROOM_CAP` and pass `--room "$ROOM_CAP"`. Don't
+put it in a committed file such as `render.yaml` or `fly.toml`.
+
+**The AI backend needs credentials there too.** Without `--ai` the agent still greets,
+prompts for names and answers the basics from `facilitator-faq.mjs`. With it:
+
+- `--ai-backend api` with `ANTHROPIC_API_KEY` set uses API credits, which are pay as you
+  go and cheap at an agent's few calls an hour. This is the simplest choice on a host.
+- `--ai-backend claude-code` bills a Claude subscription. Install the CLI on the host
+  (`npm install -g @anthropic-ai/claude-code`), run `claude setup-token` once on your own
+  machine, and store the token it prints as `CLAUDE_CODE_OAUTH_TOKEN`. The agent runs
+  `claude` with the host's environment, so that is all it needs.
+
+**What Claude can and can't do here.** From a thread, Claude can write the config, commit
+it, and run the agent anywhere it has a shell. It cannot sign you up for a host, enter
+your payment details, or see your host's dashboard. So the account, the secret values and
+the first deploy are yours, and they take about ten minutes. After that, a change pushed
+to the repo redeploys the agent on its own on Render and on Fly with a GitHub Action.
+
+| Host | Cost | Fits when |
+|------|------|-----------|
+| **Render**, Background Worker | about $7/month (Starter) | You already run the signaling server there. No Dockerfile is needed. |
+| **Fly.io**, one Machine | about $2–4/month (shared-cpu-1x, 512 MB) | You want the cheapest managed option. |
+| **Oracle Cloud** Always Free VM | $0 | You don't mind running a Linux VM yourself. |
+| A machine you already own | $0 | It is on all the time: a home server, a Raspberry Pi 4, a spare laptop. |
+
+Free tiers that put idle services to sleep (Render's free web services, for example)
+don't work, because a sleeping agent has left the room. GitHub Actions jobs end after 6
+hours, and GitHub's terms are not meant for long-running bots, so don't use them either.
+
+### Render (Background Worker)
+
+New → Background Worker → this repository, then set:
+
+- **Root directory:** `scripts/qos-cli`
+- **Build command:** `npm install` (append `&& npm install -g @anthropic-ai/claude-code`
+  for the `claude-code` backend)
+- **Start command:**
+  `node agent.mjs --room "$ROOM_CAP" --role facilitator --ai --ai-backend api --state /var/data/qos-agent`
+- **Environment:** `ROOM_CAP`, plus `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
+- **Disk** (optional, about $0.25/month for 1 GB): mount it at `/var/data`. This keeps the
+  agent's identity across deploys. Without a disk the room sees a new peer after each
+  deploy, which works but loses any `/gov trust` it was given.
+
+### Fly.io
+
+```bash
+cd scripts/qos-cli
+fly launch --no-deploy --name qos-facilitator     # detects Node; no public port needed
+fly secrets set ROOM_CAP='cap:room:…' ANTHROPIC_API_KEY='…'
+fly volumes create qos_state --size 1             # optional: stable identity
+# in fly.toml: remove the [http_service] section, mount qos_state at /data, and set
+#   [processes]
+#   app = "sh -c 'node agent.mjs --room \"$ROOM_CAP\" --role facilitator --ai --ai-backend api --state /data/qos-agent'"
+fly deploy
+```
+
+### A Linux box (Oracle Free VM, home server, Pi)
+
+```bash
+git clone https://github.com/rhovision-org/quantum-os && cd quantum-os/scripts/qos-cli
+npm install
+sudo tee /etc/systemd/system/qos-agent.service <<'UNIT'
+[Unit]
+Description=QuantumOS room agent
+After=network-online.target
+[Service]
+WorkingDirectory=/home/YOU/quantum-os/scripts/qos-cli
+EnvironmentFile=/home/YOU/.qos-agent.env
+ExecStart=/usr/bin/node agent.mjs --room ${ROOM_CAP} --role facilitator --ai --ai-backend api --state /home/YOU/.qos-agent
+Restart=always
+RestartSec=10
+User=YOU
+[Install]
+WantedBy=multi-user.target
+UNIT
+# ~/.qos-agent.env (chmod 600):  ROOM_CAP=cap:room:…   ANTHROPIC_API_KEY=…
+sudo systemctl enable --now qos-agent
+```
+
+`Restart=always` brings it back after a crash or reboot.
+
+### Custom personas on a host
+
+A host runs the code in the repository, so a role must be committed to be hosted. Add it
+to `ROLES` in `scripts/qos-cli/agent-roles.mjs` (a name, a `cmd`, a `persona` and its
+`duties`) and pass `--role <name>`. A persona tried out only in a cloud session's local
+checkout disappears with the container.
 
 ## Stopping it
 
