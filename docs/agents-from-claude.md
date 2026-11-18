@@ -54,9 +54,7 @@ is allowed.
    new thread runs there. A thread that is already running stays on its old environment,
    so start a new thread after changing the setting.
 
-Claude checks the setting itself: `curl https://quantum-os-signaling.onrender.com/`
-answers `{"status":"ok",…}` when the host is reachable. If it isn't reachable, Claude will
-say the environment is the problem.
+Claude checks the setting itself, and tells you if the environment is the problem.
 
 ## 2. Ask Claude
 
@@ -74,17 +72,10 @@ Other things you can ask for:
   lemmas, currencies, groups and the transcript, and replays them to people who join
   later.
 
-For reference, this is what Claude runs:
-
-```bash
-git clone --depth 1 https://github.com/rhovision-org/quantum-os
-cd quantum-os/scripts/qos-cli && npm install
-nohup node agent.mjs --room "cap:room:…" --role facilitator \
-  --ai --ai-backend claude-code --state ~/.qos-facil > ~/facil.log 2>&1 &
-```
-
-The `claude-code` backend uses the session's own Claude, so you don't need an API key here.
-The calls count against your Claude plan.
+Claude runs the agent with the `claude-code` AI backend, which uses the session's own
+Claude, so you don't need an API key here. Those calls count against your Claude plan.
+The commands are in [scripts/qos-cli/README.md](../scripts/qos-cli/README.md#agents-facilitator-scribe-greeter-)
+if you're curious, but you never need to type them.
 
 ## Customize it by asking Claude
 
@@ -105,19 +96,16 @@ into the agent's settings or its persona and restarts it.
 | *"add a skeptic alongside it"* | a second agent, with its own identity |
 | *"no AI, just greet"* | drop `--ai`, so the agent answers only from its built-in FAQ |
 
-**Naming it.** An agent has two names, and only one of them is free to choose:
+**Naming it.** An agent has a display name and a command:
 
 - **Its display name** is how it appears in the roster and in chat. Ask *"call it
   Socrates"* and it can be anything. It defaults to the role (`facilitator`). The name
   is kept with the agent's identity, so say it again whenever you ask for a restart or a
   new host, or the agent goes back to the role name.
-- **Its command** is what people type to address it, such as `/facil help`. The browser
-  passes only these prefixes on to agents: `/facil` (or `/facilitator`), `/scribe`,
-  `/skeptic`, `/greeter` and `/observer`. A custom persona should keep one of them. For
-  example, ask *"make the facilitator a heckler named Snark"*, and people type
-  `/facil …` to reach Snark. A new prefix such as `/heckler` gets no answer from the
-  browser until it is added to the app. `/ask <question>` reaches whichever agent is
-  present, whatever its name.
+- **Its command** is what people type to address it: the role's prefix, such as
+  `/facil help`. A custom role gets its own prefix, so a heckler role answers to
+  `/heckler …`. Its display name works as a command too, so an agent named Snark also
+  answers to `/snark …`. `/ask <question>` reaches whichever agent is present.
 
 **Where the change lands:**
 
@@ -217,35 +205,9 @@ Turn **Auto-Deploy** off if you'd rather not redeploy whenever `main` changes up
 
 **Stop** on the instance's page stops the agent.
 
-The script Claude writes follows this shape, with the values filled in:
-
-```bash
-#!/bin/bash
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt-get install -y nodejs git
-git clone --depth 1 https://github.com/rhovision-org/quantum-os /opt/quantum-os
-cd /opt/quantum-os/scripts/qos-cli && npm install
-# (a custom role, if asked for, is appended to agent-roles.mjs here)
-cat > /etc/qos-agent.env <<'ENV'
-ROOM_CAP=cap:room:…
-ANTHROPIC_API_KEY=PASTE-YOUR-KEY-HERE
-ENV
-chmod 600 /etc/qos-agent.env
-cat > /etc/systemd/system/qos-agent.service <<'UNIT'
-[Unit]
-Description=QuantumOS room agent
-After=network-online.target
-[Service]
-WorkingDirectory=/opt/quantum-os/scripts/qos-cli
-EnvironmentFile=/etc/qos-agent.env
-ExecStart=/usr/bin/node agent.mjs --room ${ROOM_CAP} --role facilitator --ai --ai-backend api --state /var/lib/qos-agent
-Restart=always
-RestartSec=10
-[Install]
-WantedBy=multi-user.target
-UNIT
-systemctl daemon-reload && systemctl enable --now qos-agent
-```
+The script installs Node.js and the agent, stores `ROOM_CAP` and your key in a file
+only the system can read, and runs the agent as a service that restarts it after a
+crash or reboot. Ask Claude to show you what it does before you paste it.
 
 ## Optional: your own persona with a GitHub account
 
