@@ -39,6 +39,7 @@ import { createCalls, type Calls } from "./calls.js";
 import { QosCommand } from "./qos-command.js";
 import { pickAskAgent, agentAskText, liveAgentTarget } from "./agent-ask.js";
 import { GoalStore, parseGoalAdd } from "./goal-store.js";
+import { successSnapshot, renderSuccessPanel } from "./success-panel.js";
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
 import { hashBlob, entryFromWire, sortEntries, findEntry, describeEntry, shortHash,
@@ -125,6 +126,10 @@ function setHideRoom(on: boolean): void {
 const sidebarEl       = document.getElementById("sidebar")!;
 const overlayEl       = document.getElementById("sidebar-overlay")!;
 const toggleBtn       = document.getElementById("sidebar-toggle") as HTMLButtonElement;
+const successOpenBtn  = document.getElementById("success-open") as HTMLButtonElement;
+const successDialog   = document.getElementById("success-dialog") as HTMLDialogElement;
+const successContent  = document.getElementById("success-content") as HTMLDivElement;
+const successCloseBtn = document.getElementById("success-close") as HTMLButtonElement;
 const myNameEl        = document.getElementById("my-name") as HTMLInputElement;
 const myIdEl          = document.getElementById("my-id")!;
 const roomIdEl        = document.getElementById("room-id")!;
@@ -934,6 +939,33 @@ function goalsForIdentity(): GoalStore | null {
   return goalStore;
 }
 
+// This panel intentionally reads the existing GoalStore and active-room /gov
+// objects only. It never signs, broadcasts, or persists a second group model.
+function refreshSuccessPanel(): void {
+  if (!successDialog.open) return;
+  const goals = goalsForIdentity();
+  if (!goals) {
+    successContent.textContent = "Identity is not ready yet.";
+    return;
+  }
+  renderSuccessPanel(successContent,
+    successSnapshot(goals.list(), [...groupStore.values()]), {
+      addGoal(text, priority) {
+        goalsForIdentity()?.add(text, priority);
+        refreshSuccessPanel();
+      },
+      completeGoal(id) {
+        goalsForIdentity()?.complete(id);
+        refreshSuccessPanel();
+      },
+      openGroup(id) {
+        successDialog.close();
+        const group = groupStore.get(id);
+        if (group) showGroupCard(group);
+      },
+    });
+}
+
 /// Verify an inbound envelope's dyncap if present. Returns a status string for
 /// chat display (empty when no dyncap was carried). On fork detection, the
 /// affected peer is flagged contested and the user is notified.
@@ -1546,6 +1578,7 @@ function switchToRoom(roomId: string): void {
   uiActiveRoom = next;
   next.hasUnread = false;        // viewing the room clears the unread flag
   applyActiveRoomToUI();
+  refreshSuccessPanel();
 }
 
 function applyActiveRoomToUI(): void {
@@ -5984,18 +6017,22 @@ function handleCommand(raw: string): string[] {
           break;
         }
         const goal = goals.add(parsed.text, parsed.priority);
+        refreshSuccessPanel();
         sys(`🎯 added **${goal.id}** — ${goal.text} · ${goal.priority}`);
         break;
       }
       if (sub === "done") {
         if (!rest) { sys("usage: /goal done <id>"); break; }
         const goal = goals.complete(rest);
+        refreshSuccessPanel();
         sys(goal ? `✓ ${goal.id} done — ${goal.text}` : `no goal ${rest} — /goal list`);
         break;
       }
       if (sub === "remove") {
         if (!rest) { sys("usage: /goal remove <id>"); break; }
-        sys(goals.remove(rest) ? `removed ${rest}` : `no goal ${rest} — /goal list`);
+        const removed = goals.remove(rest);
+        refreshSuccessPanel();
+        sys(removed ? `removed ${rest}` : `no goal ${rest} — /goal list`);
         break;
       }
       if (sub === "share") {
@@ -6601,6 +6638,7 @@ function handleCommand(raw: string): string[] {
         dyncapState = restored;
         qosCommands.clear();   // old controllers hold the previous identity
         goalStore = null; goalStoreAnchor = "";   // personal goals are identity-scoped
+        refreshSuccessPanel();
         saveDyncap();
         if (typeof parsed.name === "string" && parsed.name.trim()) {
           myName = parsed.name.trim();
@@ -9089,6 +9127,12 @@ function toggleSidebar(open?: boolean): void {
 }
 toggleBtn.addEventListener("click", () => toggleSidebar());
 overlayEl.addEventListener("click", () => toggleSidebar(false));
+successOpenBtn.addEventListener("click", () => {
+  if (!successDialog.open) successDialog.showModal();
+  refreshSuccessPanel();
+  toggleSidebar(false);
+});
+successCloseBtn.addEventListener("click", () => successDialog.close());
 
 // ---------------------------------------------------------------------------
 // Rich text (safe Markdown subset) + persistent chat transcript
@@ -10665,6 +10709,7 @@ function renderMacros(): void {
 
 function renderGroups(): void {
   if (!isUiActive() || !govListEl || !govCountEl) return;
+  refreshSuccessPanel();
   govCountEl.textContent = String(groupStore.size);
   govListEl.innerHTML = "";
   for (const g of [...groupStore.values()].sort((a, b) => b.createdAt - a.createdAt)) {

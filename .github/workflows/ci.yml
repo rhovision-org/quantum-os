@@ -179,6 +179,10 @@ jobs:
       - name: Goal store test
         run: node packages/browser/test/goal-store.test.mjs
 
+      # Compact panel: identity-private data and safe read-only group projection.
+      - name: Success overview panel test
+        run: node packages/browser/test/success-panel.test.mjs
+
       # The required RhoGov handoff artifact: canonical hashing, signature rules,
       # hash mismatch detection, and refusal to export a raw room capability.
       - name: Success charter test
