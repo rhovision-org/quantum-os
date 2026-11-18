@@ -60,9 +60,12 @@ import { loadConfig as loadNodeConfig, saveConfig as saveNodeConfig, describeCon
          type NodeConfig } from "./rholang.js";
 import { qucalcSearch, qucalcSolve,
          type SearchDone as QucalcSearchDone } from "./qucalc-search.js";
+import { checkRoomName, slugify, findRoomBySlug, parseRoomHash, buildRoomHash,
+         nameFromInvite, ROOM_NAME_MAX } from "./room-names.js";
 
 // ---------------------------------------------------------------------------
-// Room ID from URL hash: #room=cap:..., or generate a new one and set hash.
+// Room ID from URL hash: #/slug?room=cap:..., #room=cap:... (legacy), or a
+// bare #/slug naming a room this browser has joined — else generate a new one.
 //
 // A room cap is a bearer capability: reading it IS joining. The address bar is
 // therefore the leakiest surface in the app — it is in every screen share,
@@ -79,36 +82,103 @@ const ACTIVE_ROOM_KEY = "qos-active-room";
 /** Keep the room cap out of the address bar. On unless explicitly turned off. */
 let hideRoom = localStorage.getItem(HIDE_ROOM_KEY) !== "no";
 
+// ---------------------------------------------------------------------------
+// Room names — what a tab is called (room-names.ts)
+//
+// roomId → name, per browser (`qos-room-names`). A name is a label, never an
+// authority: it rides an invite link as `name=` beside the cap so the joiner's
+// tab reads the same, and its slug is what the address bar shows when the cap
+// is hidden (`#/my-room`). Unique among the rooms this browser has joined.
+// ---------------------------------------------------------------------------
+
+const ROOM_NAMES_KEY = "qos-room-names";
+const roomNames: Map<string, string> = (() => {
+  try {
+    const obj = JSON.parse(localStorage.getItem(ROOM_NAMES_KEY) || "{}");
+    if (obj && typeof obj === "object") {
+      return new Map(Object.entries(obj).filter((e): e is [string, string] => typeof e[1] === "string"));
+    }
+  } catch { /* corrupt store: start empty */ }
+  return new Map<string, string>();
+})();
+
+function saveRoomNames(): void {
+  try { localStorage.setItem(ROOM_NAMES_KEY, JSON.stringify(Object.fromEntries(roomNames))); }
+  catch { /* storage refused: names last for this session */ }
+}
+
+function setRoomName(roomId: string, name: string | null): void {
+  if (name) roomNames.set(roomId, name); else roomNames.delete(roomId);
+  saveRoomNames();
+}
+
+/** What a tab, a list line or a message calls a room. */
+function roomDisplayName(roomId: string): string {
+  return roomNames.get(roomId) ?? shortId(roomId);
+}
+
+/**
+ * Take the name an invite link carries for a room this browser has not named.
+ * A name already used here by another room gets the suggested variant instead,
+ * so names stay unique; returns a line saying so, or null.
+ */
+function adoptInviteName(roomId: string, invited: string | null): string | null {
+  if (!invited || roomNames.has(roomId)) return null;
+  const check = checkRoomName(invited, roomNames, roomId);
+  if (check.ok) { setRoomName(roomId, check.name); return null; }
+  if (check.suggestion) {
+    setRoomName(roomId, check.suggestion);
+    return `this browser already has a room named “${invited}” — calling the new one “${check.suggestion}” here (/room name to change it)`;
+  }
+  return null;
+}
+
+/** Said once the chat is up: the address bar named a room this browser doesn't know. */
+let pendingRoomNotice: string | null = null;
+
 function getRoomId(): string {
-  const params = new URLSearchParams(window.location.hash.slice(1));
+  const { slug, params } = parseRoomHash(window.location.hash);
   const existing = params.get("room");
   if (existing) return existing;
+  const joined = loadJoinedRooms();
+  // `#/my-room`: a room this browser has joined, by name. A slug is not a
+  // capability, so one this browser doesn't know can't be opened — say so.
+  if (slug) {
+    const byName = findRoomBySlug(slug, roomNames);
+    if (byName && joined.includes(byName)) return byName;
+    pendingRoomNotice = `no room called “${slug}” in this browser — a name only opens rooms you've joined here; `
+      + "to join someone else's, use their invite link (it carries the room capability)";
+  }
   // No room in the URL is the ordinary case once the cap is hidden, so the
   // room you were last in has to be remembered somewhere else — otherwise a
   // reload would mint a fresh room and leave the real one as a stray tab.
   const last = localStorage.getItem(ACTIVE_ROOM_KEY);
-  if (last && loadJoinedRooms().includes(last)) return last;
-  const id = generateCapability("room");
-  params.set("room", id);
-  if (!hideRoom) window.location.hash = params.toString();
-  return id;
+  if (last && joined.includes(last)) return last;
+  return generateCapability("room");
+}
+
+/** The hash for a room: `#/slug` always (when named), plus name + cap unless hidden. */
+function roomHash(roomId: string, withCap: boolean): string {
+  const name = roomNames.get(roomId) ?? null;
+  const params = new URLSearchParams();
+  if (withCap) {
+    if (name) params.set("name", name);
+    params.set("room", roomId);
+  }
+  return buildRoomHash(name ? slugify(name) : null, params);
 }
 
 /**
- * The address bar follows the active room — or carries nothing, in which case
- * this is also the only record of which room that was.
+ * The address bar follows the active room — its name as a slug, and the cap
+ * only when it isn't hidden. Always replaceState: switching rooms never reloads
+ * the page or adds a history entry per tab click. When the cap is hidden this
+ * is also the only record of which room that was.
  */
 function syncRoomHash(): void {
   localStorage.setItem(ACTIVE_ROOM_KEY, activeRoom.roomId);
-  if (hideRoom) {
-    if (window.location.hash) {
-      history.replaceState(null, "", window.location.pathname + window.location.search);
-    }
-    return;
-  }
-  const params = new URLSearchParams(window.location.hash.slice(1));
-  params.set("room", activeRoom.roomId);
-  history.replaceState(null, "", `#${params.toString()}`);
+  const url = window.location.pathname + window.location.search + roomHash(activeRoom.roomId, !hideRoom);
+  const current = window.location.pathname + window.location.search + window.location.hash;
+  if (url !== current) history.replaceState(null, "", url);
 }
 
 function setHideRoom(on: boolean): void {
@@ -1515,10 +1585,11 @@ function renderTabs(): void {
     tab.className = "tab"
       + (isActive ? " active" : "")
       + (ctx.hasUnread && !isActive ? " unread" : "");
-    tab.title = ctx.roomId + (ctx.hasUnread && !isActive ? " (unread)" : "");
+    const named = roomNames.get(ctx.roomId);
+    tab.title = (named ?? ctx.roomId) + (ctx.hasUnread && !isActive ? " (unread)" : "");
     const label = document.createElement("span");
     label.className = "tab-label";
-    label.textContent = (ctx.hasUnread && !isActive ? "● " : "") + shortId(ctx.roomId);
+    label.textContent = (ctx.hasUnread && !isActive ? "● " : "") + roomDisplayName(ctx.roomId);
     tab.appendChild(label);
     // Only show the close button when there's more than one tab open.
     if (rooms.size > 1) {
@@ -1602,6 +1673,9 @@ function closeRoomTab(roomId: string): void {
   if (ctx.posixNet) { ctx.posixNet.close(); ctx.posixNet = null; }
   rooms.delete(roomId);
   saveJoinedRooms();
+  // Leaving frees the name: uniqueness is among the rooms you're in, and a
+  // name held by a room with no tab would be "taken" by something invisible.
+  setRoomName(roomId, null);
   // If we closed the visible one, pick another to activate.
   if (uiActiveRoom.roomId === roomId) {
     const next = rooms.values().next().value as RoomContext;
@@ -1660,16 +1734,161 @@ function promptJoinRoom(): void {
   // Same reasoning as /room join: a legacy (pre-Pauli-closure) cap is still a
   // real room — the public room is one — so warn rather than refuse.
   if (!validateCapability(roomId)) addMessage("", `⚠ room cap is not ZFA-closed (a legacy token?) — joining anyway: ${roomId}`, "system");
+  const note = adoptInviteName(roomId, nameFromInvite(input));
   openRoomTab(roomId);
+  if (note) addMessage("", note, "system");
 }
 
-/// Mint a fresh room capability and open it as a tab. A room is a bearer
-/// capability, so this is local generation only; inviting someone still means
-/// sharing the URL from the room panel.
-function newRoomTab(): void {
+/**
+ * Ask for a room name in a modal, checking it against the names this browser
+ * already uses as it's typed. A taken name keeps the dialog open with the
+ * reason and a one-click alternative. Resolves to the accepted name, or null
+ * if cancelled. `selfRoomId` is the room being renamed (its own name is fine).
+ */
+function roomNameDialog(title: string, okLabel: string, initial = "", selfRoomId?: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "room-name-overlay";
+    const card = document.createElement("div");
+    card.className = "room-name-card";
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true");
+    const h = document.createElement("div");
+    h.className = "room-name-title";
+    h.textContent = title;
+    const lab = document.createElement("label");
+    lab.className = "room-name-label";
+    lab.textContent = "Room name";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "room-name-input";
+    input.maxLength = ROOM_NAME_MAX + 20;   // room to type past it and be told, not silently cut
+    input.placeholder = "e.g. Design review";
+    input.value = initial;
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    lab.htmlFor = input.id = "room-name-input";
+    const preview = document.createElement("div");
+    preview.className = "room-name-preview";
+    const err = document.createElement("div");
+    err.className = "room-name-error";
+    err.setAttribute("role", "alert");
+    const suggestBtn = document.createElement("button");
+    suggestBtn.type = "button";
+    suggestBtn.className = "room-name-suggest";
+    suggestBtn.hidden = true;
+    const row = document.createElement("div");
+    row.className = "room-name-row";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "room-name-cancel";
+    cancel.textContent = "Cancel";
+    const ok = document.createElement("button");
+    ok.type = "button";
+    ok.className = "room-name-ok";
+    ok.textContent = okLabel;
+    row.append(cancel, ok);
+    card.append(h, lab, input, preview, err, suggestBtn, row);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const base = `${window.location.host}${window.location.pathname}`;
+    let shownError = false;   // only complain once they've tried, or typed a duplicate
+    const refresh = (forceError = false): ReturnType<typeof checkRoomName> => {
+      const check = checkRoomName(input.value, roomNames, selfRoomId);
+      const slug = slugify(input.value);
+      preview.textContent = slug ? `address: ${base}#/${slug}` : "";
+      // A duplicate is said as soon as it's typed; anything else (empty, too
+      // long) only once they've tried to submit, so the dialog doesn't open scolding.
+      if (forceError) shownError = true;
+      const say = !check.ok && (shownError || !!check.suggestion);
+      err.textContent = !check.ok && say ? check.error : "";
+      if (!check.ok && check.suggestion) {
+        suggestBtn.hidden = false;
+        suggestBtn.textContent = `Use “${check.suggestion}” instead`;
+        suggestBtn.dataset.name = check.suggestion;
+      } else {
+        suggestBtn.hidden = true;
+      }
+      ok.disabled = !check.ok;
+      return check;
+    };
+
+    let done = false;
+    const close = (result: string | null): void => {
+      if (done) return;
+      done = true;
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      resolve(result);
+    };
+    const submit = (): void => {
+      const check = refresh(true);
+      if (check.ok) close(check.name);
+      else input.focus();
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") { e.preventDefault(); close(null); }
+      else if (e.key === "Enter") { e.preventDefault(); submit(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    input.addEventListener("input", () => refresh());
+    suggestBtn.addEventListener("click", () => {
+      input.value = suggestBtn.dataset.name ?? input.value;
+      refresh();
+      input.focus();
+    });
+    cancel.addEventListener("click", () => close(null));
+    ok.addEventListener("click", submit);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(null); });
+    refresh();
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  });
+}
+
+/// Mint a fresh room capability under a chosen name and open it as a tab. A
+/// room is a bearer capability, so this is local generation only; inviting
+/// someone still means sharing the link (which carries the name along).
+function createNamedRoom(name: string): string {
   const roomId = generateCapability("room");
+  setRoomName(roomId, name);     // before opening, so the first hash sync has the slug
   openRoomTab(roomId);
-  addMessage("", "created a new room tab — use the share link to invite someone", "system");
+  return roomId;
+}
+
+async function newRoomTab(): Promise<void> {
+  const name = await roomNameDialog("New room", "Create room");
+  if (!name) return;
+  createNamedRoom(name);
+  addMessage("", `created room “${name}” — use Copy invite link to bring someone in`, "system");
+}
+
+/** Rename a joined room (the active one by default). */
+function renameRoom(roomId: string, name: string): void {
+  setRoomName(roomId, name);
+  renderTabs();
+  if (roomId === activeRoom.roomId) { syncRoomHash(); updateShareLink(); }
+}
+
+/**
+ * The address bar changed without a reload — someone typed a `#/slug`, or
+ * pasted an invite link into this tab. Open or switch to that room; the hash
+ * is then rewritten to the room's own form (which hides the cap again).
+ */
+function onRoomHashChange(): void {
+  const { slug, params } = parseRoomHash(window.location.hash);
+  const cap = params.get("room");
+  if (cap && cap.startsWith("cap:room:")) {
+    const note = adoptInviteName(cap, nameFromInvite(window.location.href));
+    if (!validateCapability(cap)) addMessage("", `⚠ room cap is not ZFA-closed (a legacy token?) — joining anyway: ${cap}`, "system");
+    openRoomTab(cap);
+    if (note) addMessage("", note, "system");
+  } else if (slug) {
+    const target = findRoomBySlug(slug, roomNames);
+    if (target && rooms.has(target)) switchToRoom(target);
+    else addMessage("", `no room called “${slug}” in this browser — an invite link carries the room capability, a name alone can't open one`, "system");
+  }
+  syncRoomHash();
 }
 
 function setTabMenuOpen(open: boolean): void {
@@ -6432,7 +6651,8 @@ function handleCommand(raw: string): string[] {
           const active = ctx.roomId === activeRoom.roomId ? " ←" : "";
           const connected = ctx.qpeer ? "  ●" : "";
           const full = hideRoom ? "" : `  ${ctx.roomId}`;
-          sys(`  ${shortId(ctx.roomId)}${full}${connected}${active}`);
+          const named = roomNames.has(ctx.roomId) ? `“${roomNames.get(ctx.roomId)}”  ` : "";
+          sys(`  ${named}${shortId(ctx.roomId)}${full}${connected}${active}`);
         }
       } else if (sub === "join") {
         const target = rParts.slice(1).join(" ").trim();
@@ -6446,12 +6666,40 @@ function handleCommand(raw: string): string[] {
         // public room unjoinable by command while its link worked, which
         // read as "0 peers" with no explanation.
         if (!validateCapability(roomId)) sys(`⚠ room cap is not ZFA-closed (a legacy token?) — joining anyway: ${roomId}`);
+        const note = adoptInviteName(roomId, nameFromInvite(target));
         openRoomTab(roomId);
-        sys(`joined room ${shortId(roomId)} (switched to new tab)`);
+        if (note) sys(note);
+        sys(`joined room ${roomDisplayName(roomId)} (switched to new tab)`);
       } else if (sub === "new") {
-        const newId = generateCapability("room");
-        openRoomTab(newId);
-        sys(`created room ${shortId(newId)} (new tab — share its link to invite someone)`);
+        // `/room new <name>` names it inline; bare `/room new` asks, like the + ROOM menu.
+        const wanted = arg.trim().slice(rParts[0].length).trim();
+        const created = (name: string): void => {
+          createNamedRoom(name);
+          sys(`created room “${name}” (new tab — Copy invite link to bring someone in)`);
+        };
+        if (wanted) {
+          const check = checkRoomName(wanted, roomNames);
+          if (check.ok) created(check.name);
+          else sys(`⚠ ${check.error}${check.suggestion ? ` Try “${check.suggestion}”.` : ""} — no room was created`);
+        } else {
+          void roomNameDialog("New room", "Create room").then((name) => { if (name) created(name); });
+        }
+      } else if (sub === "name" || sub === "rename") {
+        const wanted = arg.trim().slice(rParts[0].length).trim();
+        const roomId = activeRoom.roomId;
+        const current = roomNames.get(roomId) ?? "";
+        const renamed = (name: string): void => {
+          renameRoom(roomId, name);
+          sys(`this room is now called “${name}” here — invite links carry the new name`);
+        };
+        if (wanted) {
+          const check = checkRoomName(wanted, roomNames, roomId);
+          if (check.ok) renamed(check.name);
+          else sys(`⚠ ${check.error}${check.suggestion ? ` Try “${check.suggestion}”.` : ""} — name unchanged`);
+        } else {
+          void roomNameDialog(current ? "Rename room" : "Name this room", "Save", current, roomId)
+            .then((name) => { if (name) renamed(name); });
+        }
       } else if (sub === "leave") {
         if (rooms.size <= 1) { sys("cannot leave the last room"); break; }
         const leavingId = activeRoom.roomId;
@@ -6467,10 +6715,12 @@ function handleCommand(raw: string): string[] {
         const target = rParts.slice(1).join(" ").trim();
         const roomId = extractRoomCap(target) || activeRoom.roomId;
         sys(`room: ${roomId}`);
-        sys(`  share URL: ${window.location.origin}${window.location.pathname}#room=${roomId}`);
+        if (roomNames.has(roomId)) sys(`  name: ${roomNames.get(roomId)}`);
+        sys(`  share URL: ${roomUrl(roomId)}`);
       } else {
         sys(`unknown subcommand: /room ${sub}`);
-        sys("  /room new                        — mint a fresh room and open it in a new tab");
+        sys("  /room new [name]                 — mint a fresh room under a name and open it in a new tab");
+        sys("  /room name [name]                — rename the active room (no name opens the dialog)");
         sys("  /room list                       — list joined rooms");
         sys("  /room join <cap:room:…|url>      — open a new tab for the named room");
         sys("  /room leave                      — close the active tab");
@@ -9002,8 +9252,8 @@ function send(): void {
  * The URL that lets someone else in. Built from the active room rather than
  * read off the address bar, which may deliberately no longer carry it.
  */
-function roomUrl(): string {
-  return `${window.location.origin}${window.location.pathname}#room=${activeRoom.roomId}`;
+function roomUrl(roomId: string = activeRoom.roomId): string {
+  return `${window.location.origin}${window.location.pathname}${roomHash(roomId, true)}`;
 }
 
 function updateShareLink(): void {
@@ -10695,6 +10945,9 @@ async function init(): Promise<void> {
   // space. A bug report that names a version is worth several that do not.
   if (appVersionEl) appVersionEl.textContent = `version ${__APP_VERSION__} · build ${__APP_BUILD__}`;
   const roomId = getRoomId();
+  // An invite link names the room it opens; take that before the hash is
+  // rewritten (and the cap hidden) below.
+  const inviteNote = adoptInviteName(roomId, nameFromInvite(window.location.href));
 
   // The URL-hash room is the first joined room and becomes the active one.
   const firstRoom = createRoom(roomId);
@@ -10792,7 +11045,12 @@ async function init(): Promise<void> {
     e.stopPropagation();
     setTabMenuOpen(tabMenuEl.hidden);
   });
-  tabNewBtn.addEventListener("click", () => { setTabMenuOpen(false); newRoomTab(); });
+  tabNewBtn.addEventListener("click", () => { setTabMenuOpen(false); void newRoomTab(); });
+  // Editing the address bar's #/slug, or pasting an invite link into this tab,
+  // changes only the hash — no reload — so the switch has to be done here.
+  window.addEventListener("hashchange", onRoomHashChange);
+  if (inviteNote) addMessage("", inviteNote, "system");
+  if (pendingRoomNotice) { addMessage("", pendingRoomNotice, "system"); pendingRoomNotice = null; }
   tabJoinBtn.addEventListener("click", () => { setTabMenuOpen(false); promptJoinRoom(); });
   document.addEventListener("click", (e) => {
     if (tabMenuEl.hidden) return;
