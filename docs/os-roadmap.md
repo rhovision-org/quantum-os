@@ -165,3 +165,6 @@ in [`CLAUDE.md`](../CLAUDE.md#documentation-prs).
 - [Connection](connection.md) — transport, overlay, TURN, reconnect.
 - [Commands](commands.md) — the shell surface as it exists today.
 - [Security](../SECURITY.md) — ZFA/dyncap threat model.
+
+
+For the group charter handoff identity and wallet-signature trust boundary, see [Success-charter identity boundary](success-charter-identity-boundary.md).
