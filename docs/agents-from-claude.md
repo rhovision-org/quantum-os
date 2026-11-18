@@ -22,13 +22,43 @@ key.
 Verified 2026-11-18: a facilitator joined a live room from a cloud session and greeted a
 new peer within seconds.
 
+## Quick start
+
+**Try it now (free with a Claude plan, lasts minutes after you stop chatting):**
+
+1. Sign in at [claude.ai](https://claude.ai) and open [Claude Code on the web](https://claude.ai/code).
+2. Create a cloud environment that allows `quantum-os-signaling.onrender.com`, and select
+   it ([step 1](#1-set-the-cloud-environment-once); environment docs:
+   [code.claude.com](https://code.claude.com/docs/en/claude-code-on-the-web)).
+3. Open a room at [rhovision-org.github.io/quantum-os](https://rhovision-org.github.io/quantum-os/),
+   copy its link, and ask Claude: *"run a facilitator agent in &lt;room link&gt;"*
+   ([step 2](#2-ask-claude)).
+
+**Keep it up (a few dollars a month, or free on your own box):**
+
+1. Get an AI credential: an [Anthropic API key](https://console.anthropic.com/settings/keys)
+   (pay as you go), or a subscription token from `claude setup-token`
+   ([install the Claude CLI](https://code.claude.com/docs/en/setup)).
+2. Pick a host and follow its recipe:
+   - [Render](#render-background-worker): [sign up](https://dashboard.render.com/register),
+     about $7/month
+   - [Fly.io](#flyio): [sign up](https://fly.io/app/sign-up), about $2–4/month
+   - [A Linux box](#a-linux-box-oracle-free-vm-home-server-pi), such as an
+     [Oracle Always Free VM](https://www.oracle.com/cloud/free/), $0
+3. Set two secrets there: `ROOM_CAP` (the room link's `cap:room:…`) and the AI credential.
+4. For a custom persona that redeploys itself, see
+   [with a GitHub account](#optional-with-a-github-account) (optional).
+
 ## 1. Set the cloud environment (once)
 
 An agent needs the signaling server, `quantum-os-signaling.onrender.com`. The
 **default ("Built-in") cloud environment's network policy blocks that host**, so the
 join fails before anything else happens.
 
-1. Create a cloud environment (named `quantum-os` here) whose network access allows
+1. Create a cloud environment (named `quantum-os` here) from the environment selector in
+   [Claude Code on the web](https://claude.ai/code)
+   ([how environments work](https://code.claude.com/docs/en/claude-code-on-the-web)). Its
+   network access must allow
    `quantum-os-signaling.onrender.com`. Allowing `*.onrender.com` also works. Keep the
    default package registries allowed, since `npm install` is needed.
 2. In a Claude **project**, open Project settings → Cloud environment and select it, so
@@ -123,10 +153,11 @@ put it in a file anyone else can read.
 **The AI backend needs credentials there too.** Without `--ai` the agent still greets,
 prompts for names and answers the basics from `facilitator-faq.mjs`. With it:
 
-- `--ai-backend api` with `ANTHROPIC_API_KEY` set uses API credits, which are pay as you
+- `--ai-backend api` with `ANTHROPIC_API_KEY` set
+  ([create a key](https://console.anthropic.com/settings/keys)) uses API credits, which are pay as you
   go and cheap at an agent's few calls an hour. This is the simplest choice on a host.
 - `--ai-backend claude-code` bills a Claude subscription. Install the CLI on the host
-  (`npm install -g @anthropic-ai/claude-code`), run `claude setup-token` once on your own
+  (`npm install -g @anthropic-ai/claude-code`; [setup docs](https://code.claude.com/docs/en/setup)), run `claude setup-token` once on your own
   machine, and store the token it prints as `CLAUDE_CODE_OAUTH_TOKEN`. The agent runs
   `claude` with the host's environment, so that is all it needs.
 
@@ -137,9 +168,9 @@ secret values and the first deploy are yours, and they take about ten minutes.
 
 | Host | Cost | Fits when |
 |------|------|-----------|
-| **Render**, Background Worker | about $7/month (Starter) | You already run the signaling server there. No Dockerfile is needed. |
-| **Fly.io**, one Machine | about $2–4/month (shared-cpu-1x, 512 MB) | You want the cheapest managed option. |
-| **Oracle Cloud** Always Free VM | $0 | You don't mind running a Linux VM yourself. |
+| **Render**, Background Worker | about $7/month (Starter; [pricing](https://render.com/pricing)) | You already run the signaling server there. No Dockerfile is needed. |
+| **Fly.io**, one Machine | about $2–4/month (shared-cpu-1x, 512 MB; [pricing](https://fly.io/docs/about/pricing/)) | You want the cheapest managed option. |
+| **Oracle Cloud** [Always Free](https://www.oracle.com/cloud/free/) VM | $0 | You don't mind running a Linux VM yourself. |
 | A machine you already own | $0 | It is on all the time: a home server, a Raspberry Pi 4, a spare laptop. |
 
 Free tiers that put idle services to sleep (Render's free web services, for example)
@@ -148,7 +179,9 @@ hours, and GitHub's terms are not meant for long-running bots, so don't use them
 
 ### Render (Background Worker)
 
-New → Background Worker → **Public Git Repository**, and paste
+[Sign up](https://dashboard.render.com/register), then in the
+[dashboard](https://dashboard.render.com/) choose New → Background Worker
+([docs](https://render.com/docs/background-workers)) → **Public Git Repository**, and paste
 `https://github.com/rhovision-org/quantum-os` (branch `main`). Render builds from the
 public repo, so it needs no GitHub connection and no access to it. Then set:
 
@@ -160,13 +193,14 @@ public repo, so it needs no GitHub connection and no access to it. Then set:
 - **Environment:** `ROOM_CAP`, plus `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
 - **Auto-deploy:** turn it off if you'd rather update when you choose. With it on, your
   agent redeploys whenever `main` changes upstream.
-- **Disk** (optional, about $0.25/month for 1 GB): mount it at `/var/data`. This keeps the
+- **Disk** (optional, about $0.25/month for 1 GB; [docs](https://render.com/docs/disks)): mount it at `/var/data`. This keeps the
   agent's identity across deploys. Without a disk the room sees a new peer after each
   deploy, which works but loses any `/gov trust` it was given.
 
 ### Fly.io
 
-Fly deploys from a local folder, so this runs in your own clone. `fly.toml` is written
+[Sign up](https://fly.io/app/sign-up) and [install `flyctl`](https://fly.io/docs/flyctl/install/),
+then `fly auth login`. Fly deploys from a local folder, so this runs in your own clone. `fly.toml` is written
 there and never leaves your machine.
 
 ```bash
@@ -182,6 +216,10 @@ fly deploy
 ```
 
 ### A Linux box (Oracle Free VM, home server, Pi)
+
+Any always-on Linux machine with [Node.js](https://nodejs.org/) 18+ will do. For a free
+one, create an [Oracle Cloud Always Free](https://www.oracle.com/cloud/free/) VM
+(Ubuntu, Ampere A1), SSH in, and install Node.
 
 ```bash
 git clone --depth 1 https://github.com/rhovision-org/quantum-os && cd quantum-os/scripts/qos-cli
@@ -219,15 +257,18 @@ from the public repo, so it only runs the roles already there.
 Nothing above needs one. A GitHub account adds one thing: a **custom persona that
 redeploys itself** on a managed host.
 
-1. Fork `rhovision-org/quantum-os` to your account. A fork is your copy: you can write to
+1. [Sign up for GitHub](https://github.com/signup), then
+   [fork rhovision-org/quantum-os](https://github.com/rhovision-org/quantum-os/fork) to your account. A fork is your copy: you can write to
    it without any access to the original.
 2. Add your role to `scripts/qos-cli/agent-roles.mjs` in the fork, as the Developer Guide
-   describes, and commit it. You can edit on github.com, or ask Claude (below).
+   describes, and commit it. You can edit it on github.com: open the file in your fork and use the
+   pencil icon. Or ask Claude (step 4).
 3. On Render, create the Background Worker from **your fork** instead of the public URL,
    with the settings above and `--role <your role>`. With auto-deploy on, every commit
    to the fork redeploys the agent.
 4. To have Claude make those edits, [connect GitHub](https://claude.ai/connect-github),
-   install the Claude GitHub App on the fork, and add the fork to your project under
+   [install the Claude GitHub App](https://github.com/apps/claude/installations/select_target)
+   on the fork, and add the fork to your project under
    Project settings → Repositories. A thread then gets the fork checked out and can push
    to it. "Make the heckler ruder" becomes a commit, and Render redeploys it.
 
