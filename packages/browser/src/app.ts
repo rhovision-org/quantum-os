@@ -37,7 +37,7 @@ import { parseDefinition, parseInvocation, expandCommand, expandCallSites,
          MACRO_NAME_RE, MAX_BODY } from "./macro-lang.js";
 import { createCalls, type Calls } from "./calls.js";
 import { QosCommand } from "./qos-command.js";
-import { pickAskAgent, agentAskText } from "./agent-ask.js";
+import { pickAskAgent, agentAskText, liveAgentTarget } from "./agent-ask.js";
 import { GoalStore, parseGoalAdd } from "./goal-store.js";
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
@@ -3611,6 +3611,7 @@ function handleCommand(raw: string): string[] {
         "  /kill <name|id>  — terminate a process you own (owner-only alias)",
         "  /goal [sub]      — private personal goals: add · list · done · review · share",
         "  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)",
+        "  /<role|name> [cmd] — address any live agent by role or display name (e.g. /heckler help)",
         "  /probe [sub]     — discrepancy probe window state (status|clear)",
         "  /room [sub]      — multi-room tabs (new|list|join <cap>|leave|ref)",
         "  /share <sel> to <room>  — bridge a lemma/chat/note into another tab",
@@ -7427,8 +7428,24 @@ function handleCommand(raw: string): string[] {
       break;
     }
 
-    default:
+    default: {
+      // A custom agent may announce a role the browser has no dedicated case
+      // for (e.g. heckler). `/ask` already routes to it; direct `/<role>` does
+      // too, as long as that peer is in the live roster — never a stale cache.
+      const presentAgents = [...peerAgents].filter(([id]) => peers.has(id));
+      const target = liveAgentTarget(presentAgents, peerNames, cmd);
+      if (target) {
+        if (!qpeer) { sys("not connected — connect first"); break; }
+        const out = `/${target.command}${arg.trim() ? " " + arg.trim() : ""}`;
+        qpeer.broadcast({ kind: "chat", text: out });
+        const who = target.name && target.name.toLowerCase() !== target.role
+          ? `${target.name} (${target.role})`
+          : `the room's ${target.role} agent(s)`;
+        sys(`→ relayed to ${who} — each answers for itself (there may be several, or none). The browser doesn't vouch for any.`);
+        break;
+      }
       sys(`unknown command: /${cmd}  (type /help for list)`);
+    }
   }
 
   return lines;
