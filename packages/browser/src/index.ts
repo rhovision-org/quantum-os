@@ -76,6 +76,12 @@ export type {
   CharterValidation, CharterValidationOptions, SuccessCharter, SuccessCharterInput,
 } from "./success-charter.js";
 
+// Versioned, JSON-compatible RhoQu surface IR (not yet the verified runtime IR).
+export {
+  compileRhoQuSurfaceIR, validateRhoQuSurfaceIR, lowerRhoQuSurfaceIR,
+} from "./rhoqu.js";
+export type { RhoQuSurfaceIR } from "./rhoqu.js";
+
 // RhoQu success recipes using only the shipped subset (see #290 for gaps).
 export { SUCCESS_RECIPES, recipeById } from "./success-recipes.js";
 export type { SuccessRecipe } from "./success-recipes.js";

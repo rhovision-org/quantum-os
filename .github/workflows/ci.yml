@@ -201,6 +201,11 @@ jobs:
       - name: RhoQu success recipes test
         run: node packages/browser/test/rhoqu-success-recipes.test.mjs
 
+      # #290: versioned surface IR must round-trip without changing legacy
+      # command lowering or promoting parallel to concurrency.
+      - name: RhoQu surface IR compatibility test
+        run: node packages/browser/test/rhoqu-surface-ir.test.mjs
+
       # Browser behaviour, against stubbed media. Not a rendering test — it
       # asserts which track ends up in the stream a joiner would be given.
       - name: Calls test

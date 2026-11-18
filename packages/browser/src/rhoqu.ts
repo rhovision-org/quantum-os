@@ -463,17 +463,139 @@ function substitute(text: string, env: Map<string, string>): string {
   return out;
 }
 
+// First #290 increment: a serializable typed surface IR between the parser
+// and the legacy command lowering. This does NOT claim runtime ID binding,
+// exec-time conditionals, concurrent branches, or a Lean-verified bridge.
+// In particular parallel is intentionally marked compatibility-sequential.
+export interface RhoQuSurfaceIR {
+  schema: "rhoqu.surface.ir/1";
+  execution: "compat-sequential";
+  definitions: ProcessDef[];
+  top: Stmt[];
+}
+
+// Parsing is pure, including for on-handler declarations: no registration or
+// command dispatch happens until an explicit lowering operation.
+export function compileRhoQuSurfaceIR(source: string): RhoQuSurfaceIR {
+  const parsed = new Parser(tokenize(source)).parseProgram();
+  return {
+    schema: "rhoqu.surface.ir/1",
+    execution: "compat-sequential",
+    definitions: [...parsed.defs.values()],
+    top: parsed.top,
+  };
+}
+
+// Imported JSON is untrusted. Validate all reachable nodes, cap recursion and
+// work, and reject unknown operators rather than interpreting an altered plan.
+export function validateRhoQuSurfaceIR(value: unknown): asserts value is RhoQuSurfaceIR {
+  const obj = (x: unknown): x is Record<string, unknown> =>
+    x !== null && typeof x === "object" && !Array.isArray(x);
+  const str = (x: unknown): x is string => typeof x === "string";
+  const strs = (x: unknown): x is string[] => Array.isArray(x) && x.every(str);
+  let remaining = 10000;
+  const enter = (depth: number) => {
+    if (depth > 48 || --remaining < 0) throw new Error("RhoQu IR exceeds structural limits");
+  };
+  const expr = (x: unknown, depth: number): void => {
+    enter(depth);
+    if (!obj(x)) throw new Error("invalid RhoQu IR expression");
+    switch (x.kind) {
+      case "num":
+        if (typeof x.value !== "number" || !Number.isFinite(x.value)) break;
+        return;
+      case "str":
+        if (str(x.value)) return;
+        break;
+      case "var":
+      case "lemma":
+        if (str(x.name)) return;
+        break;
+      case "call":
+        if (str(x.name) && Array.isArray(x.args)) {
+          for (const a of x.args) expr(a, depth + 1);
+          return;
+        }
+        break;
+      case "binop":
+        if (["and","or","eq","ne","lt","le","gt","ge"].includes(String(x.op))) {
+          expr(x.left, depth + 1); expr(x.right, depth + 1);
+          return;
+        }
+        break;
+      case "unop":
+        if (x.op === "not") {
+          expr(x.expr, depth + 1);
+          return;
+        }
+        break;
+    }
+    throw new Error("invalid RhoQu IR expression");
+  };
+  const stmts = (xs: unknown, depth: number): void => {
+    enter(depth);
+    if (!Array.isArray(xs)) throw new Error("RhoQu IR statements must be an array");
+    for (const x of xs) {
+      enter(depth);
+      if (!obj(x)) throw new Error("invalid RhoQu IR statement");
+      switch (x.kind) {
+        case "new":
+          if (strs(x.names) && x.names.length > 0) continue;
+          break;
+        case "parallel":
+          stmts(x.body, depth + 1); continue;
+        case "call":
+          if (str(x.name) && strs(x.args)) continue;
+          break;
+        case "cmd":
+          if (str(x.text) && x.text.startsWith("/")) continue;
+          break;
+        case "if":
+          expr(x.cond, depth + 1);
+          stmts(x.then, depth + 1);
+          stmts(x.else, depth + 1);
+          continue;
+        case "on":
+          if (str(x.channel) && str(x.binding)) {
+            stmts(x.body, depth + 1);
+            continue;
+          }
+          break;
+      }
+      throw new Error("invalid RhoQu IR statement");
+    }
+  };
+  if (!obj(value) || value.schema !== "rhoqu.surface.ir/1"
+    || value.execution !== "compat-sequential" || !Array.isArray(value.definitions)) {
+    throw new Error("unsupported RhoQu IR schema or execution semantics");
+  }
+  const seen = new Set<string>();
+  for (const def of value.definitions) {
+    enter(0);
+    if (!obj(def) || !str(def.name) || !strs(def.params) || seen.has(def.name)) {
+      throw new Error("invalid or duplicate RhoQu IR process definition");
+    }
+    seen.add(def.name);
+    stmts(def.body, 1);
+  }
+  stmts(value.top, 0);
+}
+
+export function lowerRhoQuSurfaceIR(ir: RhoQuSurfaceIR, ctx?: RhoQuContext): string[] {
+  validateRhoQuSurfaceIR(ir);
+  const defs = new Map<string, ProcessDef>(ir.definitions.map(d => [d.name, d]));
+  const program: Program = {defs, top: ir.top};
+  const out: string[] = [];
+  emitStmts(program.top, program, new Map<string, string>(), out, ctx);
+  return out;
+}
+
 /// Transpile a RhoQu program into a flat list of /command strings.
 /// Conditions in `if` statements are evaluated at transpile time against
 /// `ctx`, so the chosen branch's commands are what gets emitted.
 /// Throws RhoQuError on parse or expansion failure.
 export function transpile(source: string, ctx?: RhoQuContext): string[] {
-  const tokens = tokenize(source);
-  const program = new Parser(tokens).parseProgram();
-  const out: string[] = [];
-  const env = new Map<string, string>();
-  emitStmts(program.top, program, env, out, ctx);
-  return out;
+  return lowerRhoQuSurfaceIR(compileRhoQuSurfaceIR(source), ctx);
 }
 
 function emitStmts(stmts: Stmt[], program: Program, env: Map<string, string>, out: string[], ctx?: RhoQuContext): void {
