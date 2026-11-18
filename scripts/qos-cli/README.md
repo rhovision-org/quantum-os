@@ -66,7 +66,7 @@ The room has no server and no history — when every browser leaves, its lemmas,
 currencies, and chat are gone. The daemon fixes that: it stays connected (with
 auto-reconnect), **persists the room's public state + transcript to disk**, and
 **re-serves that state to every peer who joins** (`name` + `sync-lemmas` +
-`sync-currencies`, all dyncap-signed). It holds a **stable signed identity**
+`sync-currencies`, all dyncap-attributed). It holds a **stable dyncap identity**
 (`cap:peer` + dyncap anchor) across restarts, so peers TOFU-pin it as one
 continuous peer.
 
@@ -116,7 +116,7 @@ accepted only when its terms hash to the series stamp (self-verifying), and a
 live `note-series` additionally requires the sender to be the currency's issuer
 (verified anchor). **Governance groups** are persisted and re-served via
 `sync-gov`: the daemon applies the same group mutation envelopes the browser sends
-(`group-open` / `group-member` admin-gated / `gov-delegate` self-signed /
+(`group-open` / `group-member` admin-gated / `gov-delegate` self-attributed /
 `group-issue` / `group-vote` / `group-meta`), and honors a creator's group
 disband (`retract` → tombstone), so groups + delegations + treasury/kudos
 currencies survive when every browser leaves. It also ingests **`gov-vault`**
@@ -199,8 +199,8 @@ node facilitator-faq.mjs --selftest          # /facil ask answers QOS/decision b
 node facilitator-advisor.selftest.mjs        # advisor failures surface (incl. a Claude session limit)
 ```
 
-The dyncap suite proves the signing port matches the browser byte-for-byte
-(so the daemon's signatures verify there). The room key and hashed room id
+The dyncap suite proves the witness port matches the browser byte-for-byte
+(so the daemon's attributions verify there). The room key and hashed room id
 are not ported at all — `qospeer.mjs` imports the browser's own
 `packages/browser/src/room-crypto.js` (plain JS, `--selftest`), so an agent
 and a browser cannot derive them differently.
@@ -298,6 +298,10 @@ without spending a peer on a separate daemon. `NO_MEMORY=1` turns it off, `PERSI
 moves the store. Logs/pids under `.agents/`; `bash stop-agents.sh` stops everything with
 a pidfile.
 
+**From Claude (a cloud session or project thread):** see
+[docs/agents-from-claude.md](../../docs/agents-from-claude.md) for the cloud environment
+setting the signaling host needs, the exact command, and how long the agent lasts.
+
 Why those two roles, and not `scribe`: a scribe's duties are a strict subset of the
 facilitator's (compare `duties` in `agent-roles.mjs` — scribe sets nothing the
 facilitator does not), so it needs no peer of its own, and a facilitator carrying
@@ -365,7 +369,7 @@ participant: it has no proactive duties, posts nothing unprompted, and answers o
 [hare=<option>] [predict: …; …]` and `/observer stop` it appends **every envelope it
 receives** — polls with every ballot, estimate rounds, lemmas, chat, `/qlf-action`
 proposals — to its own append-only events file, timestamped on receipt with the sender's
-dyncap signature, then materializes a structured record (`game-log.mjs`):
+dyncap attribution, then materializes a structured record (`game-log.mjs`):
 
 ```
 <state>/rooms/<room>/games/<ts>-<label>.events.jsonl   raw {t, from, msg} — the data, never edited

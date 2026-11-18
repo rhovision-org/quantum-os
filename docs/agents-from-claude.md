@@ -1,0 +1,239 @@
+# Running room agents from Claude
+
+How to put a **facilitator**, or another AI agent, into a live QuantumOS room with
+Claude's help and **no terminal on your side**. Each step is either a click in a
+website or something you ask Claude in a [Claude Code on the web](https://claude.ai/code)
+session or a Claude project thread. Claude runs every command in its cloud session.
+
+The agent is the repo's own `scripts/qos-cli/agent.mjs`. It joins the room as a full
+peer, and the room can `/gov trust` it up or `/gov censure` it down like anyone else.
+The full reference is in
+[scripts/qos-cli/README.md](../scripts/qos-cli/README.md#agents-facilitator-scribe-greeter-).
+
+**What you need:** a Claude account. To keep an agent up for good, you also need an
+account with a host and an Anthropic API key. **You don't need** write access to this
+repository or a GitHub account: the repo is public, and Claude clones it anonymously.
+GitHub is only for the [optional fork path](#optional-your-own-persona-with-a-github-account).
+
+Verified 2026-11-18: a facilitator joined a live room from a cloud session and greeted a
+new peer within seconds.
+
+## Quick start
+
+**Try it now:** this is included in your Claude plan, and the agent lasts minutes after
+you stop chatting.
+
+1. In [Claude Code on the web](https://claude.ai/code), create a cloud environment that
+   allows the signaling server, and select it ([step 1](#1-set-the-cloud-environment-once)).
+2. Open a room at [rhovision-org.github.io/quantum-os](https://rhovision-org.github.io/quantum-os/),
+   copy its link, and ask Claude:
+   *"run a facilitator agent in &lt;room link&gt;"* ([step 2](#2-ask-claude)).
+
+**Keep it up:** a few dollars a month, or free.
+
+1. Create an [Anthropic API key](https://console.anthropic.com/settings/keys).
+2. Pick a host ([step 4](#4-keep-it-up-on-a-host)):
+   - [Render](#render-about-7month): about $7/month, set up by clicking through
+     Render's dashboard.
+   - [An Oracle Always Free VM](#oracle-cloud-always-free-0): $0. Claude writes a
+     setup script and you paste it into Oracle's web console.
+
+## 1. Set the cloud environment (once)
+
+An agent must reach the signaling server, `quantum-os-signaling.onrender.com`. The
+**default ("Built-in") cloud environment blocks that host**, so nothing works until it
+is allowed.
+
+1. Open [Claude Code on the web](https://claude.ai/code) and use the environment selector
+   to create a new environment, named `quantum-os` here. See
+   [how environments work](https://code.claude.com/docs/en/claude-code-on-the-web).
+2. Under its network access, allow `quantum-os-signaling.onrender.com`
+   (`*.onrender.com` also works). Keep the default package registries and GitHub allowed,
+   since Claude needs `npm install` and `git clone`.
+3. Select it. In a Claude **project**, use Project settings → Cloud environment, so every
+   new thread runs there. A thread that is already running stays on its old environment,
+   so start a new thread after changing the setting.
+
+Claude checks the setting itself, and tells you if the environment is the problem.
+
+## 2. Ask Claude
+
+Paste the room link and say what you want:
+
+> run a facilitator agent in https://rhovision-org.github.io/quantum-os/#room=cap:room:…
+
+Other things you can ask for:
+
+- **Another role:** *"run a skeptic"*. The roles are `facilitator`, `skeptic`, `scribe`,
+  `greeter` and `observer`. Run one at a time unless you need two, because each costs CPU.
+- **A persona of your own:** *"run an agent that heckles"*. See
+  [Customize it by asking Claude](#customize-it-by-asking-claude).
+- **Room memory:** *"…and have it keep the room's memory"*. The agent then stores
+  lemmas, currencies, groups and the transcript, and replays them to people who join
+  later.
+
+Claude runs the agent with the `claude-code` AI backend, which uses the session's own
+Claude, so you don't need an API key here. Those calls count against your Claude plan.
+The commands are in [scripts/qos-cli/README.md](../scripts/qos-cli/README.md#agents-facilitator-scribe-greeter-)
+if you're curious, but you never need to type them.
+
+## Customize it by asking Claude
+
+You change the agent by telling Claude what you want, in plain words. Claude turns that
+into the agent's settings or its persona and restarts it.
+
+| Ask Claude | What changes |
+|------------|--------------|
+| *"call it Socrates"* | its display name (`--name`) |
+| *"make it a heckler that mocks arguments, never people"* | a new role with that persona, the AI's instructions ([how roles work](../Developer_Guide.md#path-a--add-a-role-the-common-case)) |
+| *"only greet newcomers, otherwise stay silent"* | which duties the role performs: greeting, name prompts, nudging quiet members, rebalancing a dominant voice, synthesis, re-engaging after a lull |
+| *"be quieter"* / *"be more active"* | `--quiet` / `--active` |
+| *"at most 2 messages every 5 minutes"* | `--budget 2` |
+| *"invite quiet people in after 3 minutes"* | `--silent-min 3` |
+| *"use a cheaper model"* | `--ai-model` |
+| *"link our about page in your intro"* | `--about <url>` |
+| *"keep the room's memory"* | `--persist` |
+| *"add a skeptic alongside it"* | a second agent, with its own identity |
+| *"no AI, just greet"* | drop `--ai`, so the agent answers only from its built-in FAQ |
+
+**Naming it.** An agent has a display name and a command:
+
+- **Its display name** is how it appears in the roster and in chat. Ask *"call it
+  Socrates"* and it can be anything. It defaults to the role (`facilitator`). The name
+  is kept with the agent's identity, so say it again whenever you ask for a restart or a
+  new host, or the agent goes back to the role name.
+- **Its command** is what people type to address it: the role's prefix, such as
+  `/facil help`. A custom role gets its own prefix, so a heckler role answers to
+  `/heckler …`. Its display name works as a command too, so an agent named Snark also
+  answers to `/snark …`. `/ask <question>` reaches whichever agent is present.
+
+**Where the change lands:**
+
+- **In the cloud session:** Claude restarts the agent with the change straight away. A
+  new persona lasts until the container restarts, so ask again after that.
+- **On Render:** Claude gives you the new **Start Command** to paste into the worker's
+  Settings, and Render redeploys. A new persona needs [the fork](#optional-your-own-persona-with-a-github-account),
+  where Claude commits it for you.
+- **On Oracle:** Claude writes a new cloud-init script, and you create a new instance
+  from it, then stop the old one.
+
+**Steering it from inside the room:** you can also steer the agent without Claude, by
+typing these in the room:
+
+- `/facil off` and `/facil on` mute and unmute it.
+- `/facil chair <topic>`, then `/facil next`, run a deliberation.
+- `/gov trust` and `/gov censure` let the room raise or lower how much it may say.
+
+## 3. Check it's live
+
+Ask Claude *"is the agent in the room?"*. Claude reads the agent's log and can join a
+throwaway peer to confirm the agent greets it. In the room itself, try:
+
+- `/facil` to see whether it's present
+- `/facil help`
+- `/ask <question>`
+- `/facil chair <topic>` to have it run a deliberation
+- `/facil health`
+
+## 4. Keep it up on a host
+
+**A cloud session is not a host.** Observed 2026-11-18: the container restarts a few
+minutes after Claude's reply ends, and the agent goes with it. Asking *"restart the
+agent"* brings it back, as the same peer. For an agent that stays, put it on a host.
+
+An agent is one small Node process. It uses about 150 MB of memory and only makes
+outbound connections. Two values go into the host's secret settings, and never into a
+file anyone else can read:
+
+- **`ROOM_CAP`**: the `cap:room:…` part of the room link. Anyone who holds it can join
+  the room.
+- **`ANTHROPIC_API_KEY`**: from the [Anthropic console](https://console.anthropic.com/settings/keys).
+  You pay as you go, which is cheap at an agent's few calls an hour. Leave it out, and
+  `--ai`, for an agent that only greets and answers basic questions from its built-in FAQ.
+
+Claude can't sign you up, enter payment details, or see your dashboards. Those few
+clicks are yours, and Claude can walk you through them.
+
+| Host | Cost | You do | Claude does |
+|------|------|--------|-------------|
+| [Render](#render-about-7month) | about $7/month ([pricing](https://render.com/pricing)) | click through Render's dashboard | gives you each value to paste |
+| [Oracle Cloud](#oracle-cloud-always-free-0) | $0 ([Always Free](https://www.oracle.com/cloud/free/)) | create a VM in the web console | writes the setup script you paste in |
+
+Hosts that put idle services to sleep, such as Render's free web services, don't work,
+because a sleeping agent has left the room. GitHub Actions jobs stop after 6 hours.
+
+### Render (about $7/month)
+
+1. [Sign up](https://dashboard.render.com/register). In the
+   [dashboard](https://dashboard.render.com/), choose **New → Background Worker**
+   ([docs](https://render.com/docs/background-workers)).
+2. Choose **Public Git Repository** and paste `https://github.com/rhovision-org/quantum-os`.
+   Render needs no GitHub connection for this.
+3. Fill in:
+   - **Branch:** `main`
+   - **Root Directory:** `scripts/qos-cli`
+   - **Runtime:** Node
+   - **Build Command:** `npm install`
+   - **Start Command:**
+     `node agent.mjs --room "$ROOM_CAP" --role facilitator --ai --ai-backend api --state /var/data/qos-agent`
+   - **Instance type:** Starter
+   - **Environment Variables:** `ROOM_CAP` and `ANTHROPIC_API_KEY`
+4. Optional: under **Disks**, add 1 GB mounted at `/var/data`. That's about $0.25/month
+   ([docs](https://render.com/docs/disks)). It keeps the agent the same peer across
+   deploys, so any `/gov trust` the room gave it isn't lost.
+5. Click **Create Background Worker**. The logs should show `signaling connected; joined room`.
+
+Turn **Auto-Deploy** off if you'd rather not redeploy whenever `main` changes upstream.
+**Suspend** in the service's settings stops the agent.
+
+### Oracle Cloud Always Free ($0)
+
+1. [Sign up for Oracle Cloud Free Tier](https://www.oracle.com/cloud/free/). A card is
+   asked for, to verify you, but Always Free resources aren't charged.
+2. Ask Claude: *"write me an Oracle cloud-init script that runs a facilitator in
+   &lt;room link&gt;"*. Add *"with the heckler persona"* or similar for a custom role,
+   and Claude builds it into the script. Claude gives you a script with `ROOM_CAP` filled
+   in and a placeholder for your API key.
+3. In the console, go to **Compute → Instances → Create instance**:
+   - **Image:** Ubuntu
+   - **Shape:** an Always Free one (Ampere A1 or VM.Standard.E2.1.Micro)
+   - Open **Show advanced options → Management → Paste cloud-init script**. Paste the
+     script and replace the API-key placeholder with your key, there in the browser.
+     That way the key never goes through the chat.
+4. Click **Create**. The VM installs Node, the agent and a service that restarts it after
+   a crash or reboot. The agent joins the room a few minutes after the VM starts.
+
+**Stop** on the instance's page stops the agent.
+
+The script installs Node.js and the agent, stores `ROOM_CAP` and your key in a file
+only the system can read, and runs the agent as a service that restarts it after a
+crash or reboot. Ask Claude to show you what it does before you paste it.
+
+## Optional: your own persona with a GitHub account
+
+Render builds the public repo, so it runs only the roles already there. A fork lets
+Render run your own persona, and redeploy it whenever you change it.
+
+1. [Sign up for GitHub](https://github.com/signup) and ask Claude to
+   fork rhovision-org/quantum-os
+2. Let Claude edit the fork:
+   - [connect GitHub](https://claude.ai/connect-github)
+   - [install the Claude GitHub App](https://github.com/apps/claude/installations/select_target)
+     on the fork
+   - add the fork to your project under Project settings → Repositories
+3. Ask Claude in that project: *"add a heckler role to my fork"*. Claude commits it,
+   following the [Developer Guide](../Developer_Guide.md#path-a--add-a-role-the-common-case).
+   You can also edit `scripts/qos-cli/agent-roles.mjs` yourself on github.com, using the
+   pencil icon.
+4. Create the Render worker from **your fork** instead of the public URL, using
+   `--role <your role>` in the start command. Every later change ("make the heckler
+   ruder") is a commit, and Render redeploys it.
+
+**Sync fork** on the fork's GitHub page brings in upstream changes.
+
+## Stopping it
+
+- **In a cloud session:** ask Claude to stop the agent.
+- **On a host:** Suspend the worker on Render, or Stop the instance on Oracle.
+- **In the room:** `/facil off` silences the agent without disconnecting it, and
+  `/facil on` turns it back on.

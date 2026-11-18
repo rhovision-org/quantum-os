@@ -58,7 +58,7 @@ QLF slash commands:
   /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)
   /goal [sub]      — private personal goals: add · list · done · review · share
   /probe [sub]     — joiner-local consensus probe (status|clear)
-  /room [sub]      — multi-room tabs (list|join <cap>|leave|ref)
+  /room [sub]      — multi-room tabs (new|list|join <cap>|leave|ref)
   /share <sel> to <room>  — bridge a lemma/chat/note into another tab
   /channel [sub]   — tagged messages (listen|unlisten|send <name> <text>|list)
   /script <c1>;…   — sequential command chain (// to skip a segment)
@@ -105,7 +105,7 @@ one-person-one-vote. See [Governance.md](../Governance.md), and [Room_Best_Pract
 for the collective-intelligence practices behind it.
 
 **Notes with terms** — `/note grant USD 5 | redeemable for one coffee` mints a
-**terms-stamped** note (`cap:note-USD~<hash>`); the issuer's terms are dyncap-signed and
+**terms-stamped** note (`cap:note-USD~<hash>`); the issuer's terms are dyncap-attributed and
 travel with the note. `/note terms` reads them and `/note accept` is required before redeeming.
 Different terms for the same currency are simply different stamped series.
 
@@ -547,7 +547,7 @@ rdv-abort    proposer    → each participant   (releases locks)
 
 **Atomicity caveat**: best-effort, same trust model as `/note pass`. If a commit message is lost in flight, the recipient who got it diverges from the one who didn't. True multi-party atomicity needs a consensus layer, which is out of scope.
 
-See [AtomicSwapDemo.md](../AtomicSwapDemo.md) for a full Alice/Bob walkthrough — proposal lifecycle, locking, failure modes. The N-of-N multisig discussion lives in its own demo: [MultisigDemo.md](../MultisigDemo.md) shows 2-of-2 cosignature using `/dyncap` + `/rdv` (atomic exchange of dyncap-signed attestation tokens). K-of-N threshold multisig needs either a threshold conservation predicate or signature-strength identity beyond what hash-only dyncap provides.
+See [AtomicSwapDemo.md](../AtomicSwapDemo.md) for a full Alice/Bob walkthrough — proposal lifecycle, locking, failure modes. The N-of-N multisig discussion lives in its own demo: [MultisigDemo.md](../MultisigDemo.md) shows 2-of-2 cosignature using `/dyncap` + `/rdv` (atomic exchange of dyncap-attributed attestation tokens). K-of-N threshold multisig needs either a threshold conservation predicate or signature-strength identity beyond what hash-only dyncap provides.
 
 ### `/dyncap [sub]`
 
@@ -569,6 +569,8 @@ See [MultisigDemo.md](../MultisigDemo.md) for a worked example combining `/dynca
 ### `/ask <question>`
 
 Finds a **live** AI agent in the room and relays `/<role> ask <question>` as chat. Preference is the **facilitator** (`/facil ask …`) when one is present; otherwise the lowest-peer-id other present agent. The agent badge cache is filtered by the live peer roster, so a departed agent is not chosen. If no agent is present, it says so and sends nothing — it never pretends to have an answer locally. The chosen agent is addressed by its role prefix; the line is still room chat, so every peer sees it. The browser only picks the agent; it does not vouch for it, and the agent answers for itself.
+
+Direct addressing is not limited to the built-in roles. If a live peer announced a custom role such as `heckler`, `/heckler help` (or any `/heckler …` line) is relayed exactly like `/skeptic …`. If `heckler` is the agent's display name but its role is `skeptic`, the browser relays `/skeptic …` to that agent instead. The lookup uses the live `peers` roster, not the sticky badge cache, so a departed agent does not become a phantom command.
 
 ### `/goal [sub]`
 
@@ -594,7 +596,7 @@ breaking the room. See [success-frameworks.md](success-frameworks.md) and
 
 ### `/qos [sub]`
 
-Named QOS processes over the finite `qos.event/1` contract. A process is a capability-guarded continuation; start, suspend, resume and terminate are signed events, and every peer recomputes the same deterministic `stateDigest` from the same envelopes. No chain RPC is involved.
+Named QOS processes over the finite `qos.event/1` contract. A process is a capability-guarded continuation; start, suspend, resume and terminate are dyncap-attributed events, and every peer recomputes the same deterministic `stateDigest` from the same envelopes. No chain RPC is involved.
 
 | Subcommand | Effect |
 |---|---|
@@ -658,24 +660,25 @@ Multi-room tabs. A single browser session can be joined to N rooms simultaneousl
 
 | Subcommand | Effect |
 |---|---|
+| `/room new` | Mint a fresh room capability and open it as a new tab. The capability is generated locally; share the tab's link to invite someone. The new tab does not auto-connect. |
 | `/room` or `/room list` | Show the active room's cap-token + twist stats, plus a list of joined rooms with their connection (`●`) and active (`←`) markers. |
 | `/room join <cap:room:…\|url>` | Open a new tab joined to the named room. Accepts a raw cap-token or a share URL. The new tab is created but does not auto-connect — click Connect to bring up signaling. |
 | `/room leave` | Close the active tab. The room's state stays in `localStorage` so re-joining picks up where you left off; the connection is dropped. Can't close the last remaining tab. |
 | `/room ref [cap:room:…]` | Print a shareable URL for the active room (or the given cap). |
 
-Joined rooms persist across reloads (`qos-joined-rooms` in `localStorage`); on next launch the same tabs are restored, with the URL-hash room re-activated. The `+` button on the tab bar prompts for a room cap or URL.
+Joined rooms persist across reloads (`qos-joined-rooms` in `localStorage`); on next launch the same tabs are restored, with the URL-hash room re-activated. The `+` button on the tab bar opens a menu with **New room** (mint a fresh capability) and **Join room…** (paste a cap or URL).
 
 **Markov-blanket constraints** (deliberate):
 - No cross-room signaling backchannel — each room has its own `QOSPeer` and signaling WebSocket.
 - No cross-room state sync — a lemma declared in one room doesn't auto-propagate to others.
 - No cross-room consensus — the probe runs per-room.
-- Cross-room information flow is mediated by a peer who's in both rooms (a "bridge peer"); they consciously re-broadcast in each room. There's no automatic `/share` command yet — manual re-declaration is the bridge primitive today.
+- Cross-room information flow is mediated by `/share <selector> to <room>` or by a peer who is in both rooms; nothing propagates automatically.
 
 A peer in N rooms has the same dyncap *anchor* across rooms (it's `H(seed)` where seed is per-device), but each room maintains an independent chain trajectory via per-room `seq` in `DynCapState.seqByRoom`. The witness binding `H(seed ‖ seq ‖ room_id ‖ payload_hash)` produces algebraically independent witnesses across rooms.
 
 ### `/share <selector> to <room-prefix>`
 
-Bridge selected state from the active tab into another joined tab. The bridge is application-level: `/share` briefly swaps the active room context to the target room and runs the existing dispatcher commands there. The target room sees the action as if the user typed it locally — including the bridge peer's dyncap signature in *that* room's chain. No new wire kinds; no infrastructure relay.
+Bridge selected state from the active tab into another joined tab. The bridge is application-level: `/share` briefly swaps the active room context to the target room and runs the existing dispatcher commands there. The target room sees the action as if the user typed it locally — including the bridge peer's dyncap attribution in *that* room's chain. No new wire kinds; no infrastructure relay.
 
 | Selector | Effect in target |
 |---|---|
@@ -690,8 +693,8 @@ Target resolution: `<room-prefix>` prefix-matches against joined room IDs. Ambig
 Each room is its own Markov blanket — a self-consistent **perspective**. Information crosses between rooms only through something that stands in both. Multi-room cooperation happens at three levels:
 
 - **Many rooms, one session** — `/room` opens each room as its own tab, each an independent blanket (its own peers, lemmas, currencies, dyncap chain). Holding several tabs makes *you* the link between them.
-- **Move an item between your own tabs** — `/share <selector> to <room>` re-enacts a lemma / note / message in another of your joined rooms, signed into *that* room's chain.
-- **Link separate rooms** — the headless **room bridge** ([`scripts/qos-cli/bridge.mjs`](../scripts/qos-cli/bridge.mjs)) is one perspective that stands in two or more rooms and relays each room's outputs as the others' inputs: channels and chat, plus (opt-in) durable **lemma** and **governance** state relayed verbatim so signatures carry through. That shared membership *is* the shared closure between the rooms — **ER=EPR at the collaboration layer**. See [`Room_Bridges.md`](../Room_Bridges.md).
+- **Move an item between your own tabs** — `/share <selector> to <room>` re-enacts a lemma / note / message in another of your joined rooms, attributed into *that* room's chain.
+- **Link separate rooms** — the headless **room bridge** ([`scripts/qos-cli/bridge.mjs`](../scripts/qos-cli/bridge.mjs)) is one perspective that stands in two or more rooms and relays each room's outputs as the others' inputs: channels and chat, plus (opt-in) durable **lemma** and **governance** state relayed verbatim so attribution carries through. That shared membership *is* the shared closure between the rooms — **ER=EPR at the collaboration layer**. See [`Room_Bridges.md`](../Room_Bridges.md).
 
 ### `/channel [sub]`
 
