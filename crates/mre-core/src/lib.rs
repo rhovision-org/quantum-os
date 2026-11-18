@@ -115,3 +115,24 @@ mod tests {
         assert_eq!(canonical(&parse_rational("-2/4").unwrap()), "-1/2");
     }
 }
+
+/// Browser-compatible JSON transport. All probabilities remain rational strings.
+/// Invalid inputs are returned as an error; no state mutation occurs.
+#[cfg(feature = "wasm")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn mre_profile_a_json(
+    prior: &str,
+    likelihood_given_h: &str,
+    likelihood_given_not_h: &str,
+) -> Result<String, String> {
+    let p = parse_rational(prior).map_err(|e| format!("{e:?}"))?;
+    let a = parse_rational(likelihood_given_h).map_err(|e| format!("{e:?}"))?;
+    let b = parse_rational(likelihood_given_not_h).map_err(|e| format!("{e:?}"))?;
+    let result = update(&p, &a, &b).map_err(|e| format!("{e:?}"))?;
+    serde_json::to_string(&serde_json::json!({
+        "evidence": canonical(&result.evidence),
+        "posteriorGivenE": canonical(&result.posterior_given_e),
+        "posteriorGivenNotE": result.posterior_given_not_e.as_ref().map(canonical),
+    }))
+    .map_err(|e| e.to_string())
+}

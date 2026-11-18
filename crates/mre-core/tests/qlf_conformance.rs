@@ -53,3 +53,25 @@ fn qlf_profile_a_all_reference_vectors() {
         );
     }
 }
+
+#[cfg(feature = "wasm")]
+#[test]
+fn wasm_transport_matches_all_vectors() {
+    let fixture: Fixture = serde_json::from_str(include_str!("qlf_vectors.json")).unwrap();
+    for v in fixture.vectors {
+        let response =
+            mre_core::mre_profile_a_json(&v.prior, &v.p_e_given_h, &v.p_e_given_not_h).unwrap();
+        let result: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(result["evidence"], v.evidence, "{}: evidence", v.name);
+        assert_eq!(
+            result["posteriorGivenE"], v.posterior_given_e,
+            "{}: E",
+            v.name
+        );
+        assert_eq!(
+            result["posteriorGivenNotE"], v.posterior_given_not_e,
+            "{}: not E",
+            v.name
+        );
+    }
+}

@@ -13,3 +13,9 @@ QLF specification and vectors: `rhovision-org/quantum-logical-framework` at comm
 **Not provided:** KL/EIG numerical evaluation, temperature-dependent maximum-entropy weights, cross-platform certified logarithms, RhoGov adapter, chain integration or validator acceptance. KL and EIG reference diagnostics remain in QLF, and their pointwise-vs-expected bounds must not be conflated. Do not promote Profile B without a separate specification.
 
 Run `cargo test -p mre-core`. The conformance test checks all twelve bundled upstream vectors (including boundary cases) against exact rational results. CI runs the workspace suite on pull requests.
+
+## Browser WASM binding (Profile A)
+
+Enable the `wasm` feature to export `mre_profile_a_json(prior, likelihoodGivenH, likelihoodGivenNotH)` via `wasm-bindgen`. It returns JSON with canonical rational strings and throws for invalid domains. The **same** `update` function is used by native and WASM paths; there is no JavaScript arithmetic implementation. For browser builds, run `wasm-pack build crates/mre-core --target web -- --features wasm` and initialize the generated module explicitly in the client. This is a read-only computation primitive; it does not change governance weights.
+
+`.github/workflows/mre-wasm.yml` compiles the actual wasm32 module (Node.js target for executable CI) and tests all twelve QLF vectors against WASM, rather than merely testing a native feature-gated function.
