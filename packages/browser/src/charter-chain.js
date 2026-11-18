@@ -88,7 +88,7 @@ export function verifyCharterAuthorizations(charter, members) {
     if (member.role === "admin") adminCount++;
   }
   if (!adminCount) throw new Error("charter requires an admin wallet authorization");
-  return { valid: true, approvals: unique.size, adminApprovals: adminCount, ...CHARTER_AUTHORIZATION_TRUST };
+  return { valid: true, approvals: unique.size, adminApprovals: adminCount };
 }
 export function charterIssueTitle(charter) {
   if (!charter || charter.schema !== "success-charter/1" || charter.version !== 1
