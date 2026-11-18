@@ -6,6 +6,13 @@ route readers instead of listing everything (quantum-os#116). The short version 
 `packages/browser/src/app.ts` `handleCommand`, and [CLAUDE.md](../CLAUDE.md#slash-commands-appts-handlecommand)
 maps each command family to its module.
 
+**Required charter handoff (#291):** after a closed approval poll, use
+`/gov chain charter prepare <closed-issue-id>`, inspect the signed artifact,
+explicitly confirm `/gov chain charter handoff`, and query
+`/gov chain charter status [hash]`. The Issue/4 proposal and status query
+are described in [success-charter.md](success-charter.md). A submitted
+proposal is **not** proof of independent RhoGov ratification.
+
 Type these in the chat input after connecting. The `/help` list is shown automatically at
 startup. Commands marked **shared** broadcast their output to all peers in the room;
 **[direct]** ones address one peer.

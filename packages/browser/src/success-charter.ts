@@ -38,7 +38,8 @@ export interface CharterDecision {
 export interface CharterMember {
   anchor: string;
   role: CharterRole;
-  signature?: string;
+  /** Unsupported: dyncap attribution is not a signature. */
+  signature?: never;
 }
 
 export interface SuccessCharterInput {
@@ -56,6 +57,7 @@ export interface SuccessCharter extends SuccessCharterInput {
   schema: typeof SUCCESS_CHARTER_SCHEMA;
   version: typeof SUCCESS_CHARTER_VERSION;
   charterHash: string;
+  /** Actual secp256k1 wallet authorizations, never dyncap seed signatures. */
   signatures: string[];
 }
 
@@ -65,7 +67,7 @@ export interface CharterValidation {
 }
 
 export interface CharterValidationOptions {
-  /** A handoff requires at least one member signature; a draft may be unsigned. */
+  /** Structural presence check only; caller must verify wallet signatures separately. */
   requireSignatures?: boolean;
 }
 
@@ -115,7 +117,6 @@ function normalize(input: SuccessCharterInput): Omit<SuccessCharter, "charterHas
     members: input.members.map((m) => ({
       anchor: m.anchor.trim(),
       role: m.role,
-      ...(m.signature !== undefined ? { signature: m.signature.trim() } : {}),
     })),
     ratifiedAtSeq: input.ratifiedAtSeq,
     proposer: input.proposer.trim(),
@@ -159,7 +160,7 @@ function validateInput(input: SuccessCharterInput): string[] {
     input.members.forEach((m, i) => {
       if (!nonEmpty(m?.anchor)) errors.push(`member[${i}] needs an anchor`);
       if (m?.role !== "admin" && m?.role !== "member") errors.push(`member[${i}] has an invalid role`);
-      if (m?.signature !== undefined && typeof m.signature !== "string") errors.push(`member[${i}].signature must be a string`);
+      if (m?.signature !== undefined) errors.push(`member[${i}].signature is unsupported: dyncap is hash-only TOFU, not signing`);
     });
   }
   if (!Number.isInteger(input.ratifiedAtSeq) || input.ratifiedAtSeq < 0) {

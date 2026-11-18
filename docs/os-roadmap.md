@@ -286,3 +286,5 @@ in [`CLAUDE.md`](../CLAUDE.md#documentation-prs).
 - [Security](../SECURITY.md) — ZFA/dyncap threat model.
 - [QLF QuantumOS](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QuantumOS.md) — QLF as the kernel for real quantum hardware.
 - [QLF quantum-computation-optimization](https://github.com/rhovision-org/quantum-logical-framework/blob/main/quantum-computation-optimization.md) — the Rho→gate-pulse bridge tracked in M6.
+
+For the group charter handoff identity and wallet-signature trust boundary, see [Success-charter identity boundary](success-charter-identity-boundary.md).
