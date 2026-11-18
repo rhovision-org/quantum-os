@@ -22,7 +22,7 @@ client/server system.
 | Authority | ZFA capabilities and dyncap-signed envelopes |
 | File descriptor | a capability handle in the kernel handle table |
 | IPC | room chat, `qos-event`, `/channel`, POSIX-style sockets |
-| Persistent store | OPFS + room memory + `qos-daemon.mjs` |
+| Persistent store | rholo (durable) + OPFS/room memory (local cache) + `qos-daemon.mjs` |
 | Shell | slash commands, `/script`, `/macro`, `/rhoqu`, `/ask`, `/qos` |
 | Driver | a browser or Node host capability behind a device handle |
 | Shutdown | leave the room |
@@ -38,8 +38,9 @@ capability is the boot image.
 3. **No privileged server.** Signaling routes handshakes only; it never schedules or judges.
 4. **Capabilities are the ABI.** A file, process, device, or service is reachable only
    through a handle that carries the needed rights.
-5. **Off-chain by default.** A chain anchor is optional; boot, processes, VFS, and
-   services work with no chain RPC.
+5. **Local-first, rholo-durable.** Boot, processes, cached VFS reads, and services work with
+   no chain RPC; durable storage is written to rholo explicitly. A chain anchor is not a
+   precondition for local operation.
 6. **Attribution, not trust.** Events carry their source and dyncap proof; trust is a
    governance decision layered above the kernel.
 7. **No wall clock.** Ordering is event/sequence based. `sleep` and quotas use logical time.
@@ -56,7 +57,7 @@ capability is the boot image.
 ├────────────────────────────────────────────────────────────────────────────┤
 │  kernel: process table · handle table · scheduler · signals · VFS · devices │
 ├────────────────────────────────────────────────────────────────────────────┤
-│  memory: content-addressed objects · room memory · OPFS · snapshots        │
+│  memory: content-addressed objects (rholo) · OPFS cache · snapshots        │
 ├────────────────────────────────────────────────────────────────────────────┤
 │  transport: QOSPeer / WebRTC · posix-net sockets · signaling handshakes    │
 └────────────────────────────────────────────────────────────────────────────┘
@@ -69,8 +70,8 @@ capability is the boot image.
 | 0 | Machine, boot, identity, transport | **done** — room cap, `QOSPeer`, dyncap, ZFA, `posix-net` | — |
 | 1 | Kernel ABI: handles, syscalls, process table | **v0 model** — handles, rights, signals, wait/exit; room wiring next | [#277](https://github.com/rhovision-org/quantum-os/issues/277) |
 | 2 | Deterministic scheduler and signals | design | [#278](https://github.com/rhovision-org/quantum-os/issues/278) |
-| 3 | Content-addressed memory and GC | design | [#279](https://github.com/rhovision-org/quantum-os/issues/279) |
-| 4 | Virtual filesystem and `/fs` | design | [#280](https://github.com/rhovision-org/quantum-os/issues/280) |
+| 3 | Content-addressed memory and GC | design — rholo-backed object store, OPFS local cache | [#279](https://github.com/rhovision-org/quantum-os/issues/279) |
+| 4 | Virtual filesystem and `/fs` | design — namespace/mounts over rholo and cache; not a store | [#280](https://github.com/rhovision-org/quantum-os/issues/280) |
 | 5 | Shell: spawn/exec/wait, pipes, env | partial — commands, `/script`, `/ps`; no pipelines/jobs | [#281](https://github.com/rhovision-org/quantum-os/issues/281) |
 | 6 | Users, groups, capability permissions | partial — dyncap/ZFA/groups; no unified rights | [#282](https://github.com/rhovision-org/quantum-os/issues/282) |
 | 7 | Device model and drivers | partial — media/OPFS/WASM/rholang/sockets; no device ABI | [#283](https://github.com/rhovision-org/quantum-os/issues/283) |
@@ -88,8 +89,9 @@ capability is the boot image.
   attenuation in `qos-process.ts`, owner-only lifecycle transitions.
 - **Transport:** `QOSPeer` with sealed frames, hashed room ids, relay overlay, keepalive;
   POSIX-style stream/dgram sockets in `posix-net.ts`.
-- **Persistence:** OPFS-backed library/record storage; `qos-daemon.mjs` and
-  `agent.mjs --persist` hold and re-serve room memory.
+- **Local cache:** OPFS-backed library/record storage; `qos-daemon.mjs` and
+  `agent.mjs --persist` hold and re-serve room memory. The rholo backend below is the
+  durable store.
 - **Rholo backend (primary):** `/rholang deploy` writes a deploy's answer to the key's
   signed registry slot, and `/channel chain` keeps durable on-chain records. M6's
   `/solve --anchor` persists the logical result here first, with no QPU required.
@@ -116,10 +118,18 @@ The existing `/qos` surface now exposes a table with stable PIDs, owner labels,
 state, event count, and digest, plus `/qos ps`, `/ps`, `/qos kill`, and `/kill`
 (owner-only). A bounded lifecycle trace and the kernel-backed table are next.
 
-### M2 — storage
+### M2 — storage on rholo
 
-Content-addressed memory + GC, then a capability-rooted VFS with `/fs`. Files are
-objects; directories are manifests; mounts are capability roots. OPFS persists bytes.
+Durable storage is on rholo. Content-addressed objects are published through the existing
+rholo registry/channel path; OPFS and room memory are local caches, not the source of truth.
+Reachability GC is rooted at live processes, the room manifest, and pinned system objects, and
+the object graph is deterministically rebuildable from the signed event log.
+
+`/fs` is not an alternative store. It is the capability-rooted namespace over those objects:
+files are objects, directories are manifests, and mounts are capability roots. The primary
+mount is rholo; a local OPFS/cache mount remains available for offline reads. See
+[#279](https://github.com/rhovision-org/quantum-os/issues/279) (object store and GC) and
+[#280](https://github.com/rhovision-org/quantum-os/issues/280) (VFS and `/fs`).
 
 ### M3 — shell and users
 
@@ -196,7 +206,8 @@ A new peer can boot from a room capability and, without any additional server:
 5. be denied an operation it lacks a capability for;
 6. replay the same signed event log on another peer and reach the same digest;
 7. inspect a kernel trace and restore a snapshot;
-8. do all of that with no chain RPC.
+8. do all of that from the local cache with no chain RPC; durable writes to rholo are
+   explicit deploys.
 
 ## Non-goals
 
