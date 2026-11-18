@@ -227,7 +227,7 @@ Cross-room state (not in `RoomContext`):
 - `myName`, `dyncapState` (with `seqByRoom: Record<roomId, number>`), `signQueue`, `sessionLog`. Per-device, shared across all rooms.
 
 Tab UI:
-- HTML: `#tab-bar` with `#tab-list` and `#tab-add` (the `+` button). CSS classes `.tab`, `.tab.active`, `.tab.unread`.
+- HTML: `#tab-bar` with `#tab-list` and the `#tab-add` menu (`+` opens `#tab-menu` with **New room** `#tab-new` and **Join room…** `#tab-join`). CSS classes `.tab`, `.tab.active`, `.tab.unread`, `.tab-menu`.
 - `renderTabs()` paints from `rooms.values()`; the unread indicator is an orange `●` prefix on tabs where `ctx.hasUnread && ctx !== uiActiveRoom`. Tab clicks call `switchToRoom`.
 - `switchToRoom(roomId)` calls `setActiveRoom(next)`, sets `uiActiveRoom = next`, clears `next.hasUnread`, and calls `applyActiveRoomToUI()` which re-renders everything from the new active room (replays `chatLog`, updates sidebar, syncs URL hash via `history.replaceState`).
 
@@ -426,7 +426,7 @@ Headless **agent daemons** join a room as full peers (Node; `werift` + `ws`), re
 | `/ps` | OS-style QOS process table (pid · name · state · events · owner); same view as `/qos ps` |
 | `/kill <name|id>` | Owner-only alias for `/qos terminate`; a non-owner is refused, and there is no ambient process namespace |
 | `/probe <sub>` | Joiner-local consensus probe — `status`, `clear` (the probe runs automatically on connect) |
-| `/room <sub>` | Multi-room tabs — `list`, `join <cap\|url>`, `leave`, `ref`, **`hide`/`show`**. Hidden is the default: a room cap is a bearer capability, so the address bar (plus the share row and the sidebar line) is in every screen share, screenshot and recording. Hiding keeps it off screen without losing it — `qos-active-room` remembers which room a reload returns to, joined rooms come back as tabs, and copy / `/room ref` still hand out the link. Persisted per browser under `qos-hide-room` |
+| `/room <sub>` | Multi-room tabs — **`new`**, `list`, `join <cap\|url>`, `leave`, `ref`, **`hide`/`show`**. Hidden is the default: a room cap is a bearer capability, so the address bar (plus the share row and the sidebar line) is in every screen share, screenshot and recording. Hiding keeps it off screen without losing it — `qos-active-room` remembers which room a reload returns to, joined rooms come back as tabs, and copy / `/room ref` still hand out the link. Persisted per browser under `qos-hide-room` |
 | `/share <selector> to <room>` | Bridge a lemma / chat / note from the active tab into another joined tab (application-level; no cross-room wire kind) |
 | `/rdv counter <id> …` | Round-trip negotiation in an in-flight rendezvous — replaces rows, swaps locks, counterer implicitly accepts |
 | `/channel <sub>` | Tagged broadcast messaging — `list`, `listen <name>`, `unlisten <name>`, `send <name> <text>`; per-room subscriptions. **`/channel chain …`** is the on-chain form that outlives the room (#78): `open <name> [invite]` · `post` · `close` · `allow\|disallow` · `subscribe <address/name> [--all]` · `unsubscribe` · `read [--all]` · `info` · `list` · `install\|use <uri>`, over the Channel contract (rgov-core.js §4) and `chain-channel.ts`; the browser keeps only a read cursor per node, shard, contract and channel (`qos-chain-cursors`). `invite` gates reading, not confidentiality. A channel has one publisher plus the writers it names (`allow <name> <address> --write`, `post <address/name> <text>`), and every post carries the derived address of who wrote it |
