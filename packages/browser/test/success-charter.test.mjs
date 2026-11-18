@@ -118,6 +118,12 @@ await rejects("build rejects a roomCap field name", async () => {
 const capResult = await validateSuccessCharter({ ...draft, group: { ...draft.group, name: "cap:room:secret" } });
 ok("validate rejects a tampered artifact carrying a room cap", !capResult.ok && capResult.errors.some((e) => e.includes("room capability")), capResult.errors.join("; "));
 
+await rejects("dyncap attribution cannot masquerade as member signature", async () => {
+  const bad = base(); bad.members[0].signature = "fake"; await buildSuccessCharter(bad);
+});
+const fakeMemberSig = await validateSuccessCharter({ ...draft, members: [{...draft.members[0], signature:"fake"}] });
+ok("reject member signature claim", !fakeMemberSig.ok && fakeMemberSig.errors.some(e=>e.includes("hash-only TOFU")));
+
 // --- shape validation ------------------------------------------------------
 await rejects("empty objectives are rejected", async () => {
   const bad = base(); bad.objectives = []; await buildSuccessCharter(bad);
