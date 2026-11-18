@@ -1,0 +1,26 @@
+name: MrE browser WASM conformance
+on:
+  pull_request:
+    paths:
+      - 'crates/mre-core/**'
+      - 'scripts/test-mre-wasm.mjs'
+      - '.github/workflows/mre-wasm.yml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+jobs:
+  wasm-conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build actual browser-compatible WASM module
+        run: wasm-pack build crates/mre-core --target nodejs --out-dir ../../target/mre-wasm -- --features wasm
+      - name: Execute all QLF vectors against actual WASM
+        run: node scripts/test-mre-wasm.mjs

@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/zfa-core"]
+members = ["crates/zfa-core", "crates/mre-core"]
 resolver = "2"
 
 [workspace.package]
