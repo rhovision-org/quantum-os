@@ -122,6 +122,16 @@ function iceUfrag(sdp: string | null | undefined): string | null {
   return m ? m[1] : null;
 }
 
+function iceCandidateUfrag(candidate: RTCIceCandidateInit): string | null {
+  if (typeof candidate.usernameFragment === "string" && candidate.usernameFragment) {
+    return candidate.usernameFragment;
+  }
+  const m = /\bufrag\s+(\S+)/.exec(candidate.candidate ?? "");
+  return m ? m[1] : null;
+}
+
+const MAX_PENDING_ICE_PER_PEER = 128;
+
 /**
  * Ring + skip-link neighbor computation for the bounded-degree connection
  * overlay: sort everyone present lexicographically and connect to the peers
@@ -357,6 +367,9 @@ export class QOSPeer {
   // per-peer "we have an outstanding offer" flag for perfect-negotiation glare.
   private localStream: MediaStream | null = null;
   private makingOffer = new Map<string, boolean>();
+  // Candidates can arrive before the offer creates a PC, or while its remote
+  // description is still being installed. Keep a bounded per-peer queue.
+  private pendingIce = new Map<string, RTCIceCandidateInit[]>();
   // Per-peer grace timer for a transient ICE "disconnected": WebRTC can briefly
   // flap to "disconnected" and recover to "connected". We only declare the peer
   // gone if it has not recovered within this window — preventing a ghost from
@@ -1210,6 +1223,7 @@ export class QOSPeer {
         await pc.setLocalDescription({ type: "rollback" });
       }
       await pc.setRemoteDescription({ type: "offer", sdp });
+      await this.flushPendingIce(fromPeerId, pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       this.signal({
@@ -1228,17 +1242,62 @@ export class QOSPeer {
     const pc = this.connections.get(fromPeerId);
     if (!pc) return;
     if (pc.signalingState !== "have-local-offer") return;   // stray/rolled-back answer
-    try { await pc.setRemoteDescription({ type: "answer", sdp }); }
-    catch (e) { console.warn("[qos-peer] handleAnswer failed", e); }
+    try {
+      await pc.setRemoteDescription({ type: "answer", sdp });
+      await this.flushPendingIce(fromPeerId, pc);
+    } catch (e) { console.warn("[qos-peer] handleAnswer failed", e); }
+  }
+
+  private queueIceCandidate(peerId: string, candidate: RTCIceCandidateInit): void {
+    const pending = this.pendingIce.get(peerId) ?? [];
+    if (pending.length >= MAX_PENDING_ICE_PER_PEER) pending.shift();
+    pending.push(candidate);
+    this.pendingIce.set(peerId, pending);
+  }
+
+  private async flushPendingIce(peerId: string, pc: RTCPeerConnection): Promise<void> {
+    if (!pc.remoteDescription) return;
+    const pending = this.pendingIce.get(peerId);
+    if (!pending?.length) return;
+
+    const remoteUfrag = iceUfrag(pc.remoteDescription.sdp);
+    const remaining: RTCIceCandidateInit[] = [];
+    for (const candidate of pending) {
+      const candidateUfrag = iceCandidateUfrag(candidate);
+      // A mismatched ufrag may belong to the next ICE-restart offer, which can
+      // itself arrive after its trickled candidates. Retain it, bounded, until
+      // the matching remote description is installed.
+      if (remoteUfrag && candidateUfrag && remoteUfrag !== candidateUfrag) {
+        remaining.push(candidate);
+        continue;
+      }
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.warn("[qos-peer] queued ICE candidate rejected", e);
+      }
+    }
+    if (remaining.length) this.pendingIce.set(peerId, remaining);
+    else this.pendingIce.delete(peerId);
   }
 
   private async handleIce(fromPeerId: string, candidate: RTCIceCandidateInit): Promise<void> {
     const pc = this.connections.get(fromPeerId);
-    if (!pc) return;
-    // Candidates can arrive while a description is being rolled back during glare;
-    // tolerate the resulting benign failures.
-    try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
-    catch { /* ignore */ }
+    const candidateUfrag = iceCandidateUfrag(candidate);
+    const remoteUfrag = iceUfrag(pc?.remoteDescription?.sdp);
+    if (!pc || !pc.remoteDescription ||
+        (remoteUfrag && candidateUfrag && remoteUfrag !== candidateUfrag)) {
+      this.queueIceCandidate(fromPeerId, candidate);
+      return;
+    }
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (e) {
+      // A candidate can still race an SDP replacement. Preserve it for the next
+      // matching description rather than silently losing a valid path.
+      this.queueIceCandidate(fromPeerId, candidate);
+      console.warn("[qos-peer] ICE candidate deferred", e);
+    }
   }
 
   private createPeerConnection(remotePeerId: string): RTCPeerConnection {
