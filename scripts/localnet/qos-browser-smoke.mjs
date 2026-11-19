@@ -57,6 +57,15 @@ try {
     pages.push(page);
     await page.goto(roomUrl.href, { waitUntil: "domcontentloaded", timeout: 45_000 });
     await page.locator("#connect-btn").waitFor({ state: "visible", timeout: 30_000 });
+    // The button is present in static HTML before the async app initialization
+    // attaches its handler. The generated peer capability is set only after
+    // ZFA and dyncap are loaded and the Connect listener is installed.
+    stage = `app-initialized-${i + 1}`;
+    await page.waitForFunction(
+      () => document.querySelector("#my-id")?.textContent?.startsWith("cap:peer:") ?? false,
+      null,
+      { timeout: 60_000 },
+    );
   }
   const [a, b] = pages;
 
