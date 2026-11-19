@@ -123,27 +123,43 @@ try {
   // alone cannot satisfy this assertion.
   stage = "direct-webrtc-browser-1";
   const waitForDirectChannel = async (page, remoteName) => {
-    await sendCommand(page, `/conn connect ${remoteName}`);
-    await waitForTranscript(page, `direct connection requested to ${remoteName}`,
-      `browser requested a direct connection to ${remoteName}`);
-    await sendCommand(page, "/conn");
-    try {
-      await page.waitForFunction(
-        (name) => new RegExp(`${name}\\s+channel open\\s+conn connected`, "i")
-          .test(document.querySelector("#messages")?.innerText ?? ""),
-        remoteName,
-        { timeout: 30_000 },
-      );
-    } catch {
-      const lines = await page.locator("#messages .msg").allTextContents();
-      const states = lines.map((line) => {
-        const m = /^\s*(\S+)\s+channel\s+(\S+)\s+conn\s+(\S+)\s+ice\s+(\S+)/i.exec(line);
-        return m ? `${m[1]} channel=${m[2]} conn=${m[3]} ice=${m[4]}` : null;
-      }).filter(Boolean);
-      safeDetail = states.find((state) => state.startsWith(remoteName + " "))
-        ?? states.at(-1) ?? "no /conn state row";
-      throw new Error("direct WebRTC channel did not open");
+    await sendCommand(page, \`/conn connect \${remoteName}\`);
+    await waitForTranscript(page, \`direct connection requested to \${remoteName}\`,
+      \`browser requested a direct connection to \${remoteName}\`);
+
+    // /conn is a snapshot, not a live view. Re-run it while ICE/SCTP negotiates;
+    // waiting on the first rendered row only observes the pre-handshake state
+    // forever, even if the data channel opens a moment later.
+    const deadline = Date.now() + 30_000;
+    let connected = false;
+    while (Date.now() < deadline) {
+      await sendCommand(page, "/conn");
+      try {
+        await page.waitForFunction(
+          (name) => [...document.querySelectorAll("#messages .msg")].some((node) => {
+            const line = node.textContent?.trim() ?? "";
+            return line.startsWith(name + " ")
+              && /\bchannel\s+open\s+conn\s+connected\b/i.test(line);
+          }),
+          remoteName,
+          { timeout: Math.min(1_000, Math.max(1, deadline - Date.now())) },
+        );
+        connected = true;
+        break;
+      } catch {
+        if (Date.now() < deadline) await page.waitForTimeout(250);
+      }
     }
+    if (connected) return;
+
+    const lines = await page.locator("#messages .msg").allTextContents();
+    const states = lines.map((line) => {
+      const m = /^\s*(\S+)\s+channel\s+(\S+)\s+conn\s+(\S+)\s+ice\s+(\S+)/i.exec(line);
+      return m ? \`\${m[1]} channel=\${m[2]} conn=\${m[3]} ice=\${m[4]}\` : null;
+    }).filter(Boolean);
+    safeDetail = states.find((state) => state.startsWith(remoteName + " "))
+      ?? states.at(-1) ?? "no /conn state row";
+    throw new Error("direct WebRTC channel did not open");
   };
   await waitForDirectChannel(a, nameB);
   stage = "direct-webrtc-browser-2";
