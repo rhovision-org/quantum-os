@@ -9208,7 +9208,9 @@ function showWelcome(): void {
   div.className = "welcome";
   div.innerHTML =
     "<h3>⬡ Welcome to QuantumOS</h3>" +
-    "A peer-to-peer room — no server holds your data. To get started:" +
+    "A peer-to-peer room — no server holds your data." +
+    "Please first choose your geek level on the top right."
+    "Then:" +
     "<ol>" +
     "<li>Set a <strong>display name</strong> in the left sidebar.</li>" +
     "<li>Click <strong>Connect</strong>, then <strong>copy</strong> the share link and send it to a peer.</li>" +
