@@ -223,6 +223,7 @@ try {
       const lines = await safeTranscript(page);
       for (const line of lines) console.error(`TRANSCRIPT_${index + 1}: ${line}`);
     } catch { /* page may already be closed */ }
+  }
   for (const line of peerDiagnostics.slice(-30)) console.error(`PEER_DIAG: ${line}`);
   process.exitCode = 1;
 } finally {
