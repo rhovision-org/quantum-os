@@ -179,7 +179,24 @@ try {
 
   stage = "qos-start";
   await sendCommand(a, `/qos start ${processName}`);
-  await waitForTranscript(a, `started **${processName}**`, "browser /qos start created a local signed process");
+  // Surface the command's own error instead of turning every failed start into
+  // an opaque Playwright timeout. The expected success message remains required.
+  await a.waitForFunction(
+    (name) => {
+      const transcript = document.querySelector("#messages")?.innerText ?? "";
+      return transcript.includes(`started **${name}**`) || transcript.includes("⚠ /qos:");
+    },
+    processName,
+    { timeout: 20_000 },
+  );
+  const qosStartText = await a.locator("#messages").innerText();
+  if (!qosStartText.includes(`started **${processName}**`)) {
+    safeDetail = qosStartText.split("\\n").slice(-12)
+      .map((line) => redactPeerCaps(line).replace(/\\b[0-9a-f]{64}\\b/gi, "[hash]").slice(0, 220))
+      .join(" | ");
+    throw new Error("QOS process start returned an application error");
+  }
+  check("browser /qos start created a local signed process", true);
   stage = "qos-status";
   await sendCommand(a, `/qos status ${processName}`);
   await waitForTranscript(a, "events:", "browser /qos status reports process state and event count");
