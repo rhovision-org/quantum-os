@@ -6,15 +6,16 @@
 // returns a disabled advisor when `--ai` is off or no API key is present, and the
 // deterministic v1 behaviours carry the room.
 //
-// Two backends (pick with `--ai-backend`):
-//   • api (default)         — Anthropic Messages API via global `fetch` (Node 18+), key from
-//                             ANTHROPIC_API_KEY. Pay-as-you-go API credits.
-//   • claude-code           — shells out to the local `claude` CLI in print mode, using the
-//                             user's Claude login (Pro/Max subscription) — NO API credits.
+// Advisor backends: legacy api (Anthropic), claude-code, OpenAI-compatible
+// (openai, ollama or an explicit HTTPS/local URL), and an injected MCP
+// client adapter. No provider receives deployment authority. Unknown models,
+// missing credentials or disconnected clients disable that backend.
+//
 // Calls are made only when the throttle would allow a post (the daemon gates them), so usage is
 // bounded by the same budget/cooldowns.
 
 import { spawn } from "node:child_process";
+import { createChatAdvisor } from "./ai-provider.mjs";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
@@ -234,7 +235,7 @@ function callClaudeCLI({ claudeBin, model, system, prompt, log, timeoutMs = 45_0
   });
 }
 
-export function makeAdvisor({ ai = false, backend = "api", apiKey = process.env.ANTHROPIC_API_KEY, model = null, claudeBin = "claude", persona = null, cmd = "facil", roleName = "facilitator", faucetActive = false, log = () => {} } = {}) {
+export function makeAdvisor({ ai = false, backend = "api", apiKey = undefined, model = null, claudeBin = "claude", mcpAdvisor = null, persona = null, cmd = "facil", roleName = "facilitator", faucetActive = false, log = () => {} } = {}) {
   backend = (backend === "cli" || backend === "claude") ? "claude-code" : (backend || "api");
   // System prompt = role persona (or the facilitator default) + shared norms/knowledge.
   const sysFor = (mode) => {
@@ -245,12 +246,34 @@ export function makeAdvisor({ ai = false, backend = "api", apiKey = process.env.
     if (mode === "gamesummary") return `${who}\n\n${gameSummaryKnowledge()}`;
     return `${who}\n\n${NUDGE_NORMS}`;
   };
-  const apiModel = model || "claude-haiku-4-5-20251001";    // api backend default
-  const cliModel = model || null;                            // claude-code: null = CLI's own default
+  const apiModel = model || "claude-haiku-4-5-20251001";
+  const cliModel = model || null;
+  const chat = (backend === "openai" || backend === "ollama" ||
+    /^https?:\/\//.test(backend)) ?
+    createChatAdvisor({ backend, apiKey, model, log }) : null;
+  if (backend === "api" && apiKey === undefined)
+    apiKey = process.env.ANTHROPIC_API_KEY;
   let enabled, label;
   if (!ai) { enabled = false; label = "off"; }
-  else if (backend === "claude-code") { enabled = true; label = `claude-code${cliModel ? " " + cliModel : ""}`; }
-  else { enabled = !!apiKey; label = enabled ? apiModel : "off"; if (!apiKey) log("[facil] --ai (api backend) set but ANTHROPIC_API_KEY missing — running deterministic only (try --ai-backend claude-code)"); }
+  else if (backend === "claude-code") {
+    enabled = true;
+    label = "claude-code" + (cliModel ? " " + cliModel : "");
+  }
+  else if (chat) { enabled = chat.enabled; label = chat.label; }
+  else if (backend === "mcp") {
+    enabled = Boolean(mcpAdvisor && typeof mcpAdvisor.ask === "function");
+    label = enabled ? "mcp (external client)" : "off";
+    if (!enabled) log("[facil] mcp backend requires an explicitly connected client adapter");
+  }
+  else if (backend === "api") {
+    enabled = !!apiKey;
+    label = enabled ? apiModel : "off";
+    if (!apiKey) log("[facil] ANTHROPIC_API_KEY missing; deterministic-only advisor");
+  }
+  else {
+    enabled = false; label = "off";
+    log("[facil] unsupported advisor backend; deterministic-only advisor");
+  }
   let lastError = null;
   return {
     enabled,
@@ -272,6 +295,21 @@ export function makeAdvisor({ ai = false, backend = "api", apiKey = process.env.
         const out = await callClaudeCLI({ claudeBin, model: cliModel, system, prompt, log, timeoutMs: mode === "gamesummary" ? 120_000 : 45_000 });
         if (out.error) { lastError = out.error; return null; }
         text = out.text;
+      } else if (chat) {
+        const out = await chat.ask(system, [{ role: "user", content: prompt }], max_tokens);
+        if (out.error) { lastError = out.error; return null; }
+        text = out.text;
+      } else if (backend === "mcp") {
+        // External MCP adapters must implement ask() only. The model receives
+        // no signing/deployment interface and replies only with proposed text.
+        try {
+          const out = await mcpAdvisor.ask(system, [{ role: "user", content: prompt }]);
+          text = typeof out === "string" ? out : out?.text;
+        } catch (e) {
+          lastError = "MCP advisor failure: " + (e?.message ?? String(e));
+          log("[facil] " + lastError);
+          return null;
+        }
       } else {
         try {
           const res = await fetch(ANTHROPIC_URL, {
