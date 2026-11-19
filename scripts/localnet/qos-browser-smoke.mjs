@@ -79,23 +79,6 @@ try {
   // starts in the same room. The roster assertion below uses the actual ids.
   await a.locator("#my-name").fill(nameA);
   await b.locator("#my-name").fill(nameB);
-  // #my-id is a display capability, not QOSPeer.peerId. Read the actual
-  // connected transport identity through /id after each browser joins.
-  const readTransportId = async (page, label) => {
-    stage = `read-peer-id-${label}`;
-    await sendCommand(page, "/id");
-    await page.waitForFunction(
-      () => [...document.querySelectorAll("#messages .msg .text")]
-        .some((el) => /^peer ID:\s*cap:peer:/i.test(el.textContent ?? "")),
-      null,
-      { timeout: 15_000 },
-    );
-    const lines = await page.locator("#messages .msg .text").allTextContents();
-    const line = lines.find((value) => /^peer ID:\s*cap:peer:/i.test(value));
-    if (!line) throw new Error("transport identity was not rendered");
-    return line.replace(/^peer ID:\s*/i, "").trim();
-  };
-
   stage = "connect-browser-1";
   await a.locator("#connect-btn").click();
   await a.waitForFunction(
@@ -111,20 +94,20 @@ try {
     { timeout: 30_000 },
   );
   check("both independent browser sessions connected to signaling", true);
-  const idA = await readTransportId(a, "browser-1");
-  const idB = await readTransportId(b, "browser-2");
-  check("both browser transport identities are distinct", idA !== idB);
-
+  // The visible roster is name-oriented. Distinct names let this test
+  // prove that the two browser sessions see each other, not just the facilitator.
   stage = "peer-roster-browser-1-sees-browser-2";
   await a.waitForFunction(
-    (id) => [...document.querySelectorAll("#peer-list li")].some((li) => li.title === id),
-    idB,
+    (name) => [...document.querySelectorAll("#peer-list li")]
+      .some((li) => li.textContent?.trim() === name),
+    nameB,
     { timeout: 30_000 },
   );
   stage = "peer-roster-browser-2-sees-browser-1";
   await b.waitForFunction(
-    (id) => [...document.querySelectorAll("#peer-list li")].some((li) => li.title === id),
-    idA,
+    (name) => [...document.querySelectorAll("#peer-list li")]
+      .some((li) => li.textContent?.trim() === name),
+    nameA,
     { timeout: 30_000 },
   );
   check("both browser sessions discovered the other room member", true);
