@@ -51,7 +51,9 @@ async function waitForTranscript(page, needle, label, timeout = 20_000) {
 async function sendCommand(page, command) {
   const input = page.locator("#msg-input");
   await input.fill(command);
-  await input.press("Enter");
+  // Enter is owned by the command-palette completion handler while a
+  // suggestion is active. Click the real Send button to exercise send().
+  await page.locator("#send-btn").click();
 }
 
 try {
