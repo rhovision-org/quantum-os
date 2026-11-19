@@ -294,13 +294,13 @@ check("joining dials everyone already in the room", offersTo("aaa") === 1 && off
   const early = { candidate: "candidate:1 1 udp 1 192.0.2.1 5000 typ host", usernameFragment: "REMOTE" };
   const duringSetup = { candidate: "candidate:2 1 udp 1 192.0.2.2 5001 typ host", usernameFragment: "REMOTE" };
   // The first candidate arrives before the peer connection exists.
-  deliver({ type: "ice", from: "b", candidate: early });
+  await icePeer.handleIce("b", early);
   icePeer.ensureConnected("b");
   await tick(); await tick();
   const pc = made.at(-1);
   // The second arrives after the PC exists but before its remote description.
-  deliver({ type: "ice", from: "b", candidate: duringSetup });
-  deliver({ type: "offer", from: "b", sdp: "v=0\r\na=ice-ufrag:REMOTE\r\n" });
+  await icePeer.handleIce("b", duringSetup);
+  await icePeer.handleOffer("b", "v=0\r\na=ice-ufrag:REMOTE\r\n");
   await tick(); await tick(); await tick();
   check("ICE arriving before PC creation is queued and applied after the offer",
         pc.addedIceCandidates.some((c) => c.usernameFragment === "REMOTE" && c.candidate === early.candidate),
@@ -312,8 +312,8 @@ check("joining dials everyone already in the room", offersTo("aaa") === 1 && off
   // A candidate for a new ICE restart may beat its new offer. It must wait for
   // that generation instead of being applied to the old remote description.
   const restarted = { candidate: "candidate:3 1 udp 1 192.0.2.3 5002 typ host", usernameFragment: "NEXT" };
-  deliver({ type: "ice", from: "b", candidate: restarted });
-  deliver({ type: "offer", from: "b", sdp: "v=0\r\na=ice-ufrag:NEXT\r\n" });
+  await icePeer.handleIce("b", restarted);
+  await icePeer.handleOffer("b", "v=0\r\na=ice-ufrag:NEXT\r\n");
   await tick(); await tick(); await tick();
   const nextPc = made.at(-1);
   check("ICE for a new ufrag waits for the matching restarted offer",
