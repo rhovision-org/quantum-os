@@ -123,6 +123,9 @@ try {
   // alone cannot satisfy this assertion.
   stage = "direct-webrtc-browser-1";
   const waitForDirectChannel = async (page, remoteName) => {
+    await sendCommand(page, `/conn connect ${remoteName}`);
+    await waitForTranscript(page, `direct connection requested to ${remoteName}`,
+      `browser requested a direct connection to ${remoteName}`);
     await sendCommand(page, "/conn");
     try {
       await page.waitForFunction(
