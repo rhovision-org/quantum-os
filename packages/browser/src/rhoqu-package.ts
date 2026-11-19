@@ -172,3 +172,22 @@ export function parseRhoProcessPackage(text:string):unknown {
   if(text.length>LIMIT)throw new Error("oversized RhoQu package");
   return JSON.parse(text) as unknown;
 }
+
+/** Clipboard-friendly single-token encoding: no whitespace in /rhoqu input. */
+export function packageToToken(pkg:RhoProcessPackage):string {
+  const bytes=new TextEncoder().encode(serializeRhoProcessPackage(pkg));
+  let binary="";
+  for(let i=0;i<bytes.length;i+=8192) {
+    binary+=String.fromCharCode(...bytes.slice(i,i+8192));
+  }
+  return btoa(binary).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+
+export function packageFromToken(token:string):unknown {
+  if(!/^[A-Za-z0-9_-]+$/.test(token)||token.length>LIMIT*2)
+    throw new Error("invalid or oversized package token");
+  const b64=token.replace(/-/g,"+").replace(/_/g,"/");
+  const binary=atob(b64+"=".repeat((4-b64.length%4)%4));
+  const raw=Uint8Array.from(binary,c=>c.charCodeAt(0));
+  return parseRhoProcessPackage(new TextDecoder("utf-8",{fatal:true}).decode(raw));
+}

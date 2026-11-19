@@ -6,13 +6,14 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 const root=join(dirname(fileURLToPath(import.meta.url)),"..");
 const built=await build({stdin:{
- contents:'export {compileRhoProcessIR} from "./src/rhoqu-process.ts"; export {exportRhoProcessPackage,verifyRhoProcessPackage,canonicalRhoPackageJson,serializeRhoProcessPackage,parseRhoProcessPackage} from "./src/rhoqu-package.ts"; export {deriveAnchor} from "./src/dyncap.ts";',
+ contents:'export {compileRhoProcessIR} from "./src/rhoqu-process.ts"; export {exportRhoProcessPackage,verifyRhoProcessPackage,canonicalRhoPackageJson,serializeRhoProcessPackage,parseRhoProcessPackage,packageToToken,packageFromToken} from "./src/rhoqu-package.ts"; export {deriveAnchor} from "./src/dyncap.ts";',
  resolveDir:root,loader:"ts"
 },bundle:true,platform:"node",format:"esm",write:false});
 const api=await import("data:text/javascript;base64,"+Buffer.from(built.outputFiles[0].text).toString("base64"));
 const {compileRhoProcessIR:compile,exportRhoProcessPackage:sign,
  verifyRhoProcessPackage:verify,serializeRhoProcessPackage:encode,
- parseRhoProcessPackage:decode,deriveAnchor}=api;
+ parseRhoProcessPackage:decode,packageToToken:toToken,
+ packageFromToken:fromToken,deriveAnchor}=api;
 const seed=new Uint8Array(32).fill(13),anchor=await deriveAnchor(seed);
 const id={seed,anchor,seqByRoom:{}};
 const ctx={
@@ -38,6 +39,13 @@ assert.equal((await verify(p,{trustedKeys:new Map([[anchor,"e".repeat(64)]])})).
 const raw=encode(p);
 assert.deepEqual(decode(raw),p);
 assert.equal((await verify(decode(raw))).ok,true);
+const token=toToken(p);
+assert.match(token,/^[a-zA-Z0-9_-]+$/);
+assert.deepEqual(fromToken(token),p);
+assert.equal((await verify(fromToken(token))).ok,true);
+assert.throws(()=>fromToken("not base64*"),/invalid/);
+assert.throws(()=>fromToken("x".repeat(400001)),/oversized/);
+
 const copy=()=>JSON.parse(encode(p));
 let mutant=copy();
 mutant.payload.source="let id = /poll new Changed;";

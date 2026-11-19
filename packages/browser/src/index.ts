@@ -82,6 +82,19 @@ export {
 } from "./rhoqu.js";
 export type { RhoQuSurfaceIR } from "./rhoqu.js";
 
+// Opt-in RhoProcess IR: human-reviewed execution, never a Lean verification claim.
+export {
+  compileRhoProcessIR, validateRhoProcessIR, runRhoProcessIR,
+  effectsOf, interpolateRuntime,
+} from "./rhoqu-process.js";
+export type { RhoProcessIR, RhoCommandResult, RhoProcessHost, RhoProcessReport } from "./rhoqu-process.js";
+export { capturedIdKind, runWithStructuredId } from "./rhoqu-result.js";
+export {
+  exportRhoProcessPackage, verifyRhoProcessPackage,
+  packageToToken, packageFromToken, serializeRhoProcessPackage,
+} from "./rhoqu-package.js";
+export type { RhoProcessPackage, PackageVerification } from "./rhoqu-package.js";
+
 // RhoQu success recipes using only the shipped subset (see #290 for gaps).
 export { SUCCESS_RECIPES, recipeById } from "./success-recipes.js";
 export type { SuccessRecipe } from "./success-recipes.js";

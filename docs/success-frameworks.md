@@ -223,6 +223,25 @@ preflight state machine, not browser confirmation UX.
 - a compact private-goal / read-only-group overview;
 - docs and attribution.
 
+## RhoQu v2 opt-in execution and package workflow
+
+The runtime builder, signed package system, and bounded human-authorized
+browser adapter are specified in [RhoQu v2](rhoqu-v2.md). Supported new
+constructs include actual-ID let bindings and $LAST_ID, runtime when/require,
+a read-only concurrently joined branch form, typed effect metadata, and
+signed shareable source/IR bundles. The old parallel/if forms remain
+compatibility-sequential / compile-time.
+
+An imported package is only previewed. It does not execute until the
+operator separately approves the exact local candidate and the browser
+confirmation. Signed package integrity does not prove a remote dyncap
+anchor/private seed relationship; new public keys use explicit TOFU pinning.
+
+The remainder of #290 is the machine-checkable Lean correspondence,
+a reliable event-log-based replay criterion, cross-peer scheduling, and
+strong structured outcomes for all potentially irreversible async commands.
+These cannot be inferred from unit tests or labeled complete.
+
 ## What remains
 
 - chain handoff/status and cross-repo RhoGov work (#291);

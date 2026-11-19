@@ -9,7 +9,7 @@ import {
 } from "./rhoqu.js";
 
 export const RHO_PROCESS_SCHEMA = "rhoqu.process.ir/1";
-export type RhoEffect = "read" | "room-write" | "chain-write";
+export type RhoEffect = "read" | "room-write" | "value-write" | "chain-write";
 export type RhoRequirement = "room-read" | "room-write" | "wallet-authorization";
 
 export interface RhoCommandResult {
@@ -52,7 +52,9 @@ export function effectsOf(command: string): { effect: RhoEffect; requires: RhoRe
     "freq","coupling","search","solve","dump",
   ]);
   if (localReads.has(verb) ||
-    (verb === "goal" && ["list","review"].includes(sub)) ||
+    (verb === "goal" && (sub === "list" ||
+      sub === "review" && !/^\/goal\s+review\s+note\b/i.test(command) ||
+      sub === "habit" && /^\/goal\s+habit\s+list\b/i.test(command))) ||
     (verb === "poll" && ["list","status"].includes(sub)) ||
     (verb === "gov" && ["list","status"].includes(sub)) ||
     (verb === "note" && ["list","balance"].includes(sub)) ||
@@ -65,8 +67,11 @@ export function effectsOf(command: string): { effect: RhoEffect; requires: RhoRe
   if (verb === "rholang" && ["deploy","install"].includes(sub) ||
       verb === "gov" && sub === "chain" ||
       verb === "note" && ["grant","pass","redeem","split","merge"].includes(sub)) {
+    if (verb === "note") return {effect: "value-write", requires: ["wallet-authorization"]};
     return {effect: "chain-write", requires: ["wallet-authorization"]};
   }
+  if (verb === "rdv" && sub !== "list")
+    return {effect: "value-write", requires: ["wallet-authorization"]};
   return {effect: "room-write", requires: ["room-write"]};
 }
 

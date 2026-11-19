@@ -206,6 +206,16 @@ jobs:
       - name: RhoQu surface IR compatibility test
         run: node packages/browser/test/rhoqu-surface-ir.test.mjs
 
+      # #290 opt-in runtime, real store-result IDs, and cryptographic package import.
+      - name: RhoQu v2 runtime semantics
+        run: node packages/browser/test/rhoqu-process.test.mjs
+
+      - name: RhoQu v2 actual-result ID capture
+        run: node packages/browser/test/rhoqu-result.test.mjs
+
+      - name: RhoQu signed process packages
+        run: node packages/browser/test/rhoqu-package.test.mjs
+
       # Browser behaviour, against stubbed media. Not a rendering test — it
       # asserts which track ends up in the stream a joiner would be given.
       - name: Calls test

@@ -40,6 +40,15 @@ import { QosCommand } from "./qos-command.js";
 import { pickAskAgent, agentAskText, liveAgentTarget } from "./agent-ask.js";
 import { GoalStore, parseGoalAdd } from "./goal-store.js";
 import { RhoQuPreviewStore } from "./rhoqu-preview.js";
+import {
+  compileRhoProcessIR, validateRhoProcessIR, runRhoProcessIR,
+  type RhoProcessIR, type RhoProcessNode, type RhoProcessHost,
+} from "./rhoqu-process.js";
+import {
+  exportRhoProcessPackage, verifyRhoProcessPackage, packageToToken,
+  packageFromToken,
+} from "./rhoqu-package.js";
+import { runWithStructuredId, type RhoIdSnapshot } from "./rhoqu-result.js";
 import { successSnapshot, renderSuccessPanel } from "./success-panel.js";
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
@@ -423,6 +432,7 @@ let goalStoreAnchor = "";
 // A preview is a transient local approval intent, never a room message or
 // persistent signing authority. Old intent is consumed before dispatch.
 const rhoquPreviews = new RhoQuPreviewStore<RhoQuOnHandler>();
+const rhoquV2Previews = new RhoQuPreviewStore<RhoProcessIR>();
 let posixNet: PosixNet | null = null;
 let socketListeners: Map<string, { port: number; type: SocketType; unlisten: () => void }> = new Map();
 let socketConns: Map<string, QosSocket> = new Map();
@@ -6368,6 +6378,7 @@ function handleCommand(raw: string): string[] {
         sys("  /rhoqu approve <token>               — explicit one-use approval + confirmation");
         sys("  /rhoqu cancel <token>                — discard a preview");
         sys("  /rhoqu pending                       — count unexpired local previews");
+        sys("  /rhoqu v2 help                       — typed, human-approved orchestration");
         sys("  process P(a, b) { /grant $a; /lemma $b; } P(fork-a, alice);");
         sys("  if has(@met-bob) { /qucalc @met-bob; } else { /lemma met-bob ^v; }");
         sys("  on forks(msg) { /qucalc @msg; }      — register a channel-msg handler");
@@ -6405,6 +6416,250 @@ function handleCommand(raw: string): string[] {
       });
       const scopedRoom = activeRoom.roomId;
       const scopedAnchor = dyncapState?.anchor ?? "";
+      // RhoQu v2 is opt-in. Its typed IR is data, not permission to execute.
+      // A package import/external draft is NEVER run by merely receiving it.
+      if (src === "v2" || src.startsWith("v2 ")) {
+        const tail = src.slice(2).trim();
+        const sub = tail.split(/\s+/, 1)[0]?.toLowerCase() || "help";
+        const rest = tail.slice(sub.length).trim();
+        const roomCtx = activeRoom;
+        const initialAnchor = scopedAnchor;
+        const roomScopeOk = (): boolean =>
+          uiActiveRoom === roomCtx && activeRoom === roomCtx
+          && dyncapState?.anchor === initialAnchor;
+        const currentContext = (): RhoQuContext => ({
+          hasLemma: name => roomCtx.lemmaStore.has(canonLemma(name)),
+          balance: currency => [...roomCtx.noteStore.values()]
+            .filter(n => n.currency === currency)
+            .reduce((sum, n) => sum + n.denomination, 0),
+          isCurrencyDeclared: currency =>
+            [...roomCtx.knownCurrencies.values()].some(x => x.currency === currency),
+          peerCount: () => roomCtx.peers.size,
+          isConnected: () => roomCtx.qpeer !== null,
+          myCurrentSeq: () => dyncapState?.seqByRoom[roomCtx.roomId] ?? 0,
+        });
+        const allCommands = (plan: RhoProcessIR): string[] => {
+          validateRhoProcessIR(plan);
+          const commands: string[] = [];
+          const walk = (nodes: readonly RhoProcessNode[]): void => {
+            for (const n of nodes) {
+              if (n.kind === "command") commands.push(n.command);
+              if (n.kind === "when") { walk(n.then); walk(n.else); }
+              if (n.kind === "concurrent") for (const branch of n.branches) walk(branch);
+            }
+          };
+          walk(plan.nodes);
+          return commands;
+        };
+        const previewIR = (source: string, plan: RhoProcessIR): void => {
+          if (!roomScopeOk()) throw new Error("room or identity changed");
+          const commands = allCommands(plan);
+          const intent = rhoquV2Previews.prepare(
+            source, commands, [plan], scopedRoom, initialAnchor, fingerprint(),
+          );
+          sys("RhoQu v2 (unverified) preview " + intent.token
+            + " · " + commands.length + " potential commands");
+          sys("These are ALL potential commands, including both sides of runtime branches.");
+          for (const [i, c] of commands.entries()) {
+            sys("  " + (i + 1) + ". " + c);
+          }
+          sys("Concurrency is restricted to read-only branches. No chain finality claim.");
+          sys("Nothing executed. /rhoqu v2 approve " + intent.token
+            + " (one use, expires in 10 minutes).");
+        };
+        if (sub === "help") {
+          for (const line of [
+            "  /rhoqu v2 preview <source>  — compile + display typed plan (no dispatch)",
+            "  /rhoqu v2 approve <token>   — one-use human approval and runtime",
+            "  /rhoqu v2 cancel <token>    — discard the unexecuted preview",
+            "  /rhoqu v2 export <source>  — explicitly sign a shareable source/IR package",
+            "  /rhoqu v2 import <base64url> — verify provenance, then preview only",
+            "  let id = /poll new Question; /poll add $id yes;",
+            "  when peers() >= 2 { /lemma ready; } else { /lemma waiting; }",
+            "  require connected(); concurrent { /help; /goal list; }",
+          ]) sys(line);
+          break;
+        }
+        if (sub === "preview") {
+          try { previewIR(rest, compileRhoProcessIR(rest, currentContext())); }
+          catch (e) { sys("RhoQu v2 preview refused: " + String(e)); }
+          break;
+        }
+        if (sub === "pending") {
+          sys("RhoQu v2 pending: " + rhoquV2Previews.pending(scopedRoom));
+          break;
+        }
+        if (sub === "cancel") {
+          sys(rhoquV2Previews.cancel(rest) ? "RhoQu v2 preview cancelled" : "no such preview");
+          break;
+        }
+        if (sub === "export") {
+          if (!rest || !dyncapState) { sys("no source or signing identity"); break; }
+          const identity = dyncapState;
+          void (async () => {
+            try {
+              if (!roomScopeOk()) throw new Error("room or identity changed");
+              const plan = compileRhoProcessIR(rest, currentContext());
+              const commands = allCommands(plan);
+              if (!commands.length || commands.length > 200) throw new Error("export command budget");
+              if (!confirm("Export an Ed25519-signed RhoQu source/IR package? "
+                + "It may contain private text you wrote. Export does not broadcast or execute.")) {
+                addMessage("", "RhoQu v2 export cancelled", "system"); return;
+              }
+              const packageObject = await exportRhoProcessPackage(rest, plan, identity);
+              if (!roomScopeOk()) throw new Error("room or identity changed during signature");
+              const token = packageToToken(packageObject);
+              addMessage("", "RhoQu v2 package SHA-256: " + packageObject.sha256, "system");
+              addMessage("", "Signer dyncap anchor (TOFU claim): "
+                + packageObject.payload.issuer.dyncapAnchor, "system");
+              addMessage("", "Package (copy/paste; no automatic sharing): " + token, "system");
+            } catch (e) { addMessage("", "RhoQu v2 export refused: " + String(e), "system"); }
+          })();
+          break;
+        }
+        if (sub === "import") {
+          if (!rest) { sys("usage: /rhoqu v2 import <base64url-package>"); break; }
+          void (async () => {
+            try {
+              if (!roomScopeOk()) throw new Error("room or identity changed");
+              const raw = packageFromToken(rest);
+              const key = "qos-rhoqu-trusted-keys:" + initialAnchor;
+              const trusted = new Map<string, string>();
+              const existing = localStorage.getItem(key);
+              if (existing) {
+                const pairs = JSON.parse(existing) as unknown;
+                if (!Array.isArray(pairs)) throw new Error("corrupt trusted key registry");
+                for (const entry of pairs) {
+                  if (!Array.isArray(entry) || entry.length !== 2
+                      || typeof entry[0] !== "string" || !/^[a-f0-9]{64}$/.test(entry[0])
+                      || typeof entry[1] !== "string" || !/^[a-f0-9]{64}$/.test(entry[1]))
+                    throw new Error("invalid locally trusted key entry");
+                  trusted.set(entry[0], entry[1]);
+                }
+              }
+              const verification = await verifyRhoProcessPackage(raw, {trustedKeys: trusted});
+              if (!verification.ok || !verification.package) {
+                throw new Error("package integrity/attribution: " + verification.errors.join("; "));
+              }
+              const pack = verification.package;
+              const freshlyCompiled = compileRhoProcessIR(pack.payload.source, currentContext());
+              if (JSON.stringify(freshlyCompiled) !== JSON.stringify(pack.payload.process))
+                throw new Error("signed IR does not match source under current room snapshot");
+              if (!roomScopeOk()) throw new Error("room or identity changed");
+              const issuer = pack.payload.issuer;
+              if (verification.attribution === "tofu") {
+                const accepted = confirm("New RhoQu package signer (TOFU). Anchor: "
+                  + issuer.dyncapAnchor + " / Ed25519 key: " + issuer.signerPublicKey
+                  + ". This is NOT cryptographic proof of the dyncap seed. "
+                  + "Pin this key for subsequent imports? No command will execute.");
+                if (!accepted) { addMessage("", "TOFU signer not trusted; import refused", "system"); return; }
+                trusted.set(issuer.dyncapAnchor, issuer.signerPublicKey);
+                localStorage.setItem(key, JSON.stringify([...trusted.entries()]));
+              }
+              addMessage("", "Verified RhoQu v2 package " + verification.sha256
+                + " · attribution " + verification.attribution
+                + " (not machine-verified / no automatic execution).", "system");
+              // A package only enters the same local preflight used for typed source.
+              previewIR(pack.payload.source, pack.payload.process);
+            } catch (e) { addMessage("", "RhoQu v2 import refused: " + String(e), "system"); }
+          })();
+          break;
+        }
+        if (sub === "approve") {
+          void (async () => {
+            try {
+              if (!roomScopeOk()) throw new Error("room or identity changed");
+              const intent = rhoquV2Previews.take(
+                rest, scopedRoom, initialAnchor, fingerprint(),
+              );
+              const plan = intent.handlers[0];
+              if (!plan) throw new Error("missing approved plan");
+              validateRhoProcessIR(plan);
+              if (!confirm("Execute this RhoQu v2 plan with "
+                + intent.commands.length + " potential commands, including room/value writes? "
+                + "Each action still uses its original authorization and may be irreversible.")) {
+                addMessage("", "RhoQu v2 approval declined; token consumed", "system"); return;
+              }
+              if (!roomScopeOk()) throw new Error("room or identity changed");
+              const capture = (): RhoIdSnapshot => ({
+                poll: [...roomCtx.pollStore.keys()],
+                lemma: [...roomCtx.lemmaStore.keys()],
+                note: [...roomCtx.noteStore.keys()],
+                currency: [...roomCtx.currencyTokens.values()],
+                rendezvous: [...roomCtx.proposals.keys()],
+                qos: qosCommandFor(roomCtx)?.list().map(p => p.id) ?? [],
+                goal: goalsForIdentity()?.list().map(g => g.id) ?? [],
+                group: [...roomCtx.groupStore.keys()],
+                issue: [...roomCtx.groupStore.values()].flatMap(g =>
+                  g.issues.map(i => i.id)),
+              });
+              const host: RhoProcessHost = {
+                context: currentContext,
+                authorize: async (command, effect) => {
+                  if (!roomScopeOk()) return false;
+                  if (effect === "chain-write") return false;
+                  const verb = command.trim().split(/\s+/,1)[0].toLowerCase();
+                  // v2 deliberately does not invoke meta-commands, arbitrary
+                  // deploys, or message sends with unobservable async success.
+                  const accepted = new Set([
+                    "/help", "/id", "/zfa-check", "/qucalc", "/coupling", "/freq",
+                    "/search", "/solve", "/goal", "/poll", "/gov", "/lemma",
+                    "/note", "/rdv", "/qos", "/ps",
+                  ]);
+                  if (!accepted.has(verb)) return false;
+                  if (verb === "/gov" && /\s+chain\b/i.test(command)) return false;
+                  if (verb === "/note" && /\s+(pass|redeem|split|merge)\b/i.test(command)) return false;
+                  if (verb === "/rdv" && !/\s+list\b/i.test(command)) return false;
+                  return true;
+                },
+                execute: async command => {
+                  if (!roomScopeOk()) return {ok:false,error:"room/identity changed"};
+                  return runWithStructuredId(command, {
+                    snapshot: capture,
+                    invoke: async c => {
+                      if (!roomScopeOk()) return {ok:false,error:"room changed before dispatch"};
+                      if (/^\/qos\s/i.test(c) || /^\/ps(?:\s|$)/i.test(c)) {
+                        const controller = qosCommandFor(roomCtx);
+                        if (!controller) return {ok:false,error:"QOS identity unavailable"};
+                        const argument = c.replace(/^\/(qos|ps)\s*/i,"").trim();
+                        const qosText = /^\/ps(?:\s|$)/i.test(c) ? "ps" : argument;
+                        const execution = signQueue.then(async () => {
+                          if (!roomScopeOk()) throw new Error("room changed before QOS signing");
+                          await controller.handle(qosText);
+                        });
+                        signQueue = execution.then(() => undefined, () => undefined);
+                        await execution;
+                        return {ok:true};
+                      }
+                      const lines = inRoom(roomCtx, () => runInput(c));
+                      // The original dispatcher has no structured success API.
+                      // A creation must have an actual unique store delta;
+                      // other commands are only attested as dispatched.
+                      return {ok:true,value:lines};
+                    },
+                  });
+                },
+              };
+              const report = await runRhoProcessIR(plan, host);
+              if (!roomScopeOk()) throw new Error("room changed during RhoQu run");
+              addMessage("", "RhoQu v2 execution "
+                + (report.ok ? "completed" : "refused/partial") + ": "
+                + report.receipts.length + " actual dispatch receipts"
+                + (report.error ? " · " + report.error : ""), "system");
+              for (const receipt of report.receipts) {
+                addMessage("", "  " + (receipt.ok ? "✓ " : "✗ ")
+                  + receipt.command + (receipt.id ? " · id " + receipt.id : "")
+                  + (receipt.error ? " · " + receipt.error : ""), "system");
+              }
+              addMessage("", "A dispatch receipt is NOT remote admission, "
+                + "on-chain finality, or a proof of Lean verification.", "system");
+            } catch (e) { addMessage("", "RhoQu v2 approval refused: " + String(e), "system"); }
+          })();
+          break;
+        }
+        sys("Unknown RhoQu v2 subcommand. /rhoqu v2 help");
+        break;
+      }
       if (src.startsWith("preview ")) {
         try {
           const source = src.slice("preview ".length).trim();
