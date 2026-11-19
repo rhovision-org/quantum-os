@@ -22,6 +22,7 @@ const marker = `QOS601_CHAT_${nonce}`;
 const goal = `QOS601_GOAL_${nonce}`;
 const processName = `QOS601_PROCESS_${nonce}`;
 const checks = [];
+let stage = "launch";
 const browser = await chromium.launch({
   headless: true,
   args: ["--no-sandbox", "--disable-dev-shm-usage"],
@@ -50,6 +51,7 @@ async function sendCommand(page, command) {
 
 try {
   for (let i = 0; i < 2; i++) {
+    stage = `browser-open-${i + 1}`;
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     pages.push(page);
@@ -58,12 +60,14 @@ try {
   }
   const [a, b] = pages;
 
+  stage = "connect-browser-1";
   await a.locator("#connect-btn").click();
   await a.waitForFunction(
     () => document.querySelector("#status-dot")?.classList.contains("connected") ?? false,
     null,
     { timeout: 30_000 },
   );
+  stage = "connect-browser-2";
   await b.locator("#connect-btn").click();
   await b.waitForFunction(
     () => document.querySelector("#status-dot")?.classList.contains("connected") ?? false,
@@ -72,7 +76,9 @@ try {
   );
   check("both independent browser sessions connected to signaling", true);
 
-  for (const page of pages) {
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i];
+    stage = `peer-roster-${i + 1}`;
     await page.waitForFunction(
       () => document.querySelectorAll("#peer-list li").length >= 2,
       null,
@@ -83,12 +89,14 @@ try {
 
   // /conn reports the actual RTCDataChannel state. A WebSocket roster entry
   // alone cannot satisfy this assertion.
+  stage = "direct-webrtc-browser-1";
   await sendCommand(a, "/conn");
   await a.waitForFunction(
     () => /channel open\s+conn connected/i.test(document.querySelector("#messages")?.innerText ?? ""),
     null,
     { timeout: 30_000 },
   );
+  stage = "direct-webrtc-browser-2";
   await sendCommand(b, "/conn");
   await b.waitForFunction(
     () => /channel open\s+conn connected/i.test(document.querySelector("#messages")?.innerText ?? ""),
@@ -97,18 +105,24 @@ try {
   );
   check("both sides report an open direct WebRTC data channel", true);
 
+  stage = "chat-relay";
   await sendCommand(a, marker);
   await waitForTranscript(b, marker, "browser-to-browser chat reached the second browser");
 
+  stage = "goal-add";
   await sendCommand(a, `/goal add ${goal} | important`);
   await waitForTranscript(a, "🎯 added", "personal /goal add executed in the browser");
+  stage = "goal-list";
   await sendCommand(a, "/goal list");
   await waitForTranscript(a, "personal goals (", "personal /goal list returned the stored goal");
 
+  stage = "qos-start";
   await sendCommand(a, `/qos start ${processName}`);
   await waitForTranscript(a, `started **${processName}**`, "browser /qos start created a local signed process");
+  stage = "qos-status";
   await sendCommand(a, `/qos status ${processName}`);
   await waitForTranscript(a, "events:", "browser /qos status reports process state and event count");
+  stage = "qos-ps";
   await sendCommand(a, "/qos ps");
   await waitForTranscript(a, "QOS process table (", "browser /qos ps rendered the process table");
 
@@ -119,7 +133,7 @@ try {
   // Playwright diagnostics can embed the full navigation URL, including the
   // bearer room capability. Redact them rather than risking a CI log leak.
   const kind = error instanceof Error ? error.name : "Error";
-  console.error(`QOS #601 browser acceptance: FAIL (${kind}); diagnostic details redacted.`);
+  console.error(`QOS #601 browser acceptance: FAIL at ${stage} (${kind}); diagnostic details redacted.`);
   process.exitCode = 1;
 } finally {
   await browser.close();
