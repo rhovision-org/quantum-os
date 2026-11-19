@@ -6726,7 +6726,7 @@ function handleCommand(raw: string): string[] {
       // cannot be crossed and one that simply has not finished.
       const p = qpeer;
       if (!p) { sys("not connected to a room"); break; }
-      const connArgs = arg.trim().split(/\\s+/).filter(Boolean);
+      const connArgs = arg.trim().split(/\s+/).filter(Boolean);
       if (connArgs[0]?.toLowerCase() === "connect") {
         const target = connArgs.slice(1).join(" ");
         if (!target) { sys("usage: /conn connect <peer name or id>"); break; }
