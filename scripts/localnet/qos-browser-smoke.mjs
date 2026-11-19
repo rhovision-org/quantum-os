@@ -182,6 +182,20 @@ try {
   stage = "goal-list";
   await sendCommand(a, "/goal list");
   await waitForTranscript(a, "personal goals (", "personal /goal list returned the stored goal");
+  stage = "goal-identity-isolation";
+  await sendCommand(b, "/goal list");
+  await waitForTranscript(b, "no personal goals yet", "second browser identity cannot see the first browser's private goal");
+  const addedLine = (await a.locator("#messages .msg").allTextContents())
+    .find((line) => line.includes(goal) && line.includes("🎯 added"));
+  const goalId = addedLine?.match(/added\s+(g-\d+)\s+—/)?.[1];
+  if (!goalId) throw new Error("could not identify the newly added personal goal");
+  stage = "goal-done";
+  await sendCommand(a, `/goal done ${goalId}`);
+  await waitForTranscript(a, `${goalId} done — ${goal}`, "personal /goal done marks the goal completed");
+  stage = "goal-share";
+  await sendCommand(a, `/goal share ${goalId}`);
+  await waitForTranscript(a, `→ shared ${goalId}`, "owner explicitly shared one goal into the room");
+  await waitForTranscript(b, `shared goal: ${goal}`, "second browser received the explicitly shared goal");
 
   stage = "qos-start";
   await sendCommand(a, `/qos start ${processName}`);
@@ -212,7 +226,7 @@ try {
 
   console.log("QOS #601 browser acceptance: PASS");
   for (const item of checks) console.log(`PASS: ${item.label}`);
-  console.log("Coverage: 2 Chromium contexts; signaling membership; direct WebRTC data channels; chat; /goal add+list; /qos start+status+ps.");
+  console.log("Coverage: 2 Chromium contexts; signaling membership; direct WebRTC data channels; chat; /goal add+list+done, identity privacy, explicit share; /qos start+status+ps.");
 } catch (error) {
   // Playwright diagnostics can embed the full navigation URL, including the
   // bearer room capability. Redact them rather than risking a CI log leak.
