@@ -115,6 +115,12 @@ try {
   console.log("QOS #601 browser acceptance: PASS");
   for (const item of checks) console.log(`PASS: ${item.label}`);
   console.log("Coverage: 2 Chromium contexts; signaling membership; direct WebRTC data channels; chat; /goal add+list; /qos start+status+ps.");
+} catch (error) {
+  // Playwright diagnostics can embed the full navigation URL, including the
+  // bearer room capability. Redact them rather than risking a CI log leak.
+  const kind = error instanceof Error ? error.name : "Error";
+  console.error(`QOS #601 browser acceptance: FAIL (${kind}); diagnostic details redacted.`);
+  process.exitCode = 1;
 } finally {
   await browser.close();
 }
