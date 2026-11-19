@@ -47,6 +47,7 @@ jobs:
           bash -n scripts/localnet/qos-devnet.sh
           node --check scripts/qos-cli/agent.mjs
           node --check scripts/localnet/qos-signed-smoke.mjs
+          node --check scripts/localnet/qos-browser-smoke.mjs
           node --check scripts/qos-cli/signal-smoke.mjs
           python3 -m unittest discover -s tests -p test_qos_devnet.py -v
       - name: Install Playwright Chromium for two-browser acceptance
@@ -79,7 +80,7 @@ jobs:
           # deploy; no validator/testnet key or room cap is logged.
           node scripts/qos-cli/signal-smoke.mjs
           node scripts/localnet/qos-signed-smoke.mjs
-          BROWSER_URL="$(python3 -c 'from pathlib import Path; lines=Path("$RUNNER_TEMP/qos601-start.txt").read_text().splitlines(); print(next((x.removeprefix("Browser: ") for x in lines if x.startswith("Browser: ")), ""))')"
+          BROWSER_URL="$(python3 -c 'from pathlib import Path; import os; lines=Path(os.environ["RUNNER_TEMP"]).joinpath("qos601-start.txt").read_text().splitlines(); print(next((x.removeprefix("Browser: ") for x in lines if x.startswith("Browser: ")), ""))')"
           test -n "$BROWSER_URL"
           QOS_BROWSER_URL="$BROWSER_URL" \
             QOS_PLAYWRIGHT_MODULE="$RUNNER_TEMP/qos601-playwright/node_modules/playwright/index.mjs" \
