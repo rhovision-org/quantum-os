@@ -1165,15 +1165,17 @@ export class QOSPeer {
       this.makingOffer.set(fromPeerId, false);
       pc = undefined;
     }
-    if (!pc) {
-      pc = this.createPeerConnection(fromPeerId);
-      pc.ondatachannel = (event) => {
-        const ch = event.channel;
-        if (ch.label === "qos-stream") this.setupSocketChannel(fromPeerId, ch, "stream");
-        else if (ch.label === "qos-dgram") this.setupSocketChannel(fromPeerId, ch, "dgram");
-        else this.setupDataChannel(fromPeerId, ch);
-      };
-    }
+    if (!pc) pc = this.createPeerConnection(fromPeerId);
+    // Both sides may create an offer at the same time. The polite side rolls
+    // back its local offer and answers on the existing PC; it must still receive
+    // the remote offerer's data channels. Installing this only for a newly
+    // created PC silently drops the remote channels in the glare path.
+    pc.ondatachannel = (event) => {
+      const ch = event.channel;
+      if (ch.label === "qos-stream") this.setupSocketChannel(fromPeerId, ch, "stream");
+      else if (ch.label === "qos-dgram") this.setupSocketChannel(fromPeerId, ch, "dgram");
+      else this.setupDataChannel(fromPeerId, ch);
+    };
 
     // Perfect-negotiation glare handling: the peer with the smaller ID is polite.
     const polite = this.peerId < fromPeerId;
