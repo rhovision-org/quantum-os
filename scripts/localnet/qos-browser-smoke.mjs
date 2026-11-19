@@ -84,14 +84,14 @@ try {
     await sendCommand(page, "/id");
     await page.waitForFunction(
       () => [...document.querySelectorAll("#messages .msg .text")]
-        .some((el) => /^peer ID:\\s*cap:peer:/i.test(el.textContent ?? "")),
+        .some((el) => /^peer ID:\s*cap:peer:/i.test(el.textContent ?? "")),
       null,
       { timeout: 15_000 },
     );
     const lines = await page.locator("#messages .msg .text").allTextContents();
-    const line = lines.find((value) => /^peer ID:\\s*cap:peer:/i.test(value));
+    const line = lines.find((value) => /^peer ID:\s*cap:peer:/i.test(value));
     if (!line) throw new Error("transport identity was not rendered");
-    return line.replace(/^peer ID:\\s*/i, "").trim();
+    return line.replace(/^peer ID:\s*/i, "").trim();
   };
 
   stage = "connect-browser-1";
