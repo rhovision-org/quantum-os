@@ -6,6 +6,7 @@ on:
     paths:
       - "scripts/localnet/qos-devnet.*"
       - "scripts/localnet/qos-signed-smoke.mjs"
+      - "scripts/localnet/qos-browser-smoke.mjs"
       - "scripts/qos-cli/signal-smoke.mjs"
       - "scripts/qos-cli/agent.mjs"
       - "scripts/qos-cli/package-lock.json"
@@ -48,14 +49,21 @@ jobs:
           node --check scripts/localnet/qos-signed-smoke.mjs
           node --check scripts/qos-cli/signal-smoke.mjs
           python3 -m unittest discover -s tests -p test_qos_devnet.py -v
+      - name: Install Playwright Chromium for two-browser acceptance
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/qos601-playwright" --no-save --no-package-lock playwright@1.65.1
+          "$RUNNER_TEMP/qos601-playwright/node_modules/.bin/playwright" install --with-deps chromium
       - name: Start actual bundled Rholo node, QOS browser, signaling, facilitator
         env:
           QOS_RUN_DIR: ${{ runner.temp }}/qos601
         run: |
           set -euo pipefail
           trap 'bash scripts/localnet/qos-devnet.sh down || true' EXIT
-          # Bearer room URL is intentionally suppressed: GitHub Actions logs persist.
-          bash scripts/localnet/qos-devnet.sh up --no-ai > /dev/null
+          # Keep the one-time bearer URL in a mode-0600 runner-temp file. It is
+          # read into this step process only and is never printed or uploaded.
+          bash scripts/localnet/qos-devnet.sh up --no-ai > "$RUNNER_TEMP/qos601-start.txt"
+          chmod 600 "$RUNNER_TEMP/qos601-start.txt"
           bash scripts/localnet/qos-devnet.sh status > qos601-status.txt
           cat qos601-status.txt
           grep -q 'signaling_health=True' qos601-status.txt
@@ -71,6 +79,12 @@ jobs:
           # deploy; no validator/testnet key or room cap is logged.
           node scripts/qos-cli/signal-smoke.mjs
           node scripts/localnet/qos-signed-smoke.mjs
+          BROWSER_URL="$(python3 -c 'from pathlib import Path; lines=Path("$RUNNER_TEMP/qos601-start.txt").read_text().splitlines(); print(next((x.removeprefix("Browser: ") for x in lines if x.startswith("Browser: ")), ""))')"
+          test -n "$BROWSER_URL"
+          QOS_BROWSER_URL="$BROWSER_URL" \
+            QOS_PLAYWRIGHT_MODULE="$RUNNER_TEMP/qos601-playwright/node_modules/playwright/index.mjs" \
+            node scripts/localnet/qos-browser-smoke.mjs
+          rm -f "$RUNNER_TEMP/qos601-start.txt"
           bash scripts/localnet/qos-devnet.sh down
           bash scripts/localnet/qos-devnet.sh status | grep -q 'STOPPED'
           sha256sum qos601-status.txt qos601-signaling.json qos601-signed-deploy.json > qos601-status.SHA256SUMS
@@ -87,6 +101,7 @@ jobs:
           if-no-files-found: ignore
 
 # The smoke proves lifecycle + HTTP routing of a real disposable bundled node
-# on an isolated GitHub runner, plus a separate real signed disposable deploy
-# and two WebSocket peers. It does NOT prove two-browser WebRTC, finalized
-# settlement, RhoGov chain handoff, or public G1–G6 acceptance.
+# on an isolated GitHub runner, a separate real signed disposable deploy,
+# two independent Chromium sessions with direct WebRTC data channels, chat,
+# /goal and /qos browser commands. It does NOT prove finalized settlement,
+# RhoGov chain handoff, or public G1–G6 acceptance.
