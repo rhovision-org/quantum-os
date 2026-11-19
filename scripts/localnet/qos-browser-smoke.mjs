@@ -21,6 +21,8 @@ const nonce = `qos601-${Date.now().toString(36)}`;
 const marker = `QOS601_CHAT_${nonce}`;
 const goal = `QOS601_GOAL_${nonce}`;
 const processName = `QOS601_PROCESS_${nonce}`;
+const nameA = `QOS601_A_${nonce}`;
+const nameB = `QOS601_B_${nonce}`;
 const checks = [];
 let stage = "launch";
 let safeDetail = "";
@@ -71,6 +73,12 @@ try {
     );
   }
   const [a, b] = pages;
+  // Distinguish these browser peers from the facilitator that the harness
+  // starts in the same room. The roster assertion below uses the actual ids.
+  await a.locator("#my-name").fill(nameA);
+  await b.locator("#my-name").fill(nameB);
+  const idA = (await a.locator("#my-id").innerText()).trim();
+  const idB = (await b.locator("#my-id").innerText()).trim();
 
   stage = "connect-browser-1";
   await a.locator("#connect-btn").click();
@@ -88,41 +96,46 @@ try {
   );
   check("both independent browser sessions connected to signaling", true);
 
-  for (let i = 0; i < pages.length; i++) {
-    const page = pages[i];
-    stage = `peer-roster-${i + 1}`;
-    await page.waitForFunction(
-      () => document.querySelectorAll("#peer-list li").length >= 2,
-      null,
-      { timeout: 30_000 },
-    );
-  }
+  stage = "peer-roster-browser-1-sees-browser-2";
+  await a.waitForFunction(
+    (id) => [...document.querySelectorAll("#peer-list li")].some((li) => li.title === id),
+    idB,
+    { timeout: 30_000 },
+  );
+  stage = "peer-roster-browser-2-sees-browser-1";
+  await b.waitForFunction(
+    (id) => [...document.querySelectorAll("#peer-list li")].some((li) => li.title === id),
+    idA,
+    { timeout: 30_000 },
+  );
   check("both browser sessions discovered the other room member", true);
 
   // /conn reports the actual RTCDataChannel state. A WebSocket roster entry
   // alone cannot satisfy this assertion.
   stage = "direct-webrtc-browser-1";
-  const waitForDirectChannel = async (page) => {
+  const waitForDirectChannel = async (page, remoteName) => {
     await sendCommand(page, "/conn");
     try {
       await page.waitForFunction(
-        () => /channel open\s+conn connected/i.test(document.querySelector("#messages")?.innerText ?? ""),
-        null,
+        (name) => new RegExp(`${name}\\s+channel open\\s+conn connected`, "i")
+          .test(document.querySelector("#messages")?.innerText ?? ""),
+        remoteName,
         { timeout: 30_000 },
       );
     } catch {
       const lines = await page.locator("#messages .msg").allTextContents();
       const states = lines.map((line) => {
-        const m = /channel\s+(\S+)\s+conn\s+(\S+)\s+ice\s+(\S+)/i.exec(line);
-        return m ? `channel=${m[1]} conn=${m[2]} ice=${m[3]}` : null;
+        const m = /^\\s*(\\S+)\\s+channel\\s+(\\S+)\\s+conn\\s+(\\S+)\\s+ice\\s+(\\S+)/i.exec(line);
+        return m ? `${m[1]} channel=${m[2]} conn=${m[3]} ice=${m[4]}` : null;
       }).filter(Boolean);
-      safeDetail = states.at(-1) ?? "no /conn state row";
+      safeDetail = states.find((state) => state.startsWith(remoteName + " "))
+        ?? states.at(-1) ?? "no /conn state row";
       throw new Error("direct WebRTC channel did not open");
     }
   };
-  await waitForDirectChannel(a);
+  await waitForDirectChannel(a, nameB);
   stage = "direct-webrtc-browser-2";
-  await waitForDirectChannel(b);
+  await waitForDirectChannel(b, nameA);
   check("both sides report an open direct WebRTC data channel", true);
 
   stage = "chat-relay";
