@@ -1125,31 +1125,43 @@ export class QOSPeer {
     // A local offer is one half of a negotiation attempt. Mark it before
     // awaiting createOffer/setLocalDescription so an incoming offer that
     // arrives during either await is handled as glare, not as a fresh stable
-    // connection. handleOffer's polite/impolite decision depends on this flag.
+    // connection. Clear it on every exit so later renegotiations are unaffected.
     this.makingOffer.set(remotePeerId, true);
-    const ch = pc.createDataChannel("qos");
-    this.setupDataChannel(remotePeerId, ch);
-    // posix-net.ts's two socket transports — created alongside the chat
-    // channel so a single offer/answer establishes all three; see
-    // SocketChannelKind. Unused until something actually opens a socket to
-    // this peer, so the cost of always creating them is negligible.
-    this.setupSocketChannel(remotePeerId, pc.createDataChannel("qos-stream"), "stream");
-    this.setupSocketChannel(
-      remotePeerId,
-      pc.createDataChannel("qos-dgram", { ordered: false, maxRetransmits: 0 }),
-      "dgram",
-    );
+    try {
+      const ch = pc.createDataChannel("qos");
+      this.setupDataChannel(remotePeerId, ch);
+      // posix-net.ts's two socket transports — created alongside the chat
+      // channel so a single offer/answer establishes all three; see
+      // SocketChannelKind. Unused until something actually opens a socket to
+      // this peer, so the cost of always creating them is negligible.
+      this.setupSocketChannel(remotePeerId, pc.createDataChannel("qos-stream"), "stream");
+      this.setupSocketChannel(
+        remotePeerId,
+        pc.createDataChannel("qos-dgram", { ordered: false, maxRetransmits: 0 }),
+        "dgram",
+      );
 
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+      const offer = await pc.createOffer();
+      // A polite peer may have accepted an incoming offer while createOffer()
+      // was pending. Its remote description remains an offer after answering;
+      // do not overwrite that answer with the now-stale local offer.
+      if (pc.remoteDescription?.type === "offer") return;
+      await pc.setLocalDescription(offer);
+      // An incoming offer can also win while setLocalDescription() is pending.
+      if (pc.remoteDescription?.type === "offer" && pc.localDescription?.type === "answer") return;
 
-    this.signal({
-      type: "offer",
-      roomId: this.wireRoomId,
-      from: this.peerId,
-      to: remotePeerId,
-      sdp: offer.sdp!,
-    });
+      this.signal({
+        type: "offer",
+        roomId: this.wireRoomId,
+        from: this.peerId,
+        to: remotePeerId,
+        sdp: pc.localDescription?.sdp ?? offer.sdp!,
+      });
+    } catch (e) {
+      console.warn("[qos-peer] initiateConnection failed", e);
+    } finally {
+      this.makingOffer.set(remotePeerId, false);
+    }
   }
 
   private async handleOffer(fromPeerId: string, sdp: string): Promise<void> {
