@@ -123,9 +123,9 @@ try {
   // alone cannot satisfy this assertion.
   stage = "direct-webrtc-browser-1";
   const waitForDirectChannel = async (page, remoteName) => {
-    await sendCommand(page, \`/conn connect \${remoteName}\`);
-    await waitForTranscript(page, \`direct connection requested to \${remoteName}\`,
-      \`browser requested a direct connection to \${remoteName}\`);
+    await sendCommand(page, `/conn connect ${remoteName}`);
+    await waitForTranscript(page, `direct connection requested to ${remoteName}`,
+      `browser requested a direct connection to ${remoteName}`);
 
     // /conn is a snapshot, not a live view. Re-run it while ICE/SCTP negotiates;
     // waiting on the first rendered row only observes the pre-handshake state
@@ -139,7 +139,7 @@ try {
           (name) => [...document.querySelectorAll("#messages .msg")].some((node) => {
             const line = node.textContent?.trim() ?? "";
             return line.startsWith(name + " ")
-              && /\bchannel\s+open\s+conn\s+connected\b/i.test(line);
+              && /\\bchannel\\s+open\\s+conn\\s+connected\\b/i.test(line);
           }),
           remoteName,
           { timeout: Math.min(1_000, Math.max(1, deadline - Date.now())) },
@@ -154,8 +154,8 @@ try {
 
     const lines = await page.locator("#messages .msg").allTextContents();
     const states = lines.map((line) => {
-      const m = /^\s*(\S+)\s+channel\s+(\S+)\s+conn\s+(\S+)\s+ice\s+(\S+)/i.exec(line);
-      return m ? \`\${m[1]} channel=\${m[2]} conn=\${m[3]} ice=\${m[4]}\` : null;
+      const m = /^\\s*(\\S+)\\s+channel\\s+(\\S+)\\s+conn\\s+(\\S+)\\s+ice\\s+(\\S+)/i.exec(line);
+      return m ? `${m[1]} channel=${m[2]} conn=${m[3]} ice=${m[4]}` : null;
     }).filter(Boolean);
     safeDetail = states.find((state) => state.startsWith(remoteName + " "))
       ?? states.at(-1) ?? "no /conn state row";
