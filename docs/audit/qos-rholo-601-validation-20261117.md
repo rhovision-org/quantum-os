@@ -3,8 +3,8 @@
 **Scope:** QuantumOS is an outside application over the public Rholo API. No Rholo node plugins, new RPCs, validator configuration, CORS/TLS/admin relaxation, or production operations are part of this work.
 
 **Rholo-side doc PR:** [#604, MERGED](https://github.com/rhovision-org/rholo/pull/604), squash commit 41335ad9347c416f94f2c5e4706caa75f3fce17f; [Patrick APPROVED](https://github.com/rhovision-org/rholo/pull/604#pullrequestreview-5945419252).
-**QuantumOS application PR:** [#298, OPEN](https://github.com/rhovision-org/quantum-os/pull/298), current head f00d68f9dbc64c3c717a5c90913727340abdae66 (browser acceptance update).
-**Current-head CI evidence (f00d68f):** [integration run 44511582996](https://github.com/rhovision-org/quantum-os/actions/runs/44511582996) PASS and [general CI run 44511583003](https://github.com/rhovision-org/quantum-os/actions/runs/44511583003) PASS. The integration run executed the browser acceptance against two independent Chromium contexts; direct WebRTC, chat, `/rholang status`, read-only `/rholang eval return!(42)`, goal completion/privacy/share, and QOS start/status/ps all passed. Earlier artifact provenance remains preserved below and is not promoted beyond its stated scope.
+**QuantumOS application PR:** [#298, OPEN](https://github.com/rhovision-org/quantum-os/pull/298), current head 49541a0218d26fb7cc2a7d06b25b40e6ebe3acec (facilitator acceptance assertion added).
+**Prior code-head CI evidence (f00d68f):** [integration run 44511582996](https://github.com/rhovision-org/quantum-os/actions/runs/44511582996) PASS and [general CI run 44511583003](https://github.com/rhovision-org/quantum-os/actions/runs/44511583003) PASS. That integration run executed browser acceptance against two Chromium contexts; direct WebRTC, chat, `/rholang status`, read-only `/rholang eval return!(42)`, goal completion/privacy/share, and QOS start/status/ps passed. **Current-head CI (49541a0):** [general run 44512222909](https://github.com/rhovision-org/quantum-os/actions/runs/44512222909) PASS; [integration run 44512222944](https://github.com/rhovision-org/quantum-os/actions/runs/44512222944) is still pending at Playwright Chromium installation, so the newly added in-room facilitator FAQ assertion is not yet promoted. Earlier artifact provenance remains preserved below and is not promoted beyond its stated scope.
 
 ## Provenance and non-promotions
 
@@ -30,8 +30,8 @@
 | /goal add/list | **PASS — CI** | Run 44453360581 proved add/list on the initiating browser |
 | /goal done + two-identity privacy + explicit share | **PASS — CI** | Run 44453360581: completion on owner identity; second identity cannot see private goal; explicit share reaches second browser |
 | /qos start/status/ps | **PASS — CI** | Run 44453360581: browser starts process and reports status/events and process table |
-| /qos suspend/resume/terminate/kill + owner enforcement | **INCOMPLETE** | These browser command variants and owner-negative cases remain outside the latest smoke |
-| Facilitator | **PASS — PROCESS HEALTH ONLY** | Deterministic --no-ai facilitator alive; no independently verified /facil ask reply |
+| /qos suspend/resume/terminate/kill + owner enforcement | **PASS — UNIT TESTS** | `qos-command.test.mjs`: 28/28 local; current general CI 44512222909 includes the QOS command test. Browser smoke still covers start/status/ps only |
+| Facilitator | **FAQ SELFTEST PASS; BROWSER PENDING** | Deterministic FAQ selftest passes in general CI 44512222909; in-room `/facil ask` response assertion added, integration run 44512222944 pending |
 | /gov chain handoff | **INCOMPLETE IN #601 UI** | Separate [QuantumOS #299](https://github.com/rhovision-org/quantum-os/pull/299) and [#291 real-chain test](https://github.com/rhovision-org/quantum-os/actions/runs/44160911903) prove disposable Issue/4 proposal, **not** human council ratification, #601 browser acceptance or finalized settlement |
 | up/status/down | **PASS — BUNDLED ONLY** | Latest integration run starts and stops harness-owned services and asserts STOPPED; **existing-node** mode has not been witnessed against an external node |
 | Source-to-binary provenance for current Rholo dev | **BLOCKED** | Build pinned CURRENT dev SHA from source on GitHub runner, record executable SHA-256 and reported source; run only on disposable data |
