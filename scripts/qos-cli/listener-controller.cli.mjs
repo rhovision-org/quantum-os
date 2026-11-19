@@ -12,11 +12,24 @@
 //   node listener-controller.cli.mjs --task "what is 2+2?" --verify arithmetic \
 //     --backend claude-code --arm rag --memories memories.json
 //
+//   # C/D/E closure arms, same verifier and budget
+//   node listener-controller.cli.mjs --task "what is 2+2?" --verify arithmetic \
+//     --backend claude-code --arm rag-closure --memories memories.json
+//   node listener-controller.cli.mjs --task "what is 2+2?" --verify arithmetic \
+//     --backend claude-code --arm listener-closure --memories memories.json
+//
 // No API call is made by `--selftest`; that path uses a deterministic mock.
 
 import fs from "node:fs";
 import { makeAdvisor } from "./facilitator-advisor.mjs";
-import { Budget, controllerArm, directArm, ragArm } from "./listener-controller.mjs";
+import {
+  Budget,
+  controllerArm,
+  directArm,
+  listenerClosureArm,
+  ragArm,
+  ragClosureArm,
+} from "./listener-controller.mjs";
 
 function arg(name, fallback = null) {
   const index = process.argv.indexOf(name);
@@ -68,7 +81,8 @@ function usage() {
   node listener-controller.cli.mjs --task <text> [options]
 
 Options:
-  --arm direct|rag|controller   default: controller
+  --arm direct|rag|rag-closure|listener-closure|controller
+                                default: controller
   --backend claude-code|api     default: claude-code
   --model <name>                optional model override
   --verify arithmetic|nonempty|contains:<text>
@@ -94,6 +108,12 @@ if (process.argv.includes("--selftest")) {
     process.exit(2);
   }
   const arm = arg("--arm", "controller");
+  const arms = new Set(["direct", "rag", "rag-closure", "listener-closure", "controller"]);
+  if (!arms.has(arm)) {
+    console.error(`unknown --arm ${arm}`);
+    usage();
+    process.exit(2);
+  }
   const backend = arg("--backend", "claude-code");
   const model = arg("--model", null);
   const verify = arg("--verify", "nonempty");
@@ -127,15 +147,23 @@ if (process.argv.includes("--selftest")) {
       ? await directArm(common)
       : arm === "rag"
         ? await ragArm(common)
-        : await controllerArm({ ...common, verifier });
+        : arm === "rag-closure"
+          ? await ragClosureArm({ ...common, verifier })
+          : arm === "listener-closure"
+            ? await listenerClosureArm({ ...common, verifier })
+            : await controllerArm({ ...common, verifier });
 
   console.log(
     JSON.stringify(
       {
         arm: result.arm,
+        closureGate: result.closureGate ?? false,
+        memoryPolicy: result.memoryPolicy ?? null,
+        multiCandidate: result.multiCandidate ?? false,
         committed: result.committed,
         answer: result.answer,
         events: result.events,
+        retrieved: result.retrieved ?? [],
         memoryAdmissions: result.memoryAdmissions ?? [],
         budget: { calls: result.budget.calls, tokens: result.budget.tokens },
         error: result.error ?? advisor.lastError ?? null,

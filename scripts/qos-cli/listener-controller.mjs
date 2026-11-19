@@ -201,30 +201,49 @@ export async function ragArm({
 }
 
 /**
- * Controller arm.
+ * Shared closure loop for the factorial arms.
+ *
+ * memoryPolicy "rag"      — conventional top-k context (C)
+ * memoryPolicy "listener" — only zero-distance memories are admitted (D/E)
+ * multiCandidate false    — one candidate (C/D)
+ * multiCandidate true     — several open candidates (E)
  *
  * `verifier({ candidate, answer, evidence, memories })` returns
- * `{ ok: boolean, reason?: string }`.  A COMMIT happens only when it returns ok.
+ * `{ ok: boolean, reason?: string }`. A COMMIT happens only when it returns ok.
  */
-export async function controllerArm({
+async function closureArm({
   llm,
   task,
   memories = [],
   verifier,
   budget = new Budget(),
   maxSteps = 6,
+  memoryPolicy = "listener",
+  multiCandidate = true,
+  k = 3,
 } = {}) {
   if (typeof verifier !== "function") throw new Error("verifier is required");
+  const armName =
+    memoryPolicy === "rag" ? "rag-closure" : multiCandidate ? "controller" : "listener-closure";
   const events = [];
   const admitted = new Map();
+  let retrieved = [];
 
-  const proposal = await callLLM(llm, budget, {
-    system: CANDIDATE_SYSTEM,
-    prompt: candidatePrompt(task),
-    maxTokens: 400,
-  });
-  const candidates = parseCandidates(proposal.text, task);
-  events.push({ kind: "CANDIDATES", ids: candidates.map((candidate) => candidate.id) });
+  let candidates;
+  if (multiCandidate) {
+    const proposal = await callLLM(llm, budget, {
+      system: CANDIDATE_SYSTEM,
+      prompt: candidatePrompt(task),
+      maxTokens: 400,
+    });
+    candidates = parseCandidates(proposal.text, task);
+    events.push({ kind: "CANDIDATES", ids: candidates.map((candidate) => candidate.id) });
+  } else {
+    candidates = [
+      { id: "c1", question: String(task ?? "").trim(), distance: 1, evidence: [], committed: false },
+    ];
+    events.push({ kind: "CANDIDATES", ids: ["c1"], source: "task" });
+  }
 
   for (let step = 0; step < maxSteps && budget.canCall(); step += 1) {
     const open = candidates.filter((candidate) => !candidate.committed);
@@ -233,18 +252,27 @@ export async function controllerArm({
       a.distance < b.distance || (a.distance === b.distance && a.id < b.id) ? a : b,
     );
 
-    const listenerText = `${task} ${next.question}`;
-    const nearby = admittedMemories(memories, listenerText);
-    for (const memory of nearby) {
-      if (!admitted.has(memory.id)) {
-        admitted.set(memory.id, memory);
-        events.push({ kind: "MEMORY_ADMIT", id: memory.id, distance: 0 });
+    // The listener includes evidence accumulated so far, so a memory that was
+    // irrelevant at B_0 can become admissible only after a later clue.
+    const listenerText = `${task} ${next.question} ${next.evidence.join(" ")}`.trim();
+    let contextMemories;
+    if (memoryPolicy === "rag") {
+      contextMemories = retrieveMemories(memories, listenerText, k);
+      retrieved = contextMemories;
+    } else {
+      const nearby = admittedMemories(memories, listenerText);
+      for (const memory of nearby) {
+        if (!admitted.has(memory.id)) {
+          admitted.set(memory.id, memory);
+          events.push({ kind: "MEMORY_ADMIT", id: memory.id, distance: 0 });
+        }
       }
+      contextMemories = [...admitted.values()];
     }
 
     const call = await callLLM(llm, budget, {
       system: STEP_SYSTEM,
-      prompt: stepPrompt(task, next, [...admitted.values()]),
+      prompt: stepPrompt(task, next, contextMemories),
       maxTokens: 320,
     });
     const parsed = call.text ? parseStep(call.text) : null;
@@ -260,18 +288,23 @@ export async function controllerArm({
         candidate: next,
         answer: parsed.answer,
         evidence: next.evidence,
-        memories: [...admitted.values()],
+        memories: contextMemories,
       });
       if (verdict?.ok) {
         next.committed = true;
         events.push({ kind: "COMMIT", candidate: next.id, answer: parsed.answer, tauEvent: 0 });
         return {
-          arm: "controller",
+          arm: armName,
+          closureGate: true,
+          memoryPolicy,
+          multiCandidate,
           answer: parsed.answer,
           committed: true,
           candidate: next,
+          candidates,
           events,
           memoryAdmissions: [...admitted.values()],
+          retrieved,
           budget,
           error: null,
         };
@@ -288,13 +321,32 @@ export async function controllerArm({
   }
 
   return {
-    arm: "controller",
+    arm: armName,
+    closureGate: true,
+    memoryPolicy,
+    multiCandidate,
     answer: null,
     committed: false,
     candidates,
     events,
     memoryAdmissions: [...admitted.values()],
+    retrieved,
     budget,
     error: "no verified closure within budget",
   };
+}
+
+/** C — conventional RAG context + the same closure gate/retry as D/E. */
+export async function ragClosureArm(options = {}) {
+  return closureArm({ ...options, memoryPolicy: "rag", multiCandidate: false });
+}
+
+/** D — listener-triggered memory + closure gate; one candidate. */
+export async function listenerClosureArm(options = {}) {
+  return closureArm({ ...options, memoryPolicy: "listener", multiCandidate: false });
+}
+
+/** E — listener-triggered memory + closure gate + multiple open candidates. */
+export async function controllerArm(options = {}) {
+  return closureArm({ ...options, memoryPolicy: "listener", multiCandidate: true });
 }

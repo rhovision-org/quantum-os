@@ -12,9 +12,11 @@ import {
   controllerArm,
   directArm,
   estimateTokens,
+  listenerClosureArm,
   memoryDistance,
   parseCandidates,
   ragArm,
+  ragClosureArm,
   retrieveMemories,
 } from "./listener-controller.mjs";
 
@@ -83,14 +85,70 @@ const rag = await ragArm({
 ok("rag arm answers", rag.answer === "4" && rag.committed);
 ok("rag arm retrieves memory", rag.retrieved[0]?.id === "m1", JSON.stringify(rag.retrieved));
 
-// --- controller: verified commit -----------------------------------------
+// --- C: RAG + closure gate, same verifier/retry ---------------------------
+const step = JSON.stringify({ evidence: "2+2=4", answer: "4", done: true });
+const c = await ragClosureArm({
+  llm: mockLLM({ step }),
+  task: "what is 2+2?",
+  memories,
+  budget: new Budget({ maxCalls: 4, maxTokens: 3000 }),
+  k: 1,
+  verifier: ({ evidence }) => ({ ok: evidence.some((line) => line.includes("2+2=4")) }),
+});
+ok("C arm is rag-closure", c.arm === "rag-closure", c.arm);
+ok("C arm uses closure gate", c.closureGate === true);
+ok("C arm commits through the verifier", c.committed && c.answer === "4");
+ok("C arm retrieves conventional RAG context", c.retrieved[0]?.id === "m1");
+ok("C arm does not use listener admission events", !c.events.some((e) => e.kind === "MEMORY_ADMIT"));
+
+// --- D: listener + closure gate, one candidate ----------------------------
+const d = await listenerClosureArm({
+  llm: mockLLM({ step }),
+  task: "what is 2+2?",
+  memories,
+  budget: new Budget({ maxCalls: 4, maxTokens: 3000 }),
+  verifier: ({ evidence }) => ({ ok: evidence.some((line) => line.includes("2+2=4")) }),
+});
+ok("D arm is listener-closure", d.arm === "listener-closure", d.arm);
+ok("D arm uses closure gate", d.closureGate === true);
+ok("D arm commits through the verifier", d.committed && d.answer === "4");
+ok("D arm admits the listener-relevant memory", d.memoryAdmissions.map((m) => m.id).join(",") === "m1");
+
+// --- D: delayed relevance -------------------------------------------------
+const delayedMemories = [
+  { id: "m_delayed", text: "solve clue alpha" },
+  { id: "m_distractor", text: "puzzle hint" },
+];
+const delayedStep = (prompt) => {
+  if (prompt.includes("Admitted memories:\n- solve clue alpha")) {
+    return JSON.stringify({ evidence: "memory confirms", answer: "solved", done: true });
+  }
+  return JSON.stringify({ evidence: "clue alpha", answer: "", done: false });
+};
+const delayed = await listenerClosureArm({
+  llm: mockLLM({ step: delayedStep }),
+  task: "solve puzzle",
+  memories: delayedMemories,
+  budget: new Budget({ maxCalls: 4, maxTokens: 3000 }),
+  maxSteps: 3,
+  verifier: ({ answer, memories: admitted }) => ({
+    ok: answer === "solved" && admitted.some((memory) => memory.id === "m_delayed"),
+    reason: "needs the delayed clue",
+  }),
+});
+ok("delayed memory is admitted later", delayed.memoryAdmissions.some((m) => m.id === "m_delayed"));
+ok("delayed arm commits", delayed.committed && delayed.answer === "solved");
+const delayedAdmit = delayed.events.findIndex((e) => e.kind === "MEMORY_ADMIT" && e.id === "m_delayed");
+const delayedCommit = delayed.events.findIndex((e) => e.kind === "COMMIT");
+ok("delayed memory is admitted before commit", delayedAdmit >= 0 && delayedAdmit < delayedCommit);
+
+// --- E: full controller (listener + multiple candidates) ------------------
 const proposal = JSON.stringify({
   candidates: [
     { id: "c1", question: "compute 2+2", distance: 1 },
     { id: "c2", question: "check units", distance: 2 },
   ],
 });
-const step = JSON.stringify({ evidence: "2+2=4", answer: "4", done: true });
 const llm = mockLLM({ proposal, step });
 const controller = await controllerArm({
   llm,
@@ -102,24 +160,24 @@ const controller = await controllerArm({
     reason: "needs the arithmetic check",
   }),
 });
-ok("controller commits", controller.committed, controller.error ?? "");
-ok("controller returns the verified answer", controller.answer === "4", String(controller.answer));
+ok("E arm commits", controller.committed, controller.error ?? "");
+ok("E arm returns the verified answer", controller.answer === "4", String(controller.answer));
 ok(
-  "controller admits the relevant memory",
+  "E arm admits the relevant memory",
   controller.memoryAdmissions.map((m) => m.id).join(",") === "m1",
   JSON.stringify(controller.memoryAdmissions),
 );
 ok(
-  "controller emits COMMIT last",
+  "E arm emits COMMIT last",
   controller.events.at(-1)?.kind === "COMMIT",
   JSON.stringify(controller.events),
 );
-ok("controller stays within its call budget", controller.budget.calls <= 4);
-ok("controller does not call after commit", llm.calls.length === 2, String(llm.calls.length));
+ok("E arm stays within its call budget", controller.budget.calls <= 4);
+ok("E arm does not call after commit", llm.calls.length === 2, String(llm.calls.length));
 
-// --- controller: verifier rejection --------------------------------------
-const rejected = await controllerArm({
-  llm: mockLLM({ proposal, step: JSON.stringify({ evidence: "guess", answer: "4", done: true }) }),
+// --- verifier rejection ----------------------------------------------------
+const rejected = await listenerClosureArm({
+  llm: mockLLM({ step: JSON.stringify({ evidence: "guess", answer: "4", done: true }) }),
   task: "what is 2+2?",
   memories,
   budget: new Budget({ maxCalls: 3 }),
