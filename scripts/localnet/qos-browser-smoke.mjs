@@ -191,8 +191,8 @@ try {
   );
   const qosStartText = await a.locator("#messages").innerText();
   if (!qosStartText.includes(`started **${processName}**`)) {
-    safeDetail = qosStartText.split("\\n").slice(-12)
-      .map((line) => redactPeerCaps(line).replace(/\\b[0-9a-f]{64}\\b/gi, "[hash]").slice(0, 220))
+    safeDetail = qosStartText.split("\n").slice(-12)
+      .map((line) => redactPeerCaps(line).replace(/\b[0-9a-f]{64}\b/gi, "[hash]").slice(0, 220))
       .join(" | ");
     throw new Error("QOS process start returned an application error");
   }
