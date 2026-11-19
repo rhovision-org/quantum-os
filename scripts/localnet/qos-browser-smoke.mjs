@@ -125,7 +125,7 @@ try {
     } catch {
       const lines = await page.locator("#messages .msg").allTextContents();
       const states = lines.map((line) => {
-        const m = /^\\s*(\\S+)\\s+channel\\s+(\\S+)\\s+conn\\s+(\\S+)\\s+ice\\s+(\\S+)/i.exec(line);
+        const m = /^\s*(\S+)\s+channel\s+(\S+)\s+conn\s+(\S+)\s+ice\s+(\S+)/i.exec(line);
         return m ? `${m[1]} channel=${m[2]} conn=${m[3]} ice=${m[4]}` : null;
       }).filter(Boolean);
       safeDetail = states.find((state) => state.startsWith(remoteName + " "))
