@@ -3,7 +3,7 @@
 **Scope:** QuantumOS is an outside application over the public Rholo API. No Rholo node plugins, new RPCs, validator configuration, CORS/TLS/admin relaxation, or production operations are part of this work.
 
 **Rholo-side doc PR:** [#604, MERGED](https://github.com/rhovision-org/rholo/pull/604), squash commit 41335ad9347c416f94f2c5e4706caa75f3fce17f; [Patrick APPROVED](https://github.com/rhovision-org/rholo/pull/604#pullrequestreview-5945419252).
-**QuantumOS application PR:** [#298, OPEN](https://github.com/rhovision-org/quantum-os/pull/298), current head 64311f4854c702c80e5fe886938561215c741351.
+**QuantumOS application PR:** [#298, OPEN](https://github.com/rhovision-org/quantum-os/pull/298), current head 3d9c63b7f109fc777832a064d20efd7d11f224d3 (audit update).
 **Current-head CI evidence (40b7442):** [integration run 44453360581](https://github.com/rhovision-org/quantum-os/actions/runs/44453360581) PASS and [general CI run 44453360523](https://github.com/rhovision-org/quantum-os/actions/runs/44453360523) PASS. The integration run executed the updated browser acceptance against two independent Chromium contexts; the newly added goal completion, privacy, and explicit-sharing checks passed. Earlier artifact provenance remains preserved below and is not promoted beyond its stated scope.
 
 ## Provenance and non-promotions
@@ -27,7 +27,7 @@
 | /rholang status and eval in browser | **INCOMPLETE** | Need actual UI transcript matching node source, shard and eval result; explicit unsupported response may be BLOCKED |
 | Signed throwaway deploy | **PASS — EXECUTED, NOT SETTLED** | Real runner signed deploy reached PROCESSED_WITH_SUCCESS; deployResult was an empty array; result correctness not demonstrated |
 | Finalized signed-deploy result | **INCOMPLETE** | last_finalized was UNAVAILABLE (HTTPError); no finality or settlement established |
-| /goal add/list (prior smoke) | **PASS — CI** | Run 44452183688 proved add/list on the initiating browser |
+| /goal add/list | **PASS — CI** | Run 44453360581 proved add/list on the initiating browser |
 | /goal done + two-identity privacy + explicit share | **PASS — CI** | Run 44453360581: completion on owner identity; second identity cannot see private goal; explicit share reaches second browser |
 | /qos start/status/ps | **PASS — CI** | Run 44453360581: browser starts process and reports status/events and process table |
 | /qos suspend/resume/terminate/kill + owner enforcement | **INCOMPLETE** | These browser command variants and owner-negative cases remain outside the latest smoke |
