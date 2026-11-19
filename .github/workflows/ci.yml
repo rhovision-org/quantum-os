@@ -6,7 +6,7 @@ on:
     # checked, so a merge to main is never the first time anything is run.
     branches: [main, work]
   pull_request:
-    branches: [main, work]
+    branches: [main, work, feat/success-framework-panel-289]
 
 jobs:
   rust:
