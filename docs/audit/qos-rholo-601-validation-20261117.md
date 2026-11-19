@@ -4,7 +4,7 @@
 
 **Rholo-side doc PR:** [#604, MERGED](https://github.com/rhovision-org/rholo/pull/604), squash commit 41335ad9347c416f94f2c5e4706caa75f3fce17f; [Patrick APPROVED](https://github.com/rhovision-org/rholo/pull/604#pullrequestreview-5945419252).
 **QuantumOS application PR:** [#298, OPEN](https://github.com/rhovision-org/quantum-os/pull/298), current head 64311f4854c702c80e5fe886938561215c741351.
-**Prior-head CI evidence (64311f4):** [integration run 44452183688](https://github.com/rhovision-org/quantum-os/actions/runs/44452183688) PASS and [general CI run 44452183699](https://github.com/rhovision-org/quantum-os/actions/runs/44452183699) PASS. Earlier artifact provenance remains preserved below; the newly added goal acceptance awaits CI.
+**Current-head CI evidence (40b7442):** [integration run 44453360581](https://github.com/rhovision-org/quantum-os/actions/runs/44453360581) PASS and [general CI run 44453360523](https://github.com/rhovision-org/quantum-os/actions/runs/44453360523) PASS. The integration run executed the updated browser acceptance against two independent Chromium contexts; the newly added goal completion, privacy, and explicit-sharing checks passed. Earlier artifact provenance remains preserved below and is not promoted beyond its stated scope.
 
 ## Provenance and non-promotions
 
@@ -23,13 +23,13 @@
 | Disposable Rholo public HTTP status | **PASS — BUNDLED HISTORICAL BINARY** | Actual Node PID active; status returns source, network and shard; current dev NOT tested |
 | Browser host HTTPS and /rnode proxy | **PASS — ROUTING ONLY** | Real CI curl of browser path and proxied /api/status; not a human browser session |
 | Two independent Signaling WebSocket clients | **PASS — WEBSOCKET ONLY** | Peer discovery and opaque-message relay via real WebSocket; **NOT** two-browser WebRTC or encrypted chat proof |
-| Two actual browser contexts, direct WebRTC + chat | **PASS — CI** | Run 44452183688: both browsers discover each other; both report open direct WebRTC data channels; chat reaches the second browser |
+| Two actual browser contexts, direct WebRTC + chat | **PASS — CI** | Run 44453360581: both browsers discover each other; both report open direct WebRTC data channels; chat reaches the second browser |
 | /rholang status and eval in browser | **INCOMPLETE** | Need actual UI transcript matching node source, shard and eval result; explicit unsupported response may be BLOCKED |
 | Signed throwaway deploy | **PASS — EXECUTED, NOT SETTLED** | Real runner signed deploy reached PROCESSED_WITH_SUCCESS; deployResult was an empty array; result correctness not demonstrated |
 | Finalized signed-deploy result | **INCOMPLETE** | last_finalized was UNAVAILABLE (HTTPError); no finality or settlement established |
 | /goal add/list (prior smoke) | **PASS — CI** | Run 44452183688 proved add/list on the initiating browser |
-| /goal done + two-identity privacy + explicit share | **ADDED — CI PENDING** | New browser-smoke assertions added locally; await CI before promotion to PASS |
-| /qos start/status/ps | **PASS — CI** | Run 44452183688: browser starts process and reports status/events and process table |
+| /goal done + two-identity privacy + explicit share | **PASS — CI** | Run 44453360581: completion on owner identity; second identity cannot see private goal; explicit share reaches second browser |
+| /qos start/status/ps | **PASS — CI** | Run 44453360581: browser starts process and reports status/events and process table |
 | /qos suspend/resume/terminate/kill + owner enforcement | **INCOMPLETE** | These browser command variants and owner-negative cases remain outside the latest smoke |
 | Facilitator | **PASS — PROCESS HEALTH ONLY** | Deterministic --no-ai facilitator alive; no independently verified /facil ask reply |
 | /gov chain handoff | **INCOMPLETE IN #601 UI** | Separate [QuantumOS #299](https://github.com/rhovision-org/quantum-os/pull/299) and [#291 real-chain test](https://github.com/rhovision-org/quantum-os/actions/runs/44160911903) prove disposable Issue/4 proposal, **not** human council ratification, #601 browser acceptance or finalized settlement |
