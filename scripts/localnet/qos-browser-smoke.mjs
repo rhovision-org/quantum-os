@@ -34,7 +34,13 @@ const browser = await chromium.launch({
 });
 const pages = [];
 const peerDiagnostics = [];
-const redactPeerCaps = (text) => text.replace(/cap:peer:[A-Za-z0-9_-]+/g, "[peer-cap]");
+const redactPeerCaps = (text) => text
+  .replace(/cap:(?:peer|room):[A-Za-z0-9_-]+/g, "[capability]")
+  .replace(/https?:\/\/[^\s?#]+(?:\?[^\s#]*)?(?:#[^\s]*)?/g, "[url]");
+function safeTranscript(page) {
+  return page.locator("#messages .msg").allTextContents()
+    .then((lines) => lines.slice(-30).map((line) => redactPeerCaps(line).slice(0, 500)));
+}
 
 function check(label, ok) {
   checks.push({ label, ok: Boolean(ok) });
@@ -212,6 +218,11 @@ try {
   // bearer room capability. Redact them rather than risking a CI log leak.
   const kind = error instanceof Error ? error.name : "Error";
   console.error(`QOS #601 browser acceptance: FAIL at ${stage} (${kind}); ${safeDetail || "diagnostic details redacted"}.`);
+  for (const [index, page] of pages.entries()) {
+    try {
+      const lines = await safeTranscript(page);
+      for (const line of lines) console.error(`TRANSCRIPT_${index + 1}: ${line}`);
+    } catch { /* page may already be closed */ }
   for (const line of peerDiagnostics.slice(-30)) console.error(`PEER_DIAG: ${line}`);
   process.exitCode = 1;
 } finally {
