@@ -197,7 +197,15 @@ node selftest.mjs        # ZFA: 200 peer caps + closure facts + parseTwists
 node dyncap.selftest.mjs # dyncap: sign→verify chain, canonicalization, fork detection, state round-trip
 node facilitator-faq.mjs --selftest          # /facil ask answers QOS/decision basics without AI
 node facilitator-advisor.selftest.mjs        # advisor failures surface (incl. a Claude session limit)
+node listener-controller.selftest.mjs        # listener-triggered memory + verifier-gated COMMIT (mock LLM)
 ```
+
+The **listener controller** is a standalone reasoning harness around the existing
+Claude-backed advisor, not a new model client and not yet part of `agent.mjs`. It owns open
+candidates, listener-triggered memory admission, verifier-gated `COMMIT`, and a call/token budget;
+the advisor supplies `complete()`. See
+[docs/listener-controller.md](../../docs/listener-controller.md). Its selftest uses a deterministic
+mock; real runs inject `makeAdvisor(...).complete` with `--ai-backend claude-code` or `api`.
 
 The dyncap suite proves the witness port matches the browser byte-for-byte
 (so the daemon's attributions verify there). The room key and hashed room id
