@@ -27,10 +27,11 @@
 
 type TokenKind =
   | "process" | "new" | "in" | "parallel" | "if" | "else" | "and" | "or" | "not" | "on"
+  | "let" | "when" | "concurrent" | "require"
   | "ident" | "number" | "string" | "command"
   | "lbrace" | "rbrace" | "lparen" | "rparen"
   | "semi" | "comma" | "eof" | "pipe"
-  | "eq" | "ne" | "lt" | "le" | "gt" | "ge";
+  | "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "assign";
 
 interface Token { kind: TokenKind; value: string; line: number; col: number }
 
@@ -40,7 +41,8 @@ class RhoQuError extends Error {
   }
 }
 
-const KEYWORDS = new Set(["process", "new", "in", "parallel", "if", "else", "and", "or", "not", "on"]);
+const KEYWORDS = new Set(["process", "new", "in", "parallel", "if", "else",
+  "and", "or", "not", "on", "let", "when", "concurrent", "require"]);
 
 function tokenize(src: string): Token[] {
   const tokens: Token[] = [];
@@ -125,6 +127,7 @@ function tokenize(src: string): Token[] {
     if (ch === ">" && src[i + 1] === "=") { push("ge", ">=", line, col); advance(2); continue; }
     if (ch === "<") { push("lt", "<", line, col); advance(1); continue; }
     if (ch === ">") { push("gt", ">", line, col); advance(1); continue; }
+    if (ch === "=") { push("assign", "=", line, col); advance(1); continue; }
 
     // Punctuation
     if (ch === "{") { push("lbrace", "{", line, col); advance(1); continue; }
@@ -146,17 +149,21 @@ function tokenize(src: string): Token[] {
 // AST
 // ---------------------------------------------------------------------------
 
-type Stmt =
+export type Stmt =
   | { kind: "new"; names: string[] }
   | { kind: "parallel"; body: Stmt[] }
   | { kind: "call"; name: string; args: string[] }
   | { kind: "cmd"; text: string }
   | { kind: "if"; cond: Expr; then: Stmt[]; else: Stmt[] }
-  | { kind: "on"; channel: string; binding: string; body: Stmt[] };
+  | { kind: "on"; channel: string; binding: string; body: Stmt[] }
+  | { kind: "let"; name: string; text: string }
+  | { kind: "when"; cond: Expr; then: Stmt[]; else: Stmt[] }
+  | { kind: "require"; cond: Expr }
+  | { kind: "concurrent"; branches: Stmt[][] };
 
 // Expression AST. Evaluated against a RhoQuContext at transpile time;
 // the chosen branch's commands are emitted.
-type Expr =
+export type Expr =
   | { kind: "num"; value: number }
   | { kind: "str"; value: string }
   | { kind: "var"; name: string }              // a bare identifier (looked up in env)
@@ -168,7 +175,7 @@ type Expr =
 type BinOp = "and" | "or" | "eq" | "ne" | "lt" | "le" | "gt" | "ge";
 type UnOp = "not";
 
-interface ProcessDef { name: string; params: string[]; body: Stmt[] }
+export interface ProcessDef { name: string; params: string[]; body: Stmt[] }
 
 interface Program { defs: Map<string, ProcessDef>; top: Stmt[] }
 
@@ -281,10 +288,65 @@ class Parser {
     if (t.kind === "parallel") return this.parseParallel();
     if (t.kind === "if") return this.parseIf();
     if (t.kind === "on") return this.parseOn();
+    if (t.kind === "let") return this.parseLet();
+    if (t.kind === "when") return this.parseWhen();
+    if (t.kind === "require") return this.parseRequire();
+    if (t.kind === "concurrent") return this.parseConcurrent();
     if (t.kind === "command") return this.parseCmd();
     if (t.kind === "ident") return this.parseCall();
     if (t.kind === "semi") { this.eat(); return null; }
     throw new RhoQuError(`unexpected token '${t.value}' (kind: ${t.kind})`, t.line, t.col);
+  }
+
+  /** v2-only: capture the actual structured ID from a command result. */
+  private parseLet(): Stmt {
+    this.expect("let");
+    const name = this.expect("ident").value;
+    this.expect("assign");
+    const cmd = this.expect("command").value;
+    if (!/^[A-Za-z_][A-Za-z0-9_-]{0,63}$/.test(name)) {
+      throw new RhoQuError("invalid binding identifier", this.peek().line, this.peek().col);
+    }
+    return { kind: "let", name, text: cmd };
+  }
+
+  private parseWhen(): Stmt {
+    this.expect("when");
+    const cond = this.parseExpr();
+    this.expect("lbrace");
+    const thenBody = this.parseStmtsUntil("rbrace");
+    this.expect("rbrace");
+    let elseBody: Stmt[] = [];
+    if (this.maybe("else")) {
+      this.expect("lbrace");
+      elseBody = this.parseStmtsUntil("rbrace");
+      this.expect("rbrace");
+    }
+    return { kind: "when", cond, then: thenBody, else: elseBody };
+  }
+
+  private parseRequire(): Stmt {
+    this.expect("require");
+    return { kind: "require", cond: this.parseExpr() };
+  }
+
+  // v2: each statement inside concurrent { … } is an independent branch.
+  // A branch may be a nested sequential parallel { ... } block. Unlike the
+  // legacy parallel construct, this node is never flattened by transpile().
+  private parseConcurrent(): Stmt {
+    this.expect("concurrent");
+    this.expect("lbrace");
+    const branches: Stmt[][] = [];
+    while (this.peek().kind !== "rbrace" && this.peek().kind !== "eof") {
+      if (this.peek().kind === "semi" || this.peek().kind === "pipe") { this.eat(); continue; }
+      const stmt = this.parseStmt();
+      if (stmt) branches.push([stmt]);
+      if (branches.length > 32) throw new RhoQuError("concurrent branch budget exceeded",
+        this.peek().line, this.peek().col);
+    }
+    this.expect("rbrace");
+    if (branches.length === 0) throw new RhoQuError("concurrent requires branches",0,0);
+    return { kind: "concurrent", branches };
   }
 
   private parseOn(): Stmt {
@@ -463,17 +525,156 @@ function substitute(text: string, env: Map<string, string>): string {
   return out;
 }
 
+// First #290 increment: a serializable typed surface IR between the parser
+// and the legacy command lowering. This does NOT claim runtime ID binding,
+// exec-time conditionals, concurrent branches, or a Lean-verified bridge.
+// In particular parallel is intentionally marked compatibility-sequential.
+export interface RhoQuSurfaceIR {
+  schema: "rhoqu.surface.ir/1";
+  execution: "compat-sequential";
+  definitions: ProcessDef[];
+  top: Stmt[];
+}
+
+// Parsing is pure, including for on-handler declarations: no registration or
+// command dispatch happens until an explicit lowering operation.
+export function compileRhoQuSurfaceIR(source: string): RhoQuSurfaceIR {
+  const parsed = new Parser(tokenize(source)).parseProgram();
+  return {
+    schema: "rhoqu.surface.ir/1",
+    execution: "compat-sequential",
+    definitions: [...parsed.defs.values()],
+    top: parsed.top,
+  };
+}
+
+// Imported JSON is untrusted. Validate all reachable nodes, cap recursion and
+// work, and reject unknown operators rather than interpreting an altered plan.
+export function validateRhoQuSurfaceIR(value: unknown): asserts value is RhoQuSurfaceIR {
+  const obj = (x: unknown): x is Record<string, unknown> =>
+    x !== null && typeof x === "object" && !Array.isArray(x);
+  const str = (x: unknown): x is string => typeof x === "string";
+  const strs = (x: unknown): x is string[] => Array.isArray(x) && x.every(str);
+  let remaining = 10000;
+  const enter = (depth: number) => {
+    if (depth > 48 || --remaining < 0) throw new Error("RhoQu IR exceeds structural limits");
+  };
+  const expr = (x: unknown, depth: number): void => {
+    enter(depth);
+    if (!obj(x)) throw new Error("invalid RhoQu IR expression");
+    switch (x.kind) {
+      case "num":
+        if (typeof x.value !== "number" || !Number.isFinite(x.value)) break;
+        return;
+      case "str":
+        if (str(x.value)) return;
+        break;
+      case "var":
+      case "lemma":
+        if (str(x.name)) return;
+        break;
+      case "call":
+        if (str(x.name) && Array.isArray(x.args)) {
+          for (const a of x.args) expr(a, depth + 1);
+          return;
+        }
+        break;
+      case "binop":
+        if (["and","or","eq","ne","lt","le","gt","ge"].includes(String(x.op))) {
+          expr(x.left, depth + 1); expr(x.right, depth + 1);
+          return;
+        }
+        break;
+      case "unop":
+        if (x.op === "not") {
+          expr(x.expr, depth + 1);
+          return;
+        }
+        break;
+    }
+    throw new Error("invalid RhoQu IR expression");
+  };
+  const stmts = (xs: unknown, depth: number): void => {
+    enter(depth);
+    if (!Array.isArray(xs)) throw new Error("RhoQu IR statements must be an array");
+    for (const x of xs) {
+      enter(depth);
+      if (!obj(x)) throw new Error("invalid RhoQu IR statement");
+      switch (x.kind) {
+        case "new":
+          if (strs(x.names) && x.names.length > 0) continue;
+          break;
+        case "parallel":
+          stmts(x.body, depth + 1); continue;
+        case "concurrent":
+          if (!Array.isArray(x.branches) || x.branches.length < 1 || x.branches.length > 32)
+            break;
+          for (const branch of x.branches) stmts(branch, depth + 1);
+          continue;
+        case "let":
+          if (str(x.name) && /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/.test(x.name) &&
+              str(x.text) && x.text.startsWith("/")) continue;
+          break;
+        case "require":
+          expr(x.cond, depth + 1);
+          continue;
+        case "when":
+          expr(x.cond, depth + 1);
+          stmts(x.then, depth + 1);
+          stmts(x.else, depth + 1);
+          continue;
+        case "call":
+          if (str(x.name) && strs(x.args)) continue;
+          break;
+        case "cmd":
+          if (str(x.text) && x.text.startsWith("/")) continue;
+          break;
+        case "if":
+          expr(x.cond, depth + 1);
+          stmts(x.then, depth + 1);
+          stmts(x.else, depth + 1);
+          continue;
+        case "on":
+          if (str(x.channel) && str(x.binding)) {
+            stmts(x.body, depth + 1);
+            continue;
+          }
+          break;
+      }
+      throw new Error("invalid RhoQu IR statement");
+    }
+  };
+  if (!obj(value) || value.schema !== "rhoqu.surface.ir/1"
+    || value.execution !== "compat-sequential" || !Array.isArray(value.definitions)) {
+    throw new Error("unsupported RhoQu IR schema or execution semantics");
+  }
+  const seen = new Set<string>();
+  for (const def of value.definitions) {
+    enter(0);
+    if (!obj(def) || !str(def.name) || !strs(def.params) || seen.has(def.name)) {
+      throw new Error("invalid or duplicate RhoQu IR process definition");
+    }
+    seen.add(def.name);
+    stmts(def.body, 1);
+  }
+  stmts(value.top, 0);
+}
+
+export function lowerRhoQuSurfaceIR(ir: RhoQuSurfaceIR, ctx?: RhoQuContext): string[] {
+  validateRhoQuSurfaceIR(ir);
+  const defs = new Map<string, ProcessDef>(ir.definitions.map(d => [d.name, d]));
+  const program: Program = {defs, top: ir.top};
+  const out: string[] = [];
+  emitStmts(program.top, program, new Map<string, string>(), out, ctx);
+  return out;
+}
+
 /// Transpile a RhoQu program into a flat list of /command strings.
 /// Conditions in `if` statements are evaluated at transpile time against
 /// `ctx`, so the chosen branch's commands are what gets emitted.
 /// Throws RhoQuError on parse or expansion failure.
 export function transpile(source: string, ctx?: RhoQuContext): string[] {
-  const tokens = tokenize(source);
-  const program = new Parser(tokens).parseProgram();
-  const out: string[] = [];
-  const env = new Map<string, string>();
-  emitStmts(program.top, program, env, out, ctx);
-  return out;
+  return lowerRhoQuSurfaceIR(compileRhoQuSurfaceIR(source), ctx);
 }
 
 function emitStmts(stmts: Stmt[], program: Program, env: Map<string, string>, out: string[], ctx?: RhoQuContext): void {
@@ -481,6 +682,9 @@ function emitStmts(stmts: Stmt[], program: Program, env: Map<string, string>, ou
 }
 
 function emitStmt(s: Stmt, program: Program, env: Map<string, string>, out: string[], ctx?: RhoQuContext): void {
+  if (s.kind === "let" || s.kind === "when" || s.kind === "concurrent" || s.kind === "require") {
+    throw new RhoQuError("this construct requires /rhoqu v2 preview and approved runtime",0,0);
+  }
   if (s.kind === "new") {
     for (const name of s.names) out.push(`/grant ${name}`);
     return;
@@ -631,3 +835,20 @@ function callBuiltin(name: string, args: Value[], ctx?: RhoQuContext): Value {
 }
 
 export { RhoQuError };
+
+// The v2 executor uses the same RhoQu expression operators, evaluated at
+// each runtime node against the current room context rather than at parse.
+export function evaluateRhoQuCondition(
+  condition: Expr, bindings: ReadonlyMap<string, string>,
+  context: RhoQuContext,
+): boolean {
+  return truthy(evalExpr(condition, new Map(bindings), context));
+}
+
+// Static process argument expansion only; runtime result variables remain
+// unresolved until a command has actually returned a structured result.
+export function substituteRhoQuArgs(
+  text: string, bindings: ReadonlyMap<string, string>,
+): string {
+  return substitute(text, new Map(bindings));
+}

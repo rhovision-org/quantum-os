@@ -6,7 +6,7 @@ on:
     # checked, so a merge to main is never the first time anything is run.
     branches: [main, work]
   pull_request:
-    branches: [main, work]
+    branches: [main, work, feat/success-framework-panel-289]
 
 jobs:
   rust:
@@ -200,6 +200,21 @@ jobs:
       # pipe ends a command.
       - name: RhoQu success recipes test
         run: node packages/browser/test/rhoqu-success-recipes.test.mjs
+
+      # #290: versioned surface IR must round-trip without changing legacy
+      # command lowering or promoting parallel to concurrency.
+      - name: RhoQu surface IR compatibility test
+        run: node packages/browser/test/rhoqu-surface-ir.test.mjs
+
+      # #290 opt-in runtime, real store-result IDs, and cryptographic package import.
+      - name: RhoQu v2 runtime semantics
+        run: node packages/browser/test/rhoqu-process.test.mjs
+
+      - name: RhoQu v2 actual-result ID capture
+        run: node packages/browser/test/rhoqu-result.test.mjs
+
+      - name: RhoQu signed process packages
+        run: node packages/browser/test/rhoqu-package.test.mjs
 
       # Browser behaviour, against stubbed media. Not a rendering test — it
       # asserts which track ends up in the stream a joiner would be given.

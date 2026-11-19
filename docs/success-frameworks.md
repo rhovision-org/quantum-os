@@ -146,6 +146,34 @@ These are tracked in
 [#290](https://github.com/rhovision-org/quantum-os/issues/290). Recipes in this
 slice use only the shipped subset and do not imply the missing features.
 
+## RhoQu surface IR serialization (first #290 increment)
+
+The existing parser now exposes a versioned JSON-compatible surface plan:
+compileRhoQuSurfaceIR(source) yields a rhoqu.surface.ir/1 record, and
+lowerRhoQuSurfaceIR(record, context) emits the same legacy command sequence.
+The ordinary transpile() call uses this compile-then-lower path.
+
+- The IR carries process definitions, command statements, compile-time
+  conditions and on-handler declarations. Parsing has no dispatch or handler
+  registration side effects.
+- Lowering validates the whole structure, rejects unknown schema or execution
+  semantics, duplicate process definitions and malformed nodes, and bounds
+  nesting/work to avoid untrusted imported-plan expansion.
+- The execution mode is explicitly compat-sequential. In particular,
+  parallel blocks retain their historical ordered expansion. This version
+  provides no concurrent execution semantics or automatic capability grant.
+- On-handler registration occurs only when lowering is explicitly invoked with
+  a context. Importing or parsing JSON does not execute commands.
+
+This is a serialization and compatibility foundation, not the effect-typed,
+Lean-related, runtime-branching RhoProcess execution IR sought by #290.
+It does not implement structured command results, output ID binding,
+exec-time conditions, concurrency, or shareable process-package authority.
+
+The regression suite at packages/browser/test/rhoqu-surface-ir.test.mjs covers
+JSON round-trip replay, golden command equivalence, handler deferral, and
+fail-closed malformed/tampered plans. Legacy RhoQu success recipes still pass.
+
 ## AI integration
 
 AI is an assistant, not an authority:
@@ -194,6 +222,25 @@ preflight state machine, not browser confirmation UX.
 - tested RhoQu recipe library using the shipped subset;
 - a compact private-goal / read-only-group overview;
 - docs and attribution.
+
+## RhoQu v2 opt-in execution and package workflow
+
+The runtime builder, signed package system, and bounded human-authorized
+browser adapter are specified in [RhoQu v2](rhoqu-v2.md). Supported new
+constructs include actual-ID let bindings and $LAST_ID, runtime when/require,
+a read-only concurrently joined branch form, typed effect metadata, and
+signed shareable source/IR bundles. The old parallel/if forms remain
+compatibility-sequential / compile-time.
+
+An imported package is only previewed. It does not execute until the
+operator separately approves the exact local candidate and the browser
+confirmation. Signed package integrity does not prove a remote dyncap
+anchor/private seed relationship; new public keys use explicit TOFU pinning.
+
+The remainder of #290 is the machine-checkable Lean correspondence,
+a reliable event-log-based replay criterion, cross-peer scheduling, and
+strong structured outcomes for all potentially irreversible async commands.
+These cannot be inferred from unit tests or labeled complete.
 
 ## What remains
 
