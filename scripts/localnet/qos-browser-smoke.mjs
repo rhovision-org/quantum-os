@@ -33,6 +33,8 @@ const browser = await chromium.launch({
   args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-webrtc-hide-local-ips-with-mdns"],
 });
 const pages = [];
+const peerDiagnostics = [];
+const redactPeerCaps = (text) => text.replace(/cap:peer:[A-Za-z0-9_-]+/g, "[peer-cap]");
 
 function check(label, ok) {
   checks.push({ label, ok: Boolean(ok) });
@@ -62,6 +64,11 @@ try {
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
     pages.push(page);
+    page.on("console", (message) => {
+      const text = message.text();
+      if (text.includes("[qos-peer]")) peerDiagnostics.push(redactPeerCaps(text));
+    });
+    page.on("pageerror", (error) => peerDiagnostics.push(redactPeerCaps(`pageerror: ${error.name}`)));
     await page.goto(roomUrl.href, { waitUntil: "domcontentloaded", timeout: 45_000 });
     await page.locator("#connect-btn").waitFor({ state: "visible", timeout: 30_000 });
     // The button is present in static HTML before the async app initialization
@@ -169,6 +176,7 @@ try {
   // bearer room capability. Redact them rather than risking a CI log leak.
   const kind = error instanceof Error ? error.name : "Error";
   console.error(`QOS #601 browser acceptance: FAIL at ${stage} (${kind}); ${safeDetail || "diagnostic details redacted"}.`);
+  for (const line of peerDiagnostics.slice(-30)) console.error(`PEER_DIAG: ${line}`);
   process.exitCode = 1;
 } finally {
   await browser.close();
