@@ -1122,6 +1122,11 @@ export class QOSPeer {
     this.attemptAt.set(remotePeerId, Date.now());
     const pc = this.createPeerConnection(remotePeerId);
 
+    // A local offer is one half of a negotiation attempt. Mark it before
+    // awaiting createOffer/setLocalDescription so an incoming offer that
+    // arrives during either await is handled as glare, not as a fresh stable
+    // connection. handleOffer's polite/impolite decision depends on this flag.
+    this.makingOffer.set(remotePeerId, true);
     const ch = pc.createDataChannel("qos");
     this.setupDataChannel(remotePeerId, ch);
     // posix-net.ts's two socket transports — created alongside the chat
