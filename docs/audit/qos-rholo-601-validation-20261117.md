@@ -3,8 +3,8 @@
 **Scope:** QuantumOS is an outside application over the public Rholo API. No Rholo node plugins, new RPCs, validator configuration, CORS/TLS/admin relaxation, or production operations are part of this work.
 
 **Rholo-side doc PR:** [#604, MERGED](https://github.com/rhovision-org/rholo/pull/604), squash commit 41335ad9347c416f94f2c5e4706caa75f3fce17f; [Patrick APPROVED](https://github.com/rhovision-org/rholo/pull/604#pullrequestreview-5945419252).
-**QuantumOS application PR:** [#298, OPEN](https://github.com/rhovision-org/quantum-os/pull/298), current head 3d9c63b7f109fc777832a064d20efd7d11f224d3 (audit update).
-**Current-head CI evidence (40b7442):** [integration run 44453360581](https://github.com/rhovision-org/quantum-os/actions/runs/44453360581) PASS and [general CI run 44453360523](https://github.com/rhovision-org/quantum-os/actions/runs/44453360523) PASS. The integration run executed the updated browser acceptance against two independent Chromium contexts; the newly added goal completion, privacy, and explicit-sharing checks passed. Earlier artifact provenance remains preserved below and is not promoted beyond its stated scope.
+**QuantumOS application PR:** [#298, OPEN](https://github.com/rhovision-org/quantum-os/pull/298), current head f00d68f9dbc64c3c717a5c90913727340abdae66 (browser acceptance update).
+**Current-head CI evidence (f00d68f):** [integration run 44511582996](https://github.com/rhovision-org/quantum-os/actions/runs/44511582996) PASS and [general CI run 44511583003](https://github.com/rhovision-org/quantum-os/actions/runs/44511583003) PASS. The integration run executed the browser acceptance against two independent Chromium contexts; direct WebRTC, chat, `/rholang status`, read-only `/rholang eval return!(42)`, goal completion/privacy/share, and QOS start/status/ps all passed. Earlier artifact provenance remains preserved below and is not promoted beyond its stated scope.
 
 ## Provenance and non-promotions
 
@@ -24,7 +24,7 @@
 | Browser host HTTPS and /rnode proxy | **PASS — ROUTING ONLY** | Real CI curl of browser path and proxied /api/status; not a human browser session |
 | Two independent Signaling WebSocket clients | **PASS — WEBSOCKET ONLY** | Peer discovery and opaque-message relay via real WebSocket; **NOT** two-browser WebRTC or encrypted chat proof |
 | Two actual browser contexts, direct WebRTC + chat | **PASS — CI** | Run 44453360581: both browsers discover each other; both report open direct WebRTC data channels; chat reaches the second browser |
-| /rholang status and eval in browser | **INCOMPLETE** | Need actual UI transcript matching node source, shard and eval result; explicit unsupported response may be BLOCKED |
+| /rholang status and read-only eval in browser | **PASS — CI** | Run 44511582996: status returned node version and `/rholang eval return!(42)` returned the expected value from the disposable bundled node |
 | Signed throwaway deploy | **PASS — EXECUTED, NOT SETTLED** | Real runner signed deploy reached PROCESSED_WITH_SUCCESS; deployResult was an empty array; result correctness not demonstrated |
 | Finalized signed-deploy result | **INCOMPLETE** | last_finalized was UNAVAILABLE (HTTPError); no finality or settlement established |
 | /goal add/list | **PASS — CI** | Run 44453360581 proved add/list on the initiating browser |
