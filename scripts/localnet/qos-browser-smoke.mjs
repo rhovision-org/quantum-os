@@ -23,9 +23,12 @@ const goal = `QOS601_GOAL_${nonce}`;
 const processName = `QOS601_PROCESS_${nonce}`;
 const checks = [];
 let stage = "launch";
+let safeDetail = "";
 const browser = await chromium.launch({
   headless: true,
-  args: ["--no-sandbox", "--disable-dev-shm-usage"],
+  // The two peers share one isolated CI host. Expose its host candidates so
+  // mDNS multicast support is not a hidden dependency of this loopback test.
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-webrtc-hide-local-ips-with-mdns"],
 });
 const pages = [];
 
@@ -99,19 +102,27 @@ try {
   // /conn reports the actual RTCDataChannel state. A WebSocket roster entry
   // alone cannot satisfy this assertion.
   stage = "direct-webrtc-browser-1";
-  await sendCommand(a, "/conn");
-  await a.waitForFunction(
-    () => /channel open\s+conn connected/i.test(document.querySelector("#messages")?.innerText ?? ""),
-    null,
-    { timeout: 30_000 },
-  );
+  const waitForDirectChannel = async (page) => {
+    await sendCommand(page, "/conn");
+    try {
+      await page.waitForFunction(
+        () => /channel open\s+conn connected/i.test(document.querySelector("#messages")?.innerText ?? ""),
+        null,
+        { timeout: 30_000 },
+      );
+    } catch {
+      const lines = await page.locator("#messages .msg").allTextContents();
+      const states = lines.map((line) => {
+        const m = /channel\s+(\S+)\s+conn\s+(\S+)\s+ice\s+(\S+)/i.exec(line);
+        return m ? `channel=${m[1]} conn=${m[2]} ice=${m[3]}` : null;
+      }).filter(Boolean);
+      safeDetail = states.at(-1) ?? "no /conn state row";
+      throw new Error("direct WebRTC channel did not open");
+    }
+  };
+  await waitForDirectChannel(a);
   stage = "direct-webrtc-browser-2";
-  await sendCommand(b, "/conn");
-  await b.waitForFunction(
-    () => /channel open\s+conn connected/i.test(document.querySelector("#messages")?.innerText ?? ""),
-    null,
-    { timeout: 30_000 },
-  );
+  await waitForDirectChannel(b);
   check("both sides report an open direct WebRTC data channel", true);
 
   stage = "chat-relay";
@@ -142,7 +153,7 @@ try {
   // Playwright diagnostics can embed the full navigation URL, including the
   // bearer room capability. Redact them rather than risking a CI log leak.
   const kind = error instanceof Error ? error.name : "Error";
-  console.error(`QOS #601 browser acceptance: FAIL at ${stage} (${kind}); diagnostic details redacted.`);
+  console.error(`QOS #601 browser acceptance: FAIL at ${stage} (${kind}); ${safeDetail || "diagnostic details redacted"}.`);
   process.exitCode = 1;
 } finally {
   await browser.close();
