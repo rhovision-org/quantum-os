@@ -176,6 +176,18 @@ try {
   await sendCommand(a, marker);
   await waitForTranscript(b, marker, "browser-to-browser chat reached the second browser");
 
+  // Exercise the public Rholo HTTP API from the browser command surface. This
+  // remains read-only: status and eval, no signing key and no deploy.
+  stage = "rholang-node-config";
+  await sendCommand(a, "/rholang rnode http://127.0.0.1:40403");
+  await waitForTranscript(a, "✓ rnode set to http://127.0.0.1:40403", "browser configured the disposable Rholo node");
+  stage = "rholang-status";
+  await sendCommand(a, "/rholang status");
+  await waitForTranscript(a, "✓ rnode", "browser /rholang status returned node version", 20_000);
+  stage = "rholang-eval";
+  await sendCommand(a, "/rholang eval return!(42)");
+  await waitForTranscript(a, "→ 42", "browser /rholang eval returned the expected read-only value", 30_000);
+
   stage = "goal-add";
   await sendCommand(a, `/goal add ${goal} | important`);
   await waitForTranscript(a, "🎯 added", "personal /goal add executed in the browser");
@@ -226,7 +238,7 @@ try {
 
   console.log("QOS #601 browser acceptance: PASS");
   for (const item of checks) console.log(`PASS: ${item.label}`);
-  console.log("Coverage: 2 Chromium contexts; signaling membership; direct WebRTC data channels; chat; /goal add+list+done, identity privacy, explicit share; /qos start+status+ps.");
+  console.log("Coverage: 2 Chromium contexts; signaling membership; direct WebRTC data channels; chat; /rholang status+eval; /goal add+list+done, identity privacy, explicit share; /qos start+status+ps.");
 } catch (error) {
   // Playwright diagnostics can embed the full navigation URL, including the
   // bearer room capability. Redact them rather than risking a CI log leak.
