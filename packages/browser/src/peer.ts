@@ -1142,13 +1142,16 @@ export class QOSPeer {
       );
 
       const offer = await pc.createOffer();
+      // Read through a function so TypeScript does not incorrectly keep a
+      // pre-await narrowing across the next asynchronous WebRTC operation.
+      const remoteOfferWon = () => pc.remoteDescription?.type === "offer";
       // A polite peer may have accepted an incoming offer while createOffer()
       // was pending. Its remote description remains an offer after answering;
       // do not overwrite that answer with the now-stale local offer.
-      if (pc.remoteDescription?.type === "offer") return;
+      if (remoteOfferWon()) return;
       await pc.setLocalDescription(offer);
       // An incoming offer can also win while setLocalDescription() is pending.
-      if (pc.remoteDescription?.type === "offer" && pc.localDescription?.type === "answer") return;
+      if (remoteOfferWon() && pc.localDescription?.type === "answer") return;
 
       this.signal({
         type: "offer",
