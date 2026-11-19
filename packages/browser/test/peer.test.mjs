@@ -60,18 +60,37 @@ provide("WebSocket", FakeWS);
 // --- peer connections we can hold in any state -------------------------------
 const made = [];
 class FakePC {
+  static nextCreateOffer = null;
   constructor() {
     this.connectionState = "new";
     this.iceConnectionState = "new";
     this.signalingState = "stable";
-    this.localDescription = { sdp: "a=ice-ufrag:AAAA" };
+    this.localDescription = null;
+    this.remoteDescription = null;
+    this.rollbackCalls = 0;
     made.push(this);
   }
   createDataChannel() { return { readyState: "connecting", send() {}, close() {} }; }
-  async createOffer() { return { type: "offer", sdp: "a=ice-ufrag:AAAA" }; }
+  async createOffer() {
+    const pending = FakePC.nextCreateOffer;
+    FakePC.nextCreateOffer = null;
+    return pending ? pending() : { type: "offer", sdp: "a=ice-ufrag:AAAA" };
+  }
   async createAnswer() { return { type: "answer", sdp: "a=ice-ufrag:BBBB" }; }
-  async setLocalDescription() {}
-  async setRemoteDescription() {}
+  async setLocalDescription(description) {
+    if (description?.type === "rollback") {
+      this.rollbackCalls++;
+      this.localDescription = null;
+      this.signalingState = "stable";
+    } else {
+      this.localDescription = description;
+      this.signalingState = description?.type === "offer" ? "have-local-offer" : "stable";
+    }
+  }
+  async setRemoteDescription(description) {
+    this.remoteDescription = description;
+    this.signalingState = description?.type === "offer" ? "have-remote-offer" : "stable";
+  }
   async addIceCandidate() {}
   getSenders() { return []; }
   addTrack() { return {}; }
@@ -218,6 +237,47 @@ deliver({ type: "peers", peers: ["aaa", "zzz"] });
 await new Promise((r) => setTimeout(r, 700));
 check("joining dials everyone already in the room", offersTo("aaa") === 1 && offersTo("zzz") === 1,
       `aaa:${offersTo("aaa")} zzz:${offersTo("zzz")}`);
+
+// --- glare while createOffer is still pending -------------------------------
+// makingOffer must cover the async createOffer window. A simultaneous remote
+// offer can arrive before the local offer has been installed; in that case the
+// connection is still stable, so do NOT send an invalid rollback. Answer the
+// remote offer, then discard the stale local offer when createOffer resolves.
+{
+  const glare = new QOSPeer({ signalingUrl: "wss://x", roomId: "cap:room:0246", peerId: "a" });
+  await glare.connect();
+  FakeWS.last.onopen?.();
+  await tick();
+
+  let releaseOffer;
+  FakePC.nextCreateOffer = () => new Promise((resolve) => { releaseOffer = resolve; });
+  const mark = sent.length;
+  deliver({ type: "peers", peers: ["b"] });
+  const pc = made.at(-1);
+  check("a local negotiation marks makingOffer before awaiting createOffer",
+        glare.makingOffer.get("b") === true && typeof releaseOffer === "function",
+        String(glare.makingOffer.get("b")));
+
+  deliver({ type: "offer", from: "b", sdp: "a=ice-ufrag:REMOTE" });
+  await tick(); await tick();
+  check("a polite peer answers a colliding offer while signalingState is stable",
+        pc.remoteDescription?.type === "offer" && pc.localDescription?.type === "answer",
+        JSON.stringify({ remote: pc.remoteDescription?.type, local: pc.localDescription?.type }));
+  check("stable-state glare does not attempt an invalid rollback",
+        pc.rollbackCalls === 0, String(pc.rollbackCalls));
+  check("the remote offer was answered on the signaling channel",
+        sent.slice(mark).some((m) => m.type === "answer" && m.to === "b"),
+        JSON.stringify(sent.slice(mark).map((m) => m.type)));
+
+  releaseOffer({ type: "offer", sdp: "a=ice-ufrag:LOCAL" });
+  await tick(); await tick();
+  check("the stale local offer is discarded after the remote offer wins",
+        !sent.slice(mark).some((m) => m.type === "offer" && m.to === "b"),
+        JSON.stringify(sent.slice(mark).map((m) => m.type)));
+  check("makingOffer is cleared after glare resolution",
+        glare.makingOffer.get("b") === false, String(glare.makingOffer.get("b")));
+  glare.disconnect();
+}
 
 // --- an attempt in flight is left alone --------------------------------------
 // This is today's second bug: a connection still negotiating has no open
