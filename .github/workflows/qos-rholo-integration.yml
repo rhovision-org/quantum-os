@@ -60,7 +60,7 @@ jobs:
           QOS_RUN_DIR: ${{ runner.temp }}/qos601
         run: |
           set -euo pipefail
-          trap 'bash scripts/localnet/qos-devnet.sh down || true' EXIT
+          trap 'bash scripts/localnet/qos-devnet.sh down || true; rm -f "$RUNNER_TEMP/qos601-start.txt"' EXIT
           # Keep the one-time bearer URL in a mode-0600 runner-temp file. It is
           # read into this step process only and is never printed or uploaded.
           bash scripts/localnet/qos-devnet.sh up --no-ai > "$RUNNER_TEMP/qos601-start.txt"
