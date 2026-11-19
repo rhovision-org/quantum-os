@@ -209,6 +209,10 @@ try {
   await waitForTranscript(a, `→ shared ${goalId}`, "owner explicitly shared one goal into the room");
   await waitForTranscript(b, `shared goal: ${goal}`, "second browser received the explicitly shared goal");
 
+  stage = "facilitator-faq";
+  await sendCommand(a, "/facil ask what is /goal?");
+  await waitForTranscript(a, "private personal goal surface", "facilitator answered /goal from deterministic FAQ without AI", 20_000);
+
   stage = "qos-start";
   await sendCommand(a, `/qos start ${processName}`);
   // Surface the command's own error instead of turning every failed start into
@@ -238,7 +242,7 @@ try {
 
   console.log("QOS #601 browser acceptance: PASS");
   for (const item of checks) console.log(`PASS: ${item.label}`);
-  console.log("Coverage: 2 Chromium contexts; signaling membership; direct WebRTC data channels; chat; /rholang status+eval; /goal add+list+done, identity privacy, explicit share; /qos start+status+ps.");
+  console.log("Coverage: 2 Chromium contexts; signaling membership; direct WebRTC data channels; chat; /rholang status+eval; /goal add+list+done, identity privacy, explicit share; deterministic /facil ask FAQ; /qos start+status+ps.");
 } catch (error) {
   // Playwright diagnostics can embed the full navigation URL, including the
   // bearer room capability. Redact them rather than risking a CI log leak.
