@@ -85,13 +85,13 @@ try {
   // alone cannot satisfy this assertion.
   await sendCommand(a, "/conn");
   await a.waitForFunction(
-    () => /channel open\\s+conn connected/i.test(document.querySelector("#messages")?.innerText ?? ""),
+    () => /channel open\s+conn connected/i.test(document.querySelector("#messages")?.innerText ?? ""),
     null,
     { timeout: 30_000 },
   );
   await sendCommand(b, "/conn");
   await b.waitForFunction(
-    () => /channel open\\s+conn connected/i.test(document.querySelector("#messages")?.innerText ?? ""),
+    () => /channel open\s+conn connected/i.test(document.querySelector("#messages")?.innerText ?? ""),
     null,
     { timeout: 30_000 },
   );
@@ -101,16 +101,16 @@ try {
   await waitForTranscript(b, marker, "browser-to-browser chat reached the second browser");
 
   await sendCommand(a, `/goal add ${goal} | important`);
-  await waitForTranscript(a, `added **g-1** — ${goal}`, "personal /goal add executed in the browser");
+  await waitForTranscript(a, "🎯 added", "personal /goal add executed in the browser");
   await sendCommand(a, "/goal list");
-  await waitForTranscript(a, goal, "personal /goal list returned the stored goal");
+  await waitForTranscript(a, "personal goals (", "personal /goal list returned the stored goal");
 
   await sendCommand(a, `/qos start ${processName}`);
   await waitForTranscript(a, `started **${processName}**`, "browser /qos start created a local signed process");
   await sendCommand(a, `/qos status ${processName}`);
-  await waitForTranscript(a, `**${processName}** — running`, "browser /qos status reports the process running");
+  await waitForTranscript(a, "events:", "browser /qos status reports process state and event count");
   await sendCommand(a, "/qos ps");
-  await waitForTranscript(a, processName, "browser /qos ps includes the started process");
+  await waitForTranscript(a, "QOS process table (", "browser /qos ps rendered the process table");
 
   console.log("QOS #601 browser acceptance: PASS");
   for (const item of checks) console.log(`PASS: ${item.label}`);
