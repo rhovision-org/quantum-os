@@ -1200,7 +1200,10 @@ export class QOSPeer {
     if (collision && !polite) return;   // impolite peer ignores — its own offer wins
 
     try {
-      if (collision && polite) {
+      // When collision is raised only by makingOffer, createOffer may still
+      // be pending and no local description exists yet. Rollback is only valid
+      // once the local offer has actually changed signalingState.
+      if (collision && polite && pc.signalingState !== "stable") {
         await pc.setLocalDescription({ type: "rollback" });
       }
       await pc.setRemoteDescription({ type: "offer", sdp });
