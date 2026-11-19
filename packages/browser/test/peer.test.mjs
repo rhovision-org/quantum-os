@@ -68,6 +68,7 @@ class FakePC {
     this.localDescription = null;
     this.remoteDescription = null;
     this.rollbackCalls = 0;
+    this.addedIceCandidates = [];
     made.push(this);
   }
   createDataChannel() { return { readyState: "connecting", send() {}, close() {} }; }
@@ -91,7 +92,10 @@ class FakePC {
     this.remoteDescription = description;
     this.signalingState = description?.type === "offer" ? "have-remote-offer" : "stable";
   }
-  async addIceCandidate() {}
+  async addIceCandidate(candidate) {
+    if (!this.remoteDescription) throw new Error("remote description is not installed");
+    this.addedIceCandidates.push(candidate);
+  }
   getSenders() { return []; }
   addTrack() { return {}; }
   close() {
@@ -105,6 +109,7 @@ class FakePC {
 }
 provide("RTCPeerConnection", FakePC);
 provide("RTCSessionDescription", class {});
+provide("RTCIceCandidate", class { constructor(init) { Object.assign(this, init); } });
 
 const { QOSPeer, ringSkipNeighbors } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
@@ -277,6 +282,47 @@ check("joining dials everyone already in the room", offersTo("aaa") === 1 && off
   check("makingOffer is cleared after glare resolution",
         glare.makingOffer.get("b") === false, String(glare.makingOffer.get("b")));
   glare.disconnect();
+}
+
+// --- trickled ICE may beat the offer / remote description --------------------
+{
+  const icePeer = new QOSPeer({ signalingUrl: "wss://x", roomId: "cap:room:0246", peerId: "a" });
+  await icePeer.connect();
+  FakeWS.last.onopen?.();
+  await tick();
+
+  const early = { candidate: "candidate:1 1 udp 1 192.0.2.1 5000 typ host", usernameFragment: "REMOTE" };
+  const duringSetup = { candidate: "candidate:2 1 udp 1 192.0.2.2 5001 typ host", usernameFragment: "REMOTE" };
+  // The first candidate arrives before the peer connection exists.
+  deliver({ type: "ice", from: "b", candidate: early });
+  icePeer.ensureConnected("b");
+  await tick(); await tick();
+  const pc = made.at(-1);
+  // The second arrives after the PC exists but before its remote description.
+  deliver({ type: "ice", from: "b", candidate: duringSetup });
+  deliver({ type: "offer", from: "b", sdp: "v=0\\r\\na=ice-ufrag:REMOTE\\r\\n" });
+  await tick(); await tick(); await tick();
+  check("ICE arriving before PC creation is queued and applied after the offer",
+        pc.addedIceCandidates.some((c) => c.usernameFragment === "REMOTE" && c.candidate === early.candidate),
+        JSON.stringify(pc.addedIceCandidates));
+  check("ICE arriving before remoteDescription is also queued and applied",
+        pc.addedIceCandidates.some((c) => c.usernameFragment === "REMOTE" && c.candidate === duringSetup.candidate),
+        JSON.stringify(pc.addedIceCandidates));
+
+  // A candidate for a new ICE restart may beat its new offer. It must wait for
+  // that generation instead of being applied to the old remote description.
+  const restarted = { candidate: "candidate:3 1 udp 1 192.0.2.3 5002 typ host", usernameFragment: "NEXT" };
+  deliver({ type: "ice", from: "b", candidate: restarted });
+  deliver({ type: "offer", from: "b", sdp: "v=0\\r\\na=ice-ufrag:NEXT\\r\\n" });
+  await tick(); await tick(); await tick();
+  const nextPc = made.at(-1);
+  check("ICE for a new ufrag waits for the matching restarted offer",
+        nextPc !== pc && nextPc.addedIceCandidates.some((c) => c.usernameFragment === "NEXT"),
+        JSON.stringify(nextPc.addedIceCandidates));
+  check("queued ICE is not applied to the stale ICE generation",
+        !pc.addedIceCandidates.some((c) => c.usernameFragment === "NEXT"),
+        JSON.stringify(pc.addedIceCandidates));
+  icePeer.disconnect();
 }
 
 // --- an attempt in flight is left alone --------------------------------------
