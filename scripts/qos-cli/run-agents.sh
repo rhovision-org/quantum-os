@@ -64,7 +64,10 @@ FACIL_KEY="${FACIL_KEY-$(grep '^deployer=' ../localnet/pk.txt 2>/dev/null | cut 
 
 command -v node >/dev/null || { echo "node not found — install Node 18+."; exit 1; }
 [ -d node_modules ] || { echo "Run 'npm install' in scripts/qos-cli first."; exit 1; }
-command -v claude >/dev/null || echo "warning: 'claude' CLI not on PATH — the claude-code AI backend needs it (agents still run, deterministically)."
+AI_BACKEND="${AI_BACKEND:-claude-code}"
+if [ "$AI_BACKEND" = "claude-code" ]; then
+  command -v claude >/dev/null || echo "warning: claude CLI missing — advisor may be unavailable (deterministic behaviour remains)."
+fi
 
 mkdir -p .agents
 for role in "${ROLES[@]}"; do
@@ -86,7 +89,7 @@ for role in "${ROLES[@]}"; do
   # two facilitators with two values — the same key is funded on each.
   rnodeflag=()
   if [ "$role" = "facilitator" ] && [ -n "${FACIL_RNODE:-}" ]; then rnodeflag=(--rnode "$FACIL_RNODE"); fi
-  nohup node agent.mjs --room "$ROOM" --role "$role" --ai --ai-backend claude-code \
+  nohup node agent.mjs --room "$ROOM" --role "$role" --ai --ai-backend "$AI_BACKEND" \
     --state "./.qos-$role" "${persist[@]}" "${keyflag[@]}" "${httpflag[@]}" "${rnodeflag[@]}" >> ".agents/$role.log" 2>&1 &
   echo $! > "$pidf"
   echo "✓ started $role (pid $!)${keyflag[*]:+ [test-REV faucet active]}${httpflag[*]:+ [faucet HTTP :$FAUCET_HTTP]} → scripts/qos-cli/.agents/$role.log"

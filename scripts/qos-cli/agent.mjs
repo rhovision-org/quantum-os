@@ -69,17 +69,18 @@ Options:
   --quiet            Less assertive (halves budget, longer cooldowns).
   --active           More assertive (raises budget, shorter cooldowns).
   --ai               Enable the AI advisor (stimulate + disagreement-synthesis + ask).
-  --ai-backend <b>   api (default; needs ANTHROPIC_API_KEY, pay-as-you-go credits) or
-                     claude-code (shells out to the local \`claude\` CLI = your Claude
-                     subscription, no API credits — must be installed + logged in).
+  --ai-backend <b>   api (Anthropic), claude-code (local CLI), openai
+                     (OPENAI_API_KEY), ollama (local endpoint), or HTTPS base URL
+                     (custom endpoint; QOS_AI_API_KEY optional).
+                     mcp needs an explicit external adapter (stock CLI disabled).
   --about <url>      Link to the room's about page, shown in intro/help
                      (default: the QuantumOS MyRoom page).
   --turn             Fetch a TURN relay (GET /turn). Off by default — the agent
                      is data-only and reaches peers over the flood relay, so a
                      relay only adds ICE-candidate traffic through signaling.
                      Turn on only if this agent must span a NAT boundary itself.
-  --ai-model <m>     Model. api default: claude-haiku-4-5-20251001;
-                     claude-code default: the CLI's configured model.
+  --ai-model <m>     Backend model name. Override QOS_AI_MODEL or defaults
+                     for api/OpenAI/Ollama; custom HTTPS requires a model.
   --key <hex>        TEST-SYSTEM ONLY: a secp256k1 REV deploy key (64 hex
                      chars). Activates \`/<role> faucet [address]\`, which
                      sends a fixed amount of TEST REV to a REV address on

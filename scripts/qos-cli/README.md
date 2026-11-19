@@ -286,7 +286,7 @@ the room, not hard-coded.
 ```bash
 node agent.mjs --room <cap:room:… | room-URL> [--role facilitator] [--name <s>] \
   [--budget 4] [--silent-min 6] [--quiet | --active] \
-  [--ai] [--ai-backend api|claude-code] [--state ./.qos-agent] [--key <hex>]
+  [--ai] [--ai-backend api|claude-code|openai|ollama|URL] [--state ./.qos-agent] [--key <hex>]
 ```
 
 **Run the persistent room** (detached, on a Claude subscription): `bash run-agents.sh`
@@ -561,7 +561,7 @@ agreement* (name the crux + a path forward) — plus the `/facil ask`, `/facil o
 and `/facil chair` flows. It is
 **advisory only**: it proposes a nudge that the same throttle gates, and is called
 *only when a post would be allowed*, so usage stays bounded. The daemon is fully
-functional without it. Two backends (`--ai-backend`):
+functional without it. Provider-neutral adapters (`--ai-backend`):
 
 - **`api`** (default) — Anthropic Messages API via `fetch` (no SDK dep), key from
   `ANTHROPIC_API_KEY`; pay-as-you-go API credits.
@@ -569,6 +569,23 @@ functional without it. Two backends (`--ai-backend`):
   **Claude subscription** (Pro/Max) instead of API credits. Requires the `claude` CLI
   installed and logged in (`claude` once interactively to authenticate). No key needed:
   `node facilitator.mjs --room <…> --ai --ai-backend claude-code`.
+- **OpenAI-compatible API:** select --ai-backend openai and set OPENAI_API_KEY,
+  optionally --ai-model or QOS_AI_MODEL. The model can only propose text.
+- **Local Ollama / llama.cpp:** --ai-backend ollama; optionally set OLLAMA_BASE_URL
+  (default localhost:11434/v1) and --ai-model for an installed local model.
+  No remote key is required.
+- **Custom endpoint:** --ai-backend https://example.com/v1 with QOS_AI_API_KEY
+  (optional if auth is not required), plus a model name. Non-loopback HTTP
+  is rejected; OPENAI_API_KEY is never sent to custom servers.
+- **MCP:** callers can inject an ask(system,messages) adapter through
+  makeAdvisor. The stock CLI does NOT bundle an MCP connection or expose
+  tools; selecting mcp without a connected adapter disables AI.
+
+All adapters remain advisory-only. Browser-side command authorization and
+human approval are unchanged. Error bodies are not reflected into the chat.
+For run-agents.sh, override AI_BACKEND=openai or ollama rather than default
+claude-code and set credentials in the operator environment.
+
 
 `/facil ask` basics about QuantumOS and group decisions are answered by
 [`facilitator-faq.mjs`](facilitator-faq.mjs) without either backend. When the

@@ -89,6 +89,9 @@ jobs:
       - name: Facilitator advisor error selftest
         run: node scripts/qos-cli/facilitator-advisor.selftest.mjs
 
+      - name: Provider-neutral advisor integration selftest
+        run: node scripts/qos-cli/ai-provider.selftest.mjs
+
       # The faucet's HTTP face (faucet-http.mjs) against a stub send — the
       # per-address cooldown, the per-client hourly cap, X-Forwarded-For as
       # the client, the JSON/CORS shape a wallet codes against. Dependency-
