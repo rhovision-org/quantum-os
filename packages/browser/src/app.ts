@@ -19,6 +19,7 @@ import { findDiscrepancies, losingPeersIn, normalizeValue,
          SAMPLE_SIZE, PROBE_WINDOW_MS,
          type Observation } from "./probe.js";
 import { transpile as rhoquTranspile, RhoQuError, type RhoQuContext, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
+import { processFromCommands, executeRhoProcess } from "./rhoqu-process.js";
 import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
          type Poll, type PollMethod, type PollOption } from "./polls.js";
 import { canonLemma, parseRefTokens, parseLemmaDecl, splitLemmaNameArg } from "./lemma-parse.js";
@@ -6291,12 +6292,13 @@ function handleCommand(raw: string): string[] {
       }
       const handlersAfter = rhoquHandlers.length;
       sys(`· rhoqu transpiled to ${cmds.length} command${cmds.length === 1 ? "" : "s"}`);
-      let executed = 0;
-      for (const c of cmds) {
-        try { runInput(c); executed++; }
-        catch (err) { sys(`· rhoqu error on '${c}': ${String(err)}`); }
+      const process = processFromCommands(cmds);
+      const results = executeRhoProcess(process, (command) => runInput(command));
+      const executed = results.filter((result) => result.ok).length;
+      for (const result of results) {
+        if (!result.ok) sys(`· rhoqu error on '${result.command}': ${result.error}`);
       }
-      sys(`· rhoqu: ${executed} executed${handlersAfter > 0 ? `, ${handlersAfter} on-handler${handlersAfter === 1 ? "" : "s"} active` : ""}`);
+      sys(`· rhoqu: ${executed}/${results.length} executed${handlersAfter > 0 ? `, ${handlersAfter} on-handler${handlersAfter === 1 ? "" : "s"} active` : ""}`);
       break;
     }
 
