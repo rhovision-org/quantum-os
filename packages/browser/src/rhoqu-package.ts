@@ -22,7 +22,9 @@ function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
   const object = value as Record<string, unknown>;
-  return "{" + Object.keys(object).sort().map(key => JSON.stringify(key) + ":" + canonicalJson(object[key])).join(",") + "}";
+  // JSON has no undefined object value: omit optional fields instead of hashing
+  // a non-JSON token that serialization would later drop.
+  return "{" + Object.keys(object).filter(key => object[key] !== undefined).sort().map(key => JSON.stringify(key) + ":" + canonicalJson(object[key])).join(",") + "}";
 }
 async function sha256(value: string): Promise<string> {
   const subtle = globalThis.crypto?.subtle;

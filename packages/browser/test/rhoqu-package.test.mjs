@@ -31,6 +31,9 @@ ok("import preserves typed process and provenance", JSON.stringify(imported.proc
 const reordered = { provenance: { source: provenance.source, exportedAt: provenance.exportedAt, authorAnchor: provenance.authorAnchor }, process: process, version: 1, format: "rho-process-package" };
 const packageTwo = await createRhoProcessPackage(reordered.process, reordered.provenance);
 ok("canonical hash is stable across object key ordering", packageOne.contentHash === packageTwo.contentHash);
+const optionalSourcePackage = await serializeRhoProcessPackage(process, { authorAnchor: provenance.authorAnchor, exportedAt: provenance.exportedAt, source: undefined });
+const optionalSourceImported = await importRhoProcessPackage(optionalSourcePackage);
+ok("canonical JSON omits undefined optional provenance fields and round-trips", !Object.hasOwn(JSON.parse(optionalSourcePackage).provenance, "source") && optionalSourceImported.provenance.source === undefined);
 const tampered = JSON.parse(serialized);
 tampered.process.steps[0].command = "/poll new tampered";
 let tamperRejected = false;
