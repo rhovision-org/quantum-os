@@ -175,6 +175,9 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   ok("journal replay applies lifecycle transitions", procA?.state === "exited" && procA?.exitCode === 0);
   ok("reverse delivery reaches the same kernel digest", await replayA.kernel.stateDigest() === await replayB.kernel.stateDigest());
   ok("replay reports every accepted lifecycle event", replayA.applied.length === events.length && replayA.rejected.length === 0);
+  const incomplete = replayQosKernel(events.slice(1));
+  ok("replay refuses lifecycle without its causal start", incomplete.kernel.list().length === 0 && incomplete.rejected.length > 0);
+  ok("replay reports missing causal dependencies", incomplete.missingDependencies.length > 0);
 }
 
 // --- deterministic replay -------------------------------------------------

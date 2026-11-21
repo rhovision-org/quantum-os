@@ -408,9 +408,15 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
   const order = canonicalEventOrder(admitted);
   const kernel = new QosKernel();
   const starts = new Map<string, QosEvent>();
+  const missingEventHashes = new Set(order.missingDependencies.map((item) => item.eventHash));
+  const cyclicEventHashes = new Set(order.cyclicHashes);
   const applied: string[] = [];
   const rejected: { hash: string; reason: string }[] = [];
   for (const event of order.ordered) {
+    if (missingEventHashes.has(event.hash) || cyclicEventHashes.has(event.hash)) {
+      rejected.push({ hash: event.hash, reason: "event has unresolved or cyclic causal dependencies" });
+      continue;
+    }
     if (event.type === "process-start") {
       const name = typeof event.payload.name === "string" ? event.payload.name : event.process;
       const result = kernel.createProcess({ name, owner: event.source, pid: event.process });
