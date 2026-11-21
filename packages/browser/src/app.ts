@@ -6313,7 +6313,7 @@ function handleCommand(raw: string): string[] {
       void executeRhoProcessWithStoreBindingsAsync(process, (command) => runInput(command), (command) => {
         if (/^\/poll\s+new\b/i.test(command)) return [...pollStore.keys()];
         if (/^\/lemma\b/i.test(command)) return [...lemmaStore.keys()];
-        if (/^\/note\s+grant\b/i.test(command)) return [...noteStore.keys()];
+        if (/^\/note\s+(?:grant|merge)\b/i.test(command)) return [...noteStore.keys()];
         if (/^\/rdv\s+swap\b/i.test(command)) return [...proposals.keys()];
         if (/^\/qos\s+start\b/i.test(command)) return qosCommandFor(activeRoom)?.list().map((process) => process.id) ?? [];
         return [];
