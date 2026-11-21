@@ -63,7 +63,7 @@ function validNode(value: unknown): value is RhoProcessNode {
 }
 function validPackageBase(value: unknown): boolean {
   return isRecord(value) && value.format === "rho-process-package" && value.version === 1
-    && isRecord(value.provenance) && typeof value.provenance.authorAnchor === "string" && value.provenance.authorAnchor.length > 0
+    && isRecord(value.provenance) && typeof value.provenance.authorAnchor === "string" && /^[0-9a-f]{64}$/i.test(value.provenance.authorAnchor)
     && typeof value.provenance.exportedAt === "string"
     && (value.provenance.source === undefined || typeof value.provenance.source === "string")
     && validSequence(value.process);

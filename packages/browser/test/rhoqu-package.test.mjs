@@ -22,7 +22,7 @@ const process = { kind: "sequence", steps: [
     { kind: "sequence", steps: [{ kind: "when", condition: { kind: "call", name: "connected", args: [] }, env: {}, then: { kind: "sequence", steps: [{ kind: "command", command: "/send ready" }] } }] },
   ] },
 ]};
-const provenance = { authorAnchor: "dyncap-anchor-test", exportedAt: "2026-11-21T00:00:00.000Z", source: "rhoqu-golden-test" };
+const provenance = { authorAnchor: "a".repeat(64), exportedAt: "2026-11-21T00:00:00.000Z", source: "rhoqu-golden-test" };
 const packageOne = await createRhoProcessPackage(process, provenance);
 const serialized = await serializeRhoProcessPackage(process, provenance);
 const imported = await importRhoProcessPackage(serialized);
@@ -39,6 +39,9 @@ ok("import rejects content tampering", tamperRejected);
 let schemaRejected = false;
 try { await importRhoProcessPackage(JSON.stringify({ format: "rho-process-package", version: 99 })); } catch (error) { schemaRejected = String(error).includes("schema validation"); }
 ok("import rejects unsupported schema", schemaRejected);
+let anchorRejected = false;
+try { await createRhoProcessPackage(process, { authorAnchor: "not-a-dyncap-anchor", exportedAt: provenance.exportedAt }); } catch (error) { anchorRejected = String(error).includes("schema validation"); }
+ok("package rejects malformed dyncap anchor", anchorRejected);
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-package.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
 
