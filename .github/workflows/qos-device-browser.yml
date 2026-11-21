@@ -1,0 +1,54 @@
+name: QOS browser device acceptance (#283)
+on:
+  push:
+    branches: [feat/qos-kernel-devices-283]
+  pull_request:
+    branches: [main, work, feat/qos-kernel-identity-282]
+    paths:
+      - "packages/browser/src/qos-*.ts"
+      - "packages/browser/src/app.ts"
+      - "packages/browser/src/palette.ts"
+      - "packages/browser/test/qos-device-opfs-ci.mjs"
+      - "scripts/localnet/qos-vfs-opfs-ci.py"
+      - ".github/workflows/qos-device-browser.yml"
+permissions:
+  contents: read
+jobs:
+  browser-device:
+    name: Chromium grant-gated OPFS device, ZFA and reload
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm build:wasm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:signaling
+      - name: Install disposable Chromium
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qos283-playwright" --no-save --no-package-lock playwright@1.65.1
+          "$RUNNER_TEMP/qos283-playwright/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Actual browser device operations and passive replay
+        env:
+          QOS_PLAYWRIGHT_MODULE: ${{ runner.temp }}/qos283-playwright/node_modules/playwright/index.mjs
+        run: python3 scripts/localnet/qos-vfs-opfs-ci.py device
+      - name: Upload verified browser evidence
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qos283-browser-device
+          path: |
+            qos283-opfs-evidence.json
+            qos283-opfs-evidence.SHA256SUMS
+          if-no-files-found: error
