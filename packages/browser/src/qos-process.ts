@@ -629,7 +629,7 @@ export function compareEvents(a: QosEvent, b: QosEvent): number {
     compareStrings(a.hash, b.hash);
 }
 
-export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier" | "memory-frontier" | "vfs-version" | "shell-version" | "proxy-version" | "observed-receipt" | "device-ticket";
+export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier" | "memory-frontier" | "vfs-version" | "shell-version" | "proxy-version" | "observed-receipt" | "device-ticket" | "init-version";
 export interface QosDependency { hash: string; kind: QosDependencyKind }
 /** Only schema-defined references are causal, never arbitrary payload strings. */
 export function eventDependencies(event: QosEvent): QosDependency[] {
@@ -705,6 +705,13 @@ export function eventDependencies(event: QosEvent): QosDependency[] {
     }
     if(Array.isArray(args.authorityFrontier)&&args.authorityFrontier.length<=4096)
       for(const hash of args.authorityFrontier)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"handle-version"});
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&typeof event.payload.op==="string"&&
+     ["pkg_install","pkg_list","pkg_remove","svc_boot","svc_list","svc_status","svc_start","svc_stop","svc_restart","svc_health"].includes(event.payload.op)&&isRecord(event.payload.args)){
+    const a=event.payload.args;
+    for(const key of ["handleVersion","initVersion"])if(typeof a[key]==="string"&&HEX64.test(a[key] as string))refs.push({hash:a[key] as string,kind:key==="initVersion"?"init-version":"handle-version"});
+    if(Array.isArray(a.authorityFrontier)&&a.authorityFrontier.length<=4096)for(const hash of a.authorityFrontier)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"handle-version"});
+    if(Array.isArray(a.bindings)&&a.bindings.length<=8)for(const b of a.bindings)if(isRecord(b)&&typeof b.version==="string"&&HEX64.test(b.version))refs.push({hash:b.version,kind:"handle-version"});
   }
   return refs;
 }

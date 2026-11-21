@@ -4,9 +4,9 @@ on:
   push:
     # `work` is where changes land first; `main` is what is deployed. Both are
     # checked, so a merge to main is never the first time anything is run.
-    branches: [main, work, feat/qos-kernel-scheduler-278, feat/qos-kernel-memory-279, feat/qos-kernel-vfs-280, feat/qos-kernel-shell-281, feat/qos-kernel-identity-282, feat/qos-kernel-devices-283]
+    branches: [main, work, feat/qos-kernel-scheduler-278, feat/qos-kernel-memory-279, feat/qos-kernel-vfs-280, feat/qos-kernel-shell-281, feat/qos-kernel-identity-282, feat/qos-kernel-devices-283, feat/qos-kernel-init-284]
   pull_request:
-    branches: [main, work, feat/qos-kernel-journal-replay-317, feat/qos-kernel-scheduler-278, feat/qos-kernel-memory-279, feat/qos-kernel-vfs-280, feat/qos-kernel-shell-281, feat/qos-kernel-identity-282]
+    branches: [main, work, feat/qos-kernel-journal-replay-317, feat/qos-kernel-scheduler-278, feat/qos-kernel-memory-279, feat/qos-kernel-vfs-280, feat/qos-kernel-shell-281, feat/qos-kernel-identity-282, feat/qos-kernel-devices-283]
 
 jobs:
   rust:
@@ -174,6 +174,8 @@ jobs:
         run: node packages/browser/test/qos-identity.test.mjs
       - name: QOS capability device and observation replay test
         run: node packages/browser/test/qos-device.test.mjs
+      - name: QOS signed packages and deterministic init test
+        run: node packages/browser/test/qos-init.test.mjs
       - name: QOS isolated syscall trace test
         run: node packages/browser/test/qos-syscall-journal.test.mjs
 

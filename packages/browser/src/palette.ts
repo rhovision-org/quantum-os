@@ -116,6 +116,8 @@ export const CMD_HELP: Record<string, string[]> = {
   goal: ["/goal add <text> [| urgent-important|important|urgent|neither] — add a private personal goal.",
          "/goal list · done <id> · review · remove <id> — local to this dyncap identity; no broadcast.",
          "/goal share <id> — explicitly share one goal into the room as a signed envelope."],
+  pkg: ["/pkg install <process> | signed package, pinned publisher, capability bindings JSON", "/pkg list <process>; /pkg remove <process> <name>"],
+  svc: ["/svc boot <process> | qos-init/1 manifest JSON", "/svc list <process>; /svc start|stop|restart|status|health <process> <name>"],
   dev: ["/dev define <process> <kind> <rights> — register a logical device grant.",
     "/dev open <process> <grant> <rights>; /dev bind <process> <session>",
     "/dev list <process>; /dev read <process> <session> <limit>; /dev write <process> <session> | hex",
