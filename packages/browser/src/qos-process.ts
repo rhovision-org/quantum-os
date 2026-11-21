@@ -554,9 +554,12 @@ export class QosEventLog {
   /// Accepted events in canonical order. Events from a forked source remain
   /// out: `forkedSources` is the quarantine list.
   events(): QosEvent[] {
-    return [...this.eventsByHash.values()]
-      .filter((event) => !this.forkedSources.has(event.source))
-      .sort(compareEvents);
+    const accepted = [...this.eventsByHash.values()]
+      .filter((event) => !this.forkedSources.has(event.source));
+    // The journal's public view is causal, not merely tuple-sorted. Consumers
+    // that need diagnostics must call canonicalEventOrder explicitly; this view
+    // remains total and deterministic for partial/offline logs.
+    return canonicalEventOrder(accepted).ordered;
   }
 
   eventsFor(process: string): QosEvent[] {

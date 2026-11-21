@@ -285,6 +285,10 @@ console.log("\nexample composition — anchored");
   const reverse = await Q.orchestrate(logReverse.events(), { forkedSources: logReverse.forkedSources });
   eq("arrival order does not change the final digest", forward.finalDigest, reverse.finalDigest);
   eq("arrival order does not change the state digest", forward.stateDigest, reverse.stateDigest);
+  eq("the public event-log view uses causal canonical ordering",
+    logForward.events().map((event) => event.hash), logReverse.events().map((event) => event.hash));
+  eq("the canonical public event view matches the explicit causal order",
+    logForward.events().map((event) => event.hash), Q.canonicalEventOrder(run.all).ordered.map((event) => event.hash));
   ok("the rholalc-facing parser round-trips every emitted envelope",
     run.all.every((event) => {
       const parsed = Q.parseQosEvent(clone(event));
