@@ -15,7 +15,9 @@ const root = join(here, "..");
 const bundle = await build({
   stdin: {
     contents: `
-      export { QosKernel, QOS_ABI_VERSION, QOS_RIGHTS, QOS_ALL_RIGHTS, QOS_SYSCALLS, QOS_SIGNALS } from "./src/qos-kernel.ts";
+      export { QosKernel, replayQosKernel, QOS_ABI_VERSION, QOS_RIGHTS, QOS_ALL_RIGHTS, QOS_SYSCALLS, QOS_SIGNALS } from "./src/qos-kernel.ts";
+      export { QosProcessRoom } from "./src/qos-process.ts";
+      export { newDynCapState } from "./src/dyncap.ts";
     `,
     resolveDir: root,
     loader: "ts",
@@ -27,7 +29,7 @@ const bundle = await build({
   write: false,
 });
 const mod = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { QosKernel, QOS_ABI_VERSION, QOS_RIGHTS, QOS_ALL_RIGHTS, QOS_SYSCALLS, QOS_SIGNALS } = mod;
+const { QosKernel, replayQosKernel, QosProcessRoom, newDynCapState, QOS_ABI_VERSION, QOS_RIGHTS, QOS_ALL_RIGHTS, QOS_SYSCALLS, QOS_SIGNALS } = mod;
 
 let pass = 0, fail = 0;
 const ok = (label, cond, detail = "") => {
@@ -151,6 +153,28 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   const doubleExit = k.exit(second.value.pid, 0);
   ok("double exit is EINVAL", errno(doubleExit) === "EINVAL", errno(doubleExit));
   ok("exited process has no handles", (k.getProcess(second.value.pid)?.handles.length ?? -1) === 0);
+}
+
+// --- journal-backed kernel replay ------------------------------------------
+{
+  const identity = await newDynCapState(new Uint8Array(32).fill(21));
+  const room = new QosProcessRoom({
+    roomId: "cap:room:03010563656127610341634101250325", identity,
+    transport: { broadcast: () => {} },
+  });
+  const started = await room.startProcess("replay-worker", { entropyHex: "aa" });
+  await room.suspend(started.processId, started.event, "pause for replay");
+  await room.resume(started.processId, started.event, "continue");
+  await room.terminate(started.processId, started.event, "complete");
+  const events = room.log.events();
+  const replayA = replayQosKernel(events);
+  const replayB = replayQosKernel([...events].reverse());
+  const procA = replayA.kernel.getProcess(started.processId);
+  const procB = replayB.kernel.getProcess(started.processId);
+  ok("journal replay reconstructs process identity", procA?.name === "replay-worker" && procA?.owner === identity.anchor);
+  ok("journal replay applies lifecycle transitions", procA?.state === "exited" && procA?.exitCode === 0);
+  ok("reverse delivery reaches the same kernel digest", await replayA.kernel.stateDigest() === await replayB.kernel.stateDigest());
+  ok("replay reports every accepted lifecycle event", replayA.applied.length === events.length && replayA.rejected.length === 0);
 }
 
 // --- deterministic replay -------------------------------------------------

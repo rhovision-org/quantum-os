@@ -10,7 +10,7 @@
 // read/write/stat/VFS, scheduler ticks, devices, services, and the qos.syscall/1
 // wire envelope.
 
-import { canonicalJson, sha256Hex } from "./qos-process.js";
+import { canonicalJson, canonicalEventOrder, sha256Hex, type QosEvent } from "./qos-process.js";
 
 export const QOS_ABI_VERSION = 0;
 
@@ -248,6 +248,29 @@ export class QosKernel {
     return ok(count);
   }
 
+  /** Apply a trusted, already-validated journal lifecycle transition during replay.
+   * This is not a syscall: event admission and authority validation belong to QosEventLog.
+   */
+  replayLifecycle(pid: string, transition: "suspend" | "resume" | "terminate"): QosResult<true> {
+    const target = this.processes.get(pid);
+    if (!target) return err("ENOENT", "target does not exist");
+    if (transition === "suspend") {
+      if (target.state !== "running") return err("EINVAL", "target is not running");
+      target.state = "suspended";
+      return ok(true);
+    }
+    if (transition === "resume") {
+      if (target.state !== "suspended") return err("EINVAL", "target is not suspended");
+      target.state = "running";
+      return ok(true);
+    }
+    if (target.state !== "running" && target.state !== "suspended") return err("EINVAL", "target is not active");
+    target.state = "exited";
+    target.exitCode = 0;
+    target.handles.clear();
+    return ok(true);
+  }
+
   /** Send a signal. Self-signalling is allowed; another process requires a
    *  live handle to `proc:<target>` carrying SIGNAL. */
   signal(callerPid: string, targetPid: string, sig: QosSignal): QosResult<true> {
@@ -365,4 +388,47 @@ export class QosKernel {
       pending: [...p.pending],
     };
   }
+}
+
+export interface QosKernelReplayResult {
+  kernel: QosKernel;
+  applied: string[];
+  rejected: { hash: string; reason: string }[];
+  missingDependencies: { eventHash: string; dependencyHash: string; kind: "prev" | "grant" }[];
+  cyclicHashes: string[];
+}
+
+/** Reconstruct the kernel process table from a verified qos.event/1 event set.
+ * Input admission (hash/dyncap/fork verification) must happen before this call.
+ * The replay is deterministic for any delivery permutation of the same event set.
+ */
+export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<string> = []): QosKernelReplayResult {
+  const forked = new Set(forkedSources);
+  const admitted = events.filter((event) => !forked.has(event.source));
+  const order = canonicalEventOrder(admitted);
+  const kernel = new QosKernel();
+  const starts = new Map<string, QosEvent>();
+  const applied: string[] = [];
+  const rejected: { hash: string; reason: string }[] = [];
+  for (const event of order.ordered) {
+    if (event.type === "process-start") {
+      const name = typeof event.payload.name === "string" ? event.payload.name : event.process;
+      const result = kernel.createProcess({ name, owner: event.source, pid: event.process });
+      if (!result.ok) rejected.push({ hash: event.hash, reason: result.detail ?? result.errno });
+      else { starts.set(event.process, event); applied.push(event.hash); }
+      continue;
+    }
+    if (event.type !== "process-suspend" && event.type !== "process-resume" && event.type !== "process-terminate") continue;
+    const start = starts.get(event.process);
+    if (!start) { rejected.push({ hash: event.hash, reason: "lifecycle event precedes or lacks process-start" }); continue; }
+    if (event.source !== start.source || event.capability !== start.capability) {
+      rejected.push({ hash: event.hash, reason: "lifecycle event is not root-attributed" });
+      continue;
+    }
+    const transition = event.type === "process-suspend" ? "suspend" : event.type === "process-resume" ? "resume" : "terminate";
+    const result = kernel.replayLifecycle(event.process, transition);
+    if (!result.ok) rejected.push({ hash: event.hash, reason: result.detail ?? result.errno });
+    else applied.push(event.hash);
+  }
+  return { kernel, applied, rejected, missingDependencies: order.missingDependencies, cyclicHashes: order.cyclicHashes };
 }
