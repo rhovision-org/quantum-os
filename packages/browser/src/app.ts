@@ -6799,7 +6799,8 @@ function handleCommand(raw: string): string[] {
       // directly and only: never an arbitrary external host (no browser
       // ever can), and never through the chat flood relay (a socket is
       // point-to-point by definition — see peer.ts's SocketChannelKind).
-      // No capability gating yet — anyone can /socket listen or connect.
+      // Socket listeners and outbound connections require explicit local approval.
+      // RhoQu and /script reach this same dispatcher, so the gate applies there too.
       if (!qpeer || !posixNet) { sys("not connected to a room"); break; }
       const net = posixNet;
       // accept()/onData/onClose fire later, possibly after the user has
@@ -6833,15 +6834,24 @@ function handleCommand(raw: string): string[] {
         if (!Number.isInteger(port) || port < 0) { sys("usage: /socket listen <port> [stream|dgram]"); break; }
         const key = `${type}:${port}`;
         if (socketListeners.has(key)) { sys(`already listening on ${key}`); break; }
-        const unlisten = net.listen(port, type, (socket, fromPeerId) => {
-          const prev = activeRoom; setActiveRoom(cmdCtx);
-          try {
-            addMessage("", `↳ ${peerLabel(fromPeerId)} connected on ${key}  (conn ${socket.connId})`, "system");
-            wireSocket(socket, peerLabel(fromPeerId));
-          } finally { setActiveRoom(prev); }
-        });
-        socketListeners.set(key, { port, type, unlisten });
-        sys(`✓ listening on ${key}`);
+        void (async () => {
+          const ok = await confirmDialog(
+            "Approve socket listener?",
+            `Allow incoming mesh connections on ${key}? This exposes a socket endpoint to peers in this room.`,
+            "Start listener",
+          );
+          if (!ok) { sys(`socket listen ${key}: cancelled`); return; }
+          if (socketListeners.has(key)) { sys(`already listening on ${key}`); return; }
+          const unlisten = net.listen(port, type, (socket, fromPeerId) => {
+            const prev = activeRoom; setActiveRoom(cmdCtx);
+            try {
+              addMessage("", `↳ ${peerLabel(fromPeerId)} connected on ${key}  (conn ${socket.connId})`, "system");
+              wireSocket(socket, peerLabel(fromPeerId));
+            } finally { setActiveRoom(prev); }
+          });
+          socketListeners.set(key, { port, type, unlisten });
+          sys(`✓ listening on ${key}`);
+        })();
         break;
       }
 
@@ -6864,18 +6874,26 @@ function handleCommand(raw: string): string[] {
         const targetId = resolvePeer(targetToken);
         if (!targetId || !Number.isInteger(port)) { sys("usage: /socket connect <peer> <port> [stream|dgram]"); break; }
         const label = peerLabel(targetId);
-        sys(`connecting to ${label}:${port} (${type})…`);
-        void net.connect(targetId, port, type).then((socket) => {
+        void (async () => {
+          const ok = await confirmDialog(
+            "Approve socket connection?",
+            `Connect to ${label} (${targetId}) on port ${port} using ${type}? This opens a direct peer socket.`,
+            "Connect",
+          );
+          if (!ok) { sys(`socket connect ${label}:${port}: cancelled`); return; }
+          sys(`connecting to ${label}:${port} (${type})…`);
+          void net.connect(targetId, port, type).then((socket) => {
           const prev = activeRoom; setActiveRoom(cmdCtx);
           try {
             wireSocket(socket, label);
             addMessage("", `✓ connected to ${label}:${port} — conn ${socket.connId}`, "system");
           } finally { setActiveRoom(prev); }
-        }).catch((e: Error) => {
-          const prev = activeRoom; setActiveRoom(cmdCtx);
-          try { addMessage("", `✗ ${label}:${port} — ${e.message}`, "system"); }
-          finally { setActiveRoom(prev); }
-        });
+          }).catch((e: Error) => {
+            const prev = activeRoom; setActiveRoom(cmdCtx);
+            try { addMessage("", `✗ ${label}:${port} — ${e.message}`, "system"); }
+            finally { setActiveRoom(prev); }
+          });
+        })();
         break;
       }
 
