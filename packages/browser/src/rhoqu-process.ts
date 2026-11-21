@@ -11,6 +11,7 @@ export type RhoRuntimeExpr =
   | { readonly kind: "unop"; readonly op: RhoUnOp; readonly expr: RhoRuntimeExpr };
 export type RhoCommandNode = { readonly kind: "command"; readonly command: string; readonly bind?: string };
 export type RhoSequenceNode = { readonly kind: "sequence"; readonly steps: readonly RhoProcessNode[] };
+export type RhoParallelNode = { readonly kind: "parallel"; readonly branches: readonly RhoProcessNode[] };
 export type RhoRuntimeWhenNode = {
   readonly kind: "when";
   readonly condition: RhoRuntimeExpr;
@@ -18,7 +19,7 @@ export type RhoRuntimeWhenNode = {
   readonly then: RhoSequenceNode;
   readonly else?: RhoSequenceNode;
 };
-export type RhoProcessNode = RhoCommandNode | RhoSequenceNode | RhoRuntimeWhenNode;
+export type RhoProcessNode = RhoCommandNode | RhoSequenceNode | RhoParallelNode | RhoRuntimeWhenNode;
 export type RhoProcess = { readonly kind: "sequence"; readonly steps: readonly RhoProcessNode[] };
 export type RhoFlatProcess = RhoProcess;
 export type RhoCommandExecution = { readonly lines: readonly string[]; readonly id?: string; readonly value?: unknown };
@@ -49,6 +50,7 @@ export function executeRhoProcess(
   let lastId: string | undefined;
   const visit = (node: RhoProcessNode): void => {
     if (node.kind === "sequence") { for (const step of node.steps) visit(step); return; }
+    if (node.kind === "parallel") { results.push({ ok: false, command: "parallel", error: "parallel execution requires executeRhoProcessAsync", lines: [] }); return; }
     if (node.kind === "when") {
       const label = "when " + JSON.stringify(node.condition);
       try {
@@ -73,10 +75,63 @@ export function executeRhoProcess(
   visit(process);
   return results;
 }
+/** Async interpreter: sequences are awaited; parallel branches start together and retain isolated bindings. */
+export async function executeRhoProcessAsync(
+  process: RhoProcessNode,
+  executeCommand: (command: string) => Promise<readonly string[] | RhoCommandExecution> | readonly string[] | RhoCommandExecution,
+  options: RhoProcessExecutionOptions = {},
+): Promise<RhoCommandResult[]> {
+  type State = { bindings: Map<string, string>; lastId?: string };
+  const visit = async (node: RhoProcessNode, state: State): Promise<RhoCommandResult[]> => {
+    if (node.kind === "sequence") {
+      const out: RhoCommandResult[] = [];
+      for (const step of node.steps) out.push(...await visit(step, state));
+      return out;
+    }
+    if (node.kind === "parallel") {
+      const branches = await Promise.all(node.branches.map(branch => visit(branch, { bindings: new Map(state.bindings), lastId: state.lastId })));
+      return branches.flat();
+    }
+    if (node.kind === "when") {
+      try {
+        if (!options.evaluateWhen) throw new Error("runtime when requires a snapshot evaluator");
+        return await visit(options.evaluateWhen(node.condition, node.env) ? node.then : (node.else ?? { kind: "sequence", steps: [] }), state);
+      } catch (error) {
+        return [{ ok: false, command: "when " + JSON.stringify(node.condition), error: error instanceof Error ? error.message : String(error), lines: [] }];
+      }
+    }
+    const resolved = resolveBindings(node.command, state.bindings, state.lastId);
+    try {
+      const raw = await executeCommand(resolved);
+      const execution: RhoCommandExecution = Array.isArray(raw) ? { lines: raw } : raw as RhoCommandExecution;
+      const result: RhoCommandResult = { ok: true, command: resolved, lines: execution.lines, ...(execution.id ? { id: execution.id } : {}), ...(execution.value !== undefined ? { value: execution.value } : {}) };
+      if (execution.id) { state.lastId = execution.id; if (node.bind) state.bindings.set(node.bind, execution.id); }
+      return [result];
+    } catch (error) {
+      return [{ ok: false, command: resolved, error: error instanceof Error ? error.message : String(error), lines: [] }];
+    }
+  };
+  return visit(process, { bindings: new Map(), lastId: undefined });
+}
+export async function executeRhoProcessWithStoreBindingsAsync(
+  process: RhoProcessNode,
+  executeCommand: (command: string) => Promise<readonly string[] | RhoCommandExecution> | readonly string[] | RhoCommandExecution,
+  getIdsForCommand: (command: string) => readonly string[],
+  options: RhoProcessExecutionOptions = {},
+): Promise<RhoCommandResult[]> {
+  return executeRhoProcessAsync(process, async command => {
+    const before = new Set(getIdsForCommand(command));
+    const raw = await executeCommand(command);
+    const execution: RhoCommandExecution = Array.isArray(raw) ? { lines: raw } : raw as RhoCommandExecution;
+    const created = getIdsForCommand(command).filter(id => !before.has(id));
+    return created.length === 1 ? { ...execution, id: created[0] } : raw;
+  }, options);
+}
 /** Count commands in both branches for display/preview. */
 export function countRhoProcessCommands(process: RhoProcessNode): number {
   if (process.kind === "command") return 1;
   if (process.kind === "sequence") return process.steps.reduce((n, step) => n + countRhoProcessCommands(step), 0);
+  if (process.kind === "parallel") return process.branches.reduce((n, branch) => n + countRhoProcessCommands(branch), 0);
   return countRhoProcessCommands(process.then) + (process.else ? countRhoProcessCommands(process.else) : 0);
 }
 /** Bind only a unique ID newly captured from an authoritative store. */

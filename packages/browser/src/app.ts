@@ -19,7 +19,7 @@ import { findDiscrepancies, losingPeersIn, normalizeValue,
          SAMPLE_SIZE, PROBE_WINDOW_MS,
          type Observation } from "./probe.js";
 import { transpileProcess as rhoquTranspileProcess, evaluateRhoQuRuntimeCondition, RhoQuError, type RhoQuContext, type RhoQuRuntimeSnapshot, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
-import { executeRhoProcessWithStoreBindings, countRhoProcessCommands, type RhoFlatProcess } from "./rhoqu-process.js";
+import { executeRhoProcessWithStoreBindingsAsync, countRhoProcessCommands, type RhoFlatProcess } from "./rhoqu-process.js";
 import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
          type Poll, type PollMethod, type PollOption } from "./polls.js";
 import { canonLemma, parseRefTokens, parseLemmaDecl, splitLemmaNameArg } from "./lemma-parse.js";
@@ -6307,7 +6307,7 @@ function handleCommand(raw: string): string[] {
           currentSeq: dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
         };
       };
-      const results = executeRhoProcessWithStoreBindings(process, (command) => runInput(command), (command) => {
+      void executeRhoProcessWithStoreBindingsAsync(process, (command) => runInput(command), (command) => {
         if (/^\/poll\s+new\b/i.test(command)) return [...pollStore.keys()];
         if (/^\/lemma\b/i.test(command)) return [...lemmaStore.keys()];
         if (/^\/note\s+grant\b/i.test(command)) return [...noteStore.keys()];
@@ -6315,12 +6315,13 @@ function handleCommand(raw: string): string[] {
         return [];
       }, {
         evaluateWhen: (condition, env) => evaluateRhoQuRuntimeCondition(condition, env, runtimeSnapshot()),
-      });
-      const executed = results.filter((result) => result.ok).length;
-      for (const result of results) {
-        if (!result.ok) sys(`· rhoqu error on '${result.command}': ${result.error}`);
-      }
-      sys(`· rhoqu: ${executed}/${results.length} executed${handlersAfter > 0 ? `, ${handlersAfter} on-handler${handlersAfter === 1 ? "" : "s"} active` : ""}`);
+      }).then((results) => {
+        const executed = results.filter((result) => result.ok).length;
+        for (const result of results) {
+          if (!result.ok) sys(`· rhoqu error on '${result.command}': ${result.error}`);
+        }
+        sys(`· rhoqu: ${executed}/${results.length} executed${handlersAfter > 0 ? `, ${handlersAfter} on-handler${handlersAfter === 1 ? "" : "s"} active` : ""}`);
+      }).catch((error) => sys(`· rhoqu execution error: ${String(error)}`));
       break;
     }
 

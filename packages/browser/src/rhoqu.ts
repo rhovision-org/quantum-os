@@ -21,7 +21,7 @@
 /// `transpile` remains source → string[] for legacy callers; `transpileProcess`
 /// retains bindings in structured command IR for live execution.
 
-import type { RhoFlatProcess, RhoProcessNode, RhoCommandNode, RhoRuntimeExpr, RhoRuntimeWhenNode, RhoBinOp, RhoUnOp } from "./rhoqu-process.js";
+import type { RhoFlatProcess, RhoProcessNode, RhoRuntimeExpr, RhoRuntimeWhenNode, RhoBinOp, RhoUnOp } from "./rhoqu-process.js";
 import { canonLemma } from "./lemma-parse.js";
 
 // ---------------------------------------------------------------------------
@@ -502,6 +502,7 @@ export function transpile(source: string, ctx?: RhoQuContext): string[] {
   const flatten = (nodes: readonly RhoProcessNode[]): string[] => nodes.flatMap((node) => {
     if (node.kind === "command") return [node.command];
     if (node.kind === "sequence") return flatten(node.steps);
+    if (node.kind === "parallel") return node.branches.flatMap(flatten);
     throw new RhoQuError("runtime when cannot be flattened by legacy transpile; use transpileProcess", 0, 0);
   });
   return flatten(process.steps);
@@ -585,7 +586,7 @@ function lowerStmts(stmts: Stmt[], program: Program, env: Map<string, string>, c
   const out: RhoProcessNode[] = [];
   for (const s of stmts) {
     if (s.kind === "new") { for (const name of s.names) out.push({ kind: "command", command: "/grant " + name }); continue; }
-    if (s.kind === "parallel") { out.push(...lowerStmts(s.body, program, env, ctx)); continue; }
+    if (s.kind === "parallel") { out.push({ kind: "parallel", branches: s.body.map((branch) => ({ kind: "sequence", steps: lowerStmts([branch], program, env, ctx) })) }); continue; }
     if (s.kind === "cmd") { out.push({ kind: "command", command: substitute(s.text, env), ...(s.bind ? { bind: s.bind } : {}) }); continue; }
     if (s.kind === "if") { out.push(...lowerStmts(truthy(evalExpr(s.cond, env, ctx)) ? s.then : s.else, program, env, ctx)); continue; }
     if (s.kind === "when") {
