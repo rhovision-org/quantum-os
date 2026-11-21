@@ -21,12 +21,14 @@
 /// The transpiler is pure: source string → string[]. The dispatcher runs
 /// each command via handleCommand; errors in one don't stop subsequent.
 
+import type { RhoProcess, RhoCommandNode } from "./rhoqu-process.js";
+
 // ---------------------------------------------------------------------------
 // Tokens
 // ---------------------------------------------------------------------------
 
 type TokenKind =
-  | "process" | "new" | "in" | "parallel" | "if" | "else" | "and" | "or" | "not" | "on"
+  | "process" | "new" | "in" | "parallel" | "if" | "else" | "and" | "or" | "not" | "on" | "bind"
   | "ident" | "number" | "string" | "command"
   | "lbrace" | "rbrace" | "lparen" | "rparen"
   | "semi" | "comma" | "eof" | "pipe"
@@ -40,7 +42,7 @@ class RhoQuError extends Error {
   }
 }
 
-const KEYWORDS = new Set(["process", "new", "in", "parallel", "if", "else", "and", "or", "not", "on"]);
+const KEYWORDS = new Set(["process", "new", "in", "parallel", "if", "else", "and", "or", "not", "on", "bind"]);
 
 function tokenize(src: string): Token[] {
   const tokens: Token[] = [];
@@ -150,7 +152,7 @@ type Stmt =
   | { kind: "new"; names: string[] }
   | { kind: "parallel"; body: Stmt[] }
   | { kind: "call"; name: string; args: string[] }
-  | { kind: "cmd"; text: string }
+  | { kind: "cmd"; text: string; bind?: string }
   | { kind: "if"; cond: Expr; then: Stmt[]; else: Stmt[] }
   | { kind: "on"; channel: string; binding: string; body: Stmt[] };
 
@@ -282,6 +284,7 @@ class Parser {
     if (t.kind === "if") return this.parseIf();
     if (t.kind === "on") return this.parseOn();
     if (t.kind === "command") return this.parseCmd();
+    if (t.kind === "bind") return this.parseBindCommand();
     if (t.kind === "ident") return this.parseCall();
     if (t.kind === "semi") { this.eat(); return null; }
     throw new RhoQuError(`unexpected token '${t.value}' (kind: ${t.kind})`, t.line, t.col);
@@ -410,6 +413,13 @@ class Parser {
     return { kind: "cmd", text: t.value };
   }
 
+  private parseBindCommand(): Stmt {
+    this.expect("bind");
+    const name = this.expect("ident").value;
+    const command = this.expect("command");
+    return { kind: "cmd", text: command.value, bind: name };
+  }
+
   private parseCall(): Stmt {
     const name = this.expect("ident").value;
     this.expect("lparen");
@@ -467,36 +477,42 @@ function substitute(text: string, env: Map<string, string>): string {
 /// Conditions in `if` statements are evaluated at transpile time against
 /// `ctx`, so the chosen branch's commands are what gets emitted.
 /// Throws RhoQuError on parse or expansion failure.
-export function transpile(source: string, ctx?: RhoQuContext): string[] {
+export function transpileProcess(source: string, ctx?: RhoQuContext): RhoProcess {
   const tokens = tokenize(source);
   const program = new Parser(tokens).parseProgram();
   const out: string[] = [];
+  const bindings = new Map<number, string>();
   const env = new Map<string, string>();
-  emitStmts(program.top, program, env, out, ctx);
-  return out;
+  emitStmts(program.top, program, env, out, ctx, bindings);
+  return { kind: "sequence", steps: out.map((command, index): RhoCommandNode => ({
+    kind: "command", command, ...(bindings.has(index) ? { bind: bindings.get(index) } : {}),
+  })) };
 }
-
-function emitStmts(stmts: Stmt[], program: Program, env: Map<string, string>, out: string[], ctx?: RhoQuContext): void {
-  for (const s of stmts) emitStmt(s, program, env, out, ctx);
+export function transpile(source: string, ctx?: RhoQuContext): string[] {
+  return transpileProcess(source, ctx).steps.map(step => step.command);
 }
-
-function emitStmt(s: Stmt, program: Program, env: Map<string, string>, out: string[], ctx?: RhoQuContext): void {
+function emitStmts(stmts: Stmt[], program: Program, env: Map<string, string>, out: string[], ctx?: RhoQuContext, bindings?: Map<number, string>): void {
+  for (const s of stmts) emitStmt(s, program, env, out, ctx, bindings);
+}
+function emitStmt(s: Stmt, program: Program, env: Map<string, string>, out: string[], ctx?: RhoQuContext, bindings?: Map<number, string>): void {
   if (s.kind === "new") {
     for (const name of s.names) out.push(`/grant ${name}`);
     return;
   }
   if (s.kind === "parallel") {
-    emitStmts(s.body, program, env, out, ctx);
+    emitStmts(s.body, program, env, out, ctx, bindings);
     return;
   }
   if (s.kind === "cmd") {
+    const index = out.length;
     out.push(substitute(s.text, env));
+    if (s.bind && bindings) bindings.set(index, s.bind);
     return;
   }
   if (s.kind === "if") {
     const v = evalExpr(s.cond, env, ctx);
     const branch = truthy(v) ? s.then : s.else;
-    emitStmts(branch, program, env, out, ctx);
+    emitStmts(branch, program, env, out, ctx, bindings);
     return;
   }
   if (s.kind === "on") {
@@ -541,7 +557,7 @@ function emitStmt(s: Stmt, program: Program, env: Map<string, string>, out: stri
         : argVal;
       childEnv.set(def.params[k], stripped);
     }
-    emitStmts(def.body, program, childEnv, out, ctx);
+    emitStmts(def.body, program, childEnv, out, ctx, bindings);
     return;
   }
 }

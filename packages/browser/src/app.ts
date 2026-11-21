@@ -18,8 +18,8 @@ import { encryptVault, decryptVault, looksLikeVault } from "./vault.js";
 import { findDiscrepancies, losingPeersIn, normalizeValue,
          SAMPLE_SIZE, PROBE_WINDOW_MS,
          type Observation } from "./probe.js";
-import { transpile as rhoquTranspile, RhoQuError, type RhoQuContext, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
-import { processFromCommands, executeRhoProcess } from "./rhoqu-process.js";
+import { transpileProcess as rhoquTranspileProcess, transpile as rhoquTranspile, RhoQuError, type RhoQuContext, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
+import { executeRhoProcess } from "./rhoqu-process.js";
 import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
          type Poll, type PollMethod, type PollOption } from "./polls.js";
 import { canonLemma, parseRefTokens, parseLemmaDecl, splitLemmaNameArg } from "./lemma-parse.js";
@@ -6262,6 +6262,7 @@ function handleCommand(raw: string): string[] {
         sys("  /rhoqu list                          — show registered on-handlers");
         sys("  /rhoqu clear                         — drop all on-handlers in this room");
         sys("  process P(a, b) { /grant $a; /lemma $b; } P(fork-a, alice);");
+        sys("  bind pollId /poll new Decision; /poll add $pollId Option A;");
         sys("  if has(@met-bob) { /qucalc @met-bob; } else { /lemma met-bob ^v; }");
         sys("  on forks(msg) { /qucalc @msg; }      — register a channel-msg handler");
         break;
@@ -6282,18 +6283,28 @@ function handleCommand(raw: string): string[] {
         myCurrentSeq: () => dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
         registerOnHandler: (h) => { rhoquHandlers.push(h); },
       };
-      let cmds: string[];
+      let process;
       try {
-        cmds = rhoquTranspile(src, rhoCtx);
+        process = rhoquTranspileProcess(src, rhoCtx);
       } catch (e) {
         if (e instanceof RhoQuError) sys(`· ${e.message}`);
         else sys(`· rhoqu parse error: ${String(e)}`);
         break;
       }
       const handlersAfter = rhoquHandlers.length;
+      const cmds = process.steps.map((step) => step.command);
       sys(`· rhoqu transpiled to ${cmds.length} command${cmds.length === 1 ? "" : "s"}`);
-      const process = processFromCommands(cmds);
-      const results = executeRhoProcess(process, (command) => runInput(command));
+      const results = executeRhoProcess(process, (command) => {
+        // /poll new creates an ID in pollStore. Return it structurally so
+        // RhoQu `bind name /poll new ...;` never parses IDs from display text.
+        const before = /^\/poll\s+new\b/i.test(command) ? new Set(pollStore.keys()) : null;
+        const lines = runInput(command);
+        if (before) {
+          const created = [...pollStore.keys()].filter((id) => !before.has(id));
+          if (created.length === 1) return { lines, id: created[0] };
+        }
+        return lines;
+      });
       const executed = results.filter((result) => result.ok).length;
       for (const result of results) {
         if (!result.ok) sys(`· rhoqu error on '${result.command}': ${result.error}`);
