@@ -2188,6 +2188,11 @@ function detachFromFree(chosen: NoteEntry, N: number): { outgoing: string; chang
   return { outgoing: paid, change };
 }
 
+function restoreDetachedNote(chosen: NoteEntry, change: NoteEntry | null): void {
+  if (change) noteStore.delete(change.token);
+  noteStore.set(chosen.token, chosen);
+}
+
 function lockToken(token: string, entry: NoteEntry, proposalId: string): void {
   lockedNotes.set(token, {
     token,
@@ -5519,7 +5524,7 @@ function handleCommand(raw: string): string[] {
           void signedSend(targetId, { kind: "note-pass", currency, denomination: N, token: detached.outgoing,
             ...(passTerms ? { terms: passTerms.terms, termsHash: passTerms.termsHash } : {}) }).then((sent) => {
             if (!sent) {
-              undoDetach(chosen, detached.change);
+              restoreDetachedNote(chosen, detached.change);
               saveNotes(); renderNotes();
               addMessage("", `transfer to ${targetName} failed — note restored to wallet`, "system");
               return;
@@ -5558,7 +5563,7 @@ function handleCommand(raw: string): string[] {
           if (!detached) { sys("split failed"); break; }
           void signedSend(issuerId, { kind: "note-redeem", currency, denomination: N, token: detached.outgoing }).then((sent) => {
             if (!sent) {
-              undoDetach(chosen, detached.change);
+              restoreDetachedNote(chosen, detached.change);
               saveNotes(); renderNotes();
               addMessage("", `redemption send to ${issuerName} failed — note restored to wallet`, "system");
               return;
@@ -5836,7 +5841,7 @@ function handleCommand(raw: string): string[] {
           }).then((sent) => {
             if (!sent) {
               lockedNotes.delete(detached.outgoing);
-              undoDetach(chosen, detached.change);
+              restoreDetachedNote(chosen, detached.change);
               state.myStatus = "pending";
               saveNotes(); renderNotes();
               addMessage("", "accept send failed — note restored and proposal remains pending", "system");
@@ -5964,7 +5969,7 @@ function handleCommand(raw: string): string[] {
           }).then((sent) => {
             if (!sent) {
               lockedNotes.delete(detached.outgoing);
-              undoDetach(chosen, detached.change);
+              restoreDetachedNote(chosen, detached.change);
               state.proposal.rows = previousRows;
               state.proposal.proposerName = previousName;
               state.proposal.expiresAt = previousExpiry;
