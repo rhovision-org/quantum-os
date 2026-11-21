@@ -80,4 +80,3 @@ try { await createRhoProcessPackage(oversizedObjectProcess, provenance); } catch
 ok("package creation rejects oversized canonical payload", oversizedCreationRejected);
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-package.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
-
