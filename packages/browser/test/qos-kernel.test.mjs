@@ -177,6 +177,7 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   ok("replay reports every accepted lifecycle event", replayA.applied.length === events.length && replayA.rejected.length === 0);
   const incomplete = replayQosKernel(events.slice(1));
   ok("replay refuses lifecycle without its causal start", incomplete.kernel.list().length === 0 && incomplete.rejected.length > 0);
+  ok("replay rejects all descendants of missing causal input", incomplete.rejected.length === events.length - 1);
   ok("replay reports missing causal dependencies", incomplete.missingDependencies.length > 0);
 }
 

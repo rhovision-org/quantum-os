@@ -408,12 +408,26 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
   const order = canonicalEventOrder(admitted);
   const kernel = new QosKernel();
   const starts = new Map<string, QosEvent>();
-  const missingEventHashes = new Set(order.missingDependencies.map((item) => item.eventHash));
-  const cyclicEventHashes = new Set(order.cyclicHashes);
+  const invalidEventHashes = new Set(order.missingDependencies.map((item) => item.eventHash));
+  for (const hash of order.cyclicHashes) invalidEventHashes.add(hash);
+  // Fail closed transitively: an event whose prev/grant points to an invalid
+  // event is itself invalid, even if its direct references are present.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const event of order.ordered) {
+      if (invalidEventHashes.has(event.hash)) continue;
+      const refs = [event.prev !== "genesis" ? event.prev : null, event.grant !== "root" ? event.grant : null].filter(Boolean) as string[];
+      if (refs.some((ref) => invalidEventHashes.has(ref))) {
+        invalidEventHashes.add(event.hash);
+        changed = true;
+      }
+    }
+  }
   const applied: string[] = [];
   const rejected: { hash: string; reason: string }[] = [];
   for (const event of order.ordered) {
-    if (missingEventHashes.has(event.hash) || cyclicEventHashes.has(event.hash)) {
+    if (invalidEventHashes.has(event.hash)) {
       rejected.push({ hash: event.hash, reason: "event has unresolved or cyclic causal dependencies" });
       continue;
     }
