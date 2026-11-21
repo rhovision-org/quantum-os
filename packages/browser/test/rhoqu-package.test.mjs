@@ -4,10 +4,10 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const bundle = await build({
-  stdin: { contents: 'export { createRhoProcessPackage, serializeRhoProcessPackage, importRhoProcessPackage } from "./src/rhoqu-package.ts";', resolveDir: root, loader: "ts", sourcefile: "rhoqu-package-test-entry.ts" },
+  stdin: { contents: 'export { createRhoProcessPackage, serializeRhoProcessPackage, importRhoProcessPackage } from "./src/rhoqu-package.ts"; export { transpileProcess } from "./src/rhoqu.ts"; export { executeRhoProcessAsync } from "./src/rhoqu-process.ts";', resolveDir: root, loader: "ts", sourcefile: "rhoqu-package-test-entry.ts" },
   bundle: true, format: "esm", platform: "node", write: false,
 });
-const { createRhoProcessPackage, serializeRhoProcessPackage, importRhoProcessPackage } = await import(
+const { createRhoProcessPackage, serializeRhoProcessPackage, importRhoProcessPackage, transpileProcess, executeRhoProcessAsync } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
 let pass = 0, fail = 0;
@@ -28,6 +28,16 @@ const serialized = await serializeRhoProcessPackage(process, provenance);
 const imported = await importRhoProcessPackage(serialized);
 ok("package export contains canonical format and SHA-256", packageOne.format === "rho-process-package" && packageOne.contentHash.length === 64 && serialized === JSON.stringify(JSON.parse(serialized)));
 ok("import preserves typed process and provenance", JSON.stringify(imported.process) === JSON.stringify(process) && imported.provenance.authorAnchor === provenance.authorAnchor && imported.provenance.source === provenance.source);
+const goldenSource = "bind pollId /poll new Decision; /poll add $pollId Option A; /poll status $LAST_ID;";
+const goldenIR = transpileProcess(goldenSource);
+const goldenPackage = await serializeRhoProcessPackage(goldenIR, provenance);
+const goldenImport = await importRhoProcessPackage(goldenPackage);
+const goldenCommands = [];
+const goldenResults = await executeRhoProcessAsync(goldenImport.process, command => {
+  goldenCommands.push(command);
+  return command === "/poll new Decision" ? { lines: ["created"], id: "poll-real-golden" } : [command];
+});
+ok("source → IR → package → import → execution preserves ID bindings", goldenCommands.join("|") === "/poll new Decision|/poll add poll-real-golden Option A|/poll status poll-real-golden" && goldenResults.length === 3 && goldenResults.every(result => result.ok));
 const reordered = { provenance: { source: provenance.source, exportedAt: provenance.exportedAt, authorAnchor: provenance.authorAnchor }, process: process, version: 1, format: "rho-process-package" };
 const packageTwo = await createRhoProcessPackage(reordered.process, reordered.provenance);
 ok("canonical hash is stable across object key ordering", packageOne.contentHash === packageTwo.contentHash);
