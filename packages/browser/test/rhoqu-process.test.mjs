@@ -51,5 +51,27 @@ ok("LAST_ID resolves to actual ID, not guessed text", boundCommands[2] === "/pol
 const missingIdCommands = [];
 executeRhoProcess(bindingProcess, command => { missingIdCommands.push(command); return ["created but no structured ID"]; });
 ok("missing ID never fabricates a binding", missingIdCommands[1] === "/poll add $pollId" && missingIdCommands[2] === "/poll status $LAST_ID");
+const failedBindingCommands = [];
+const failedBinding = executeRhoProcess(bindingProcess, command => {
+  failedBindingCommands.push(command);
+  if (command === "/poll new bound") return { lines: ["not created" ] };
+  if (command === "/poll add $pollId") throw new Error("add failed");
+  return { lines: ["ok"], id: "poll-next-9" };
+});
+ok("unstructured command output does not bind", failedBindingCommands[1] === "/poll add $pollId");
+ok("failed command does not advance LAST_ID", failedBindingCommands[2] === "/poll status $LAST_ID");
+ok("failure remains explicit in result", failedBinding[1]?.ok === false && failedBinding[1]?.error === "add failed");
+const refreshCommands = [];
+executeRhoProcess({ kind: "sequence", steps: [
+  { kind: "command", command: "/first", bind: "target" },
+  { kind: "command", command: "/second", bind: "target" },
+  { kind: "command", command: "/use $target $LAST_ID" },
+]}, command => {
+  refreshCommands.push(command);
+  if (command === "/first") return { lines: [], id: "id-a" };
+  if (command === "/second") return { lines: [], id: "id-b" };
+  return [];
+});
+ok("latest successful binding replaces prior value", refreshCommands[2] === "/use id-b id-b");
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-process.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
