@@ -870,16 +870,17 @@ function signedBroadcast(envelope: Record<string, unknown>): void {
   }).catch(() => { /* swallow signing errors so the queue keeps moving */ });
 }
 
-function signedSend(peerId: string, envelope: Record<string, unknown>): boolean {
-  // Queue direct signing in sequence; fail closed if identity is unavailable.
-  if (!qpeer || !dyncapState) return false;
-  signQueue = signQueue.then(async () => {
-    if (!qpeer || !dyncapState) return;
+function signedSend(peerId: string, envelope: Record<string, unknown>): Promise<boolean> {
+  // Resolve only after signing and transport enqueue have both completed. The
+  // queue remains ordered and resilient to a prior rejected signing operation.
+  const send = signQueue.then(async () => {
+    if (!qpeer || !dyncapState) return false;
     const dyncap = await signEnvelope(dyncapState, activeRoom.roomId, envelope);
     saveDyncap();
-    qpeer.send(peerId, { ...envelope, dyncap });
-  }).catch(() => { /* swallow */ });
-  return true;
+    return qpeer.send(peerId, { ...envelope, dyncap });
+  }).catch(() => false);
+  signQueue = send.then(() => undefined, () => undefined);
+  return send;
 }
 
 /// The per-room `/qos` controller. Its transport reads the room context's peer
@@ -5515,18 +5516,20 @@ function handleCommand(raw: string): string[] {
           const detached = detach(chosen, N);
           if (!detached) { sys("split failed"); break; }
           const passTerms = seriesTerms.get(currency);
-          const sent = signedSend(targetId, { kind: "note-pass", currency, denomination: N, token: detached.outgoing,
-            ...(passTerms ? { terms: passTerms.terms, termsHash: passTerms.termsHash } : {}) });
-          if (!sent) {
-            undoDetach(chosen, detached.change);
-            sys(`cannot reach ${targetName} — data channel not open`);
-            break;
-          }
-          saveNotes();
-          renderNotes();
-          sys(`· ${currency} ${N} → ${targetName}`);
-          sys(`  ${detached.outgoing}`);
-          if (detached.change) sys(`  (change ${detached.change.denomination} returned to your wallet)`);
+          void signedSend(targetId, { kind: "note-pass", currency, denomination: N, token: detached.outgoing,
+            ...(passTerms ? { terms: passTerms.terms, termsHash: passTerms.termsHash } : {}) }).then((sent) => {
+            if (!sent) {
+              undoDetach(chosen, detached.change);
+              saveNotes(); renderNotes();
+              addMessage("", `transfer to ${targetName} failed — note restored to wallet`, "system");
+              return;
+            }
+            saveNotes(); renderNotes();
+            addMessage("", `· ${currency} ${N} → ${targetName}`, "system");
+            addMessage("", `  ${detached.outgoing}`, "system");
+            if (detached.change) addMessage("", `  (change ${detached.change.denomination} returned to your wallet)`, "system");
+          });
+          sys(`· signing note transfer to ${targetName}…`);
           break;
         }
 
@@ -5553,17 +5556,19 @@ function handleCommand(raw: string): string[] {
           if (!issuerId) { sys(`unknown peer: '${issuerName}'`); break; }
           const detached = detach(chosen, N);
           if (!detached) { sys("split failed"); break; }
-          const sent = signedSend(issuerId, { kind: "note-redeem", currency, denomination: N, token: detached.outgoing });
-          if (!sent) {
-            undoDetach(chosen, detached.change);
-            sys(`cannot reach ${issuerName} — data channel not open`);
-            break;
-          }
-          saveNotes();
-          renderNotes();
-          sys(`· redeemed ${currency} ${N} → ${issuerName}`);
-          sys(`  awaiting receipt…`);
-          if (detached.change) sys(`  (change ${detached.change.denomination} returned to your wallet)`);
+          void signedSend(issuerId, { kind: "note-redeem", currency, denomination: N, token: detached.outgoing }).then((sent) => {
+            if (!sent) {
+              undoDetach(chosen, detached.change);
+              saveNotes(); renderNotes();
+              addMessage("", `redemption send to ${issuerName} failed — note restored to wallet`, "system");
+              return;
+            }
+            saveNotes(); renderNotes();
+            addMessage("", `· redeemed ${currency} ${N} → ${issuerName}`, "system");
+            addMessage("", `  awaiting receipt…`, "system");
+            if (detached.change) addMessage("", `  (change ${detached.change.denomination} returned to your wallet)`, "system");
+          });
+          sys(`· signing redemption to ${issuerName}…`);
           break;
         }
 
@@ -5739,20 +5744,20 @@ function handleCommand(raw: string): string[] {
           saveNotes();
           renderNotes();
 
-          const sent = signedSend(targetId, { kind: "rdv-propose", proposal });
-          if (!sent) {
-            releaseLockedFor(id);
-            proposals.delete(id);
-            clearProposalTimeout(id);
-            saveNotes();
-            renderNotes();
-            sys(`cannot reach ${targetName} — data channel not open`);
-            break;
-          }
-          sys(`· proposed rendezvous ${shortRdvId(id)} to ${targetName}`);
-          sys(`  you give ${giveCur} ${giveN}, get ${getCur} ${getN}`);
-          sys(`  expires in ${Math.round(RDV_TIMEOUT_MS / 1000)}s — /rdv abort ${shortRdvId(id)} to cancel`);
-          if (detached.change) sys(`  (change ${detached.change.denomination} returned to your wallet)`);
+          void signedSend(targetId, { kind: "rdv-propose", proposal }).then((sent) => {
+            if (!sent) {
+              releaseLockedFor(id); proposals.delete(id); clearProposalTimeout(id);
+              saveNotes(); renderNotes();
+              addMessage("", `proposal send to ${targetName} failed — reservation released`, "system");
+              return;
+            }
+            saveNotes(); renderNotes();
+            addMessage("", `· proposed rendezvous ${shortRdvId(id)} to ${targetName}`, "system");
+            addMessage("", `  you give ${giveCur} ${giveN}, get ${getCur} ${getN}`, "system");
+            addMessage("", `  expires in ${Math.round(RDV_TIMEOUT_MS / 1000)}s — /rdv abort ${shortRdvId(id)} to cancel`, "system");
+            if (detached.change) addMessage("", `  (change ${detached.change.denomination} returned to your wallet)`, "system");
+          });
+          sys(`· signing rendezvous proposal to ${targetName}…`);
           break;
         }
 
@@ -5826,24 +5831,24 @@ function handleCommand(raw: string): string[] {
           }
 
           // Participant path — original behavior.
-          state.myStatus = "accepted";
-          saveNotes();
-          renderNotes();
-
-          const sent = signedSend(state.proposal.proposer, {
+          void signedSend(state.proposal.proposer, {
             kind: "rdv-accept", id: state.proposal.id, token: detached.outgoing,
+          }).then((sent) => {
+            if (!sent) {
+              lockedNotes.delete(detached.outgoing);
+              undoDetach(chosen, detached.change);
+              state.myStatus = "pending";
+              saveNotes(); renderNotes();
+              addMessage("", "accept send failed — note restored and proposal remains pending", "system");
+              return;
+            }
+            state.myStatus = "accepted";
+            saveNotes(); renderNotes();
+            addMessage("", `· accepted rendezvous ${shortRdvId(state.proposal.id)}`, "system");
+            addMessage("", `  locked ${row.gives.currency} ${row.gives.denomination}; awaiting commit…`, "system");
+            if (detached.change) addMessage("", `  (change ${detached.change.denomination} returned to your wallet)`, "system");
           });
-          if (!sent) {
-            releaseLockedFor(state.proposal.id);
-            state.myStatus = "pending";
-            saveNotes();
-            renderNotes();
-            sys("cannot reach proposer — try again");
-            break;
-          }
-          sys(`· accepted rendezvous ${shortRdvId(state.proposal.id)}`);
-          sys(`  locked ${row.gives.currency} ${row.gives.denomination}; awaiting commit…`);
-          if (detached.change) sys(`  (change ${detached.change.denomination} returned to your wallet)`);
+          sys("· signing rendezvous acceptance…");
           break;
         }
 
@@ -5911,11 +5916,16 @@ function handleCommand(raw: string): string[] {
           const otherId = uniqueParticipants(state.proposal).find(p => p !== myId);
           if (!otherId) { sys("no other participant to counter to"); break; }
 
-          // Release current locks (both my own and the other's, if any).
-          releaseLockedFor(state.proposal.id);
+          // Keep old reservations until the counter envelope is accepted by
+          // transport. Snapshot proposal state for rollback.
+          const previousRows = state.proposal.rows;
+          const previousName = state.proposal.proposerName;
+          const previousExpiry = state.proposal.expiresAt;
+          const previousAccepted = new Map(state.acceptedBy);
+          const previousStatus = state.myStatus;
           state.acceptedBy.clear();
 
-          // Replace the proposal's rows with the new cyclic swap.
+          // Replace proposal rows temporarily; rollback if sending fails.
           const myName2 = myName || shortId(myId);
           const newRows: Row[] = cyclicSwap(
             myId,    { currency: giveCur, denomination: giveN },
@@ -5948,19 +5958,34 @@ function handleCommand(raw: string): string[] {
           // Send the counter envelope, including the token I just locked so
           // the recipient can record it in their acceptedBy for the eventual
           // commit construction.
-          const sent = signedSend(otherId, {
+          void signedSend(otherId, {
             kind: "rdv-counter", id: state.proposal.id, rows: newRows,
             proposerName: myName2, token: detached.outgoing,
-          });
-          if (!sent) {
+          }).then((sent) => {
+            if (!sent) {
+              lockedNotes.delete(detached.outgoing);
+              undoDetach(chosen, detached.change);
+              state.proposal.rows = previousRows;
+              state.proposal.proposerName = previousName;
+              state.proposal.expiresAt = previousExpiry;
+              state.acceptedBy.clear();
+              for (const [peer, tok] of previousAccepted) state.acceptedBy.set(peer, tok);
+              state.myStatus = previousStatus;
+              clearProposalTimeout(state.proposal.id);
+              scheduleProposalTimeout(state.proposal.id, Math.max(0, previousExpiry - Date.now()));
+              saveNotes(); renderNotes();
+              addMessage("", "counter send failed — previous terms and reservations restored", "system");
+              return;
+            }
+            lockedNotes.delete(detached.outgoing);
             releaseLockedFor(state.proposal.id);
-            state.acceptedBy.delete(myId);
-            sys("cannot reach the other participant — counter not delivered");
-            break;
-          }
-          sys(`· counter sent for rendezvous ${shortRdvId(state.proposal.id)}`);
-          sys(`  new terms: you give ${giveCur} ${giveN}, get ${getCur} ${getN}`);
-          if (detached.change) sys(`  (change ${detached.change.denomination} returned to your wallet)`);
+            lockToken(detached.outgoing, lockEntry, state.proposal.id);
+            saveNotes(); renderNotes();
+            addMessage("", `· counter sent for rendezvous ${shortRdvId(state.proposal.id)}`, "system");
+            addMessage("", `  new terms: you give ${giveCur} ${giveN}, get ${getCur} ${getN}`, "system");
+            if (detached.change) addMessage("", `  (change ${detached.change.denomination} returned to your wallet)`, "system");
+          });
+          sys("· signing rendezvous counter…");
           break;
         }
 
@@ -7941,14 +7966,13 @@ async function connect(): Promise<void> {
           }
           const receipt = mintReceipt(currency, N);
           const myLabel = myName || (qpeer ? shortId(qpeer.peerId) : "local");
-          redemptionsHonored.set(token, { token, currency, denomination: N, redeemer: who, at: Date.now() });
-          saveNotes();
-          renderNotes();
-          const ok = signedSend(from, { kind: "note-receipt", currency, denomination: N, token: receipt, original: token, issuer: myLabel });
-          if (!ok) {
-            addMessage("", `  · receipt minted but could not deliver — peer unreachable`, "system");
+          const receiptSent = await signedSend(from, { kind: "note-receipt", currency, denomination: N, token: receipt, original: token, issuer: myLabel });
+          if (!receiptSent) {
+            addMessage("", `  · receipt send failed — redemption remains retryable`, "system");
             return;
           }
+          redemptionsHonored.set(token, { token, currency, denomination: N, redeemer: who, at: Date.now() });
+          saveNotes(); renderNotes();
           addMessage("", `  · honored: ${currency} ${N} for ${who}`, "system");
           addMessage("", `    receipt: ${receipt}`, "system");
           return;
