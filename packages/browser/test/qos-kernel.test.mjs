@@ -141,10 +141,12 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   ok("SIGNAL handle resumes suspended target", resumed.ok && k.getProcess(worker.value.pid)?.state === "running", errno(resumed));
   const invalidResume = k.resume(init.pid, worker.value.pid);
   ok("resume of running process is EINVAL", errno(invalidResume) === "EINVAL", errno(invalidResume));
+  const suspendForKill = k.suspend(init.pid, worker.value.pid);
+  ok("process can be suspended again after resume", suspendForKill.ok, errno(suspendForKill));
   const killed = k.signal(init.pid, worker.value.pid, "SIGKILL");
   ok("owner can signal with a SIGNAL handle", killed.ok, errno(killed));
   const wv = k.getProcess(worker.value.pid);
-  ok("SIGKILL marks the process exited", wv?.state === "exited" && wv.exitCode === -9, JSON.stringify(wv));
+  ok("terminating signal exits a suspended process", wv?.state === "exited" && wv.exitCode === -9, JSON.stringify(wv));
 
   const waited = k.wait(init.pid, worker.value.pid);
   ok("wait reaps the child with its exit code", waited.ok && waited.value === -9, JSON.stringify(waited));
