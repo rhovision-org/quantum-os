@@ -6437,6 +6437,13 @@ function handleCommand(raw: string): string[] {
       // room with the bridge peer's dyncap chain in *that* room — no new
       // wire kinds, no infrastructure relay.
       const runIn = (ctx: RoomContext, cmd: string): string[] => {
+        // Sharing is delegated execution into another room, not a fresh direct
+        // user invocation there. Enforce the same approval policy as every
+        // non-interactive runner before switching context or dispatching.
+        if (requiresInteractiveApproval(cmd)) {
+          sys(`· share blocked '${cmd}': requires direct interactive approval in the target room`);
+          return [];
+        }
         const prev = activeRoom; setActiveRoom(ctx);
         try { return handleCommand(cmd); } finally { setActiveRoom(prev); }
       };
