@@ -32,6 +32,12 @@ check("registry decoder rejects mismatched hash",await decodeMemoryRecord([JSON.
 const rec=JSON.stringify({schema:"qos.memory/1",id:aId,hex:"616263"});
 check("registry string readback validates content",Buffer.from(await decodeMemoryRecord([JSON.stringify(rec)],aId)).equals(Buffer.from(aBytes)));
 check("registry programs use insert and lookup",memoryPublishProgram(aId,aBytes).includes("rho:registry:insertArbitrary") && memoryReadProgram(aDesc.locator.uri).includes("rho:registry:lookup"));
+check("publish explicitly declares deployId system channel before emitting receipt",
+  memoryPublishProgram(aId,aBytes).includes('deployId(`rho:rchain:deployId`)') &&
+  memoryPublishProgram(aId,aBytes).includes("deployId!(uri)"));
+check("exploratory lookup never binds deploy-only system channel",
+  !memoryReadProgram(aDesc.locator.uri).includes("rho:rchain:deployId"));
+
 check("ambiguous registry replies refused",await decodeMemoryRecord([rec,rec])===null);
 
 const roomId="cap:room:03010563656127610341634101250325";

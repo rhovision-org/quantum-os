@@ -9,7 +9,7 @@ export function memoryPublishProgram(id:string,bytes:Uint8Array):string{
   if(!isObjectId(id)||bytes.byteLength>MAX_OBJECT_BYTES)throw new Error("invalid object");
   // Store ASCII JSON as a Rholang string, avoiding node-specific map rendering.
   const record=JSON.stringify(JSON.stringify({schema:"qos.memory/1",id,hex:hex(bytes)}));
-  return `new insertArbitrary(\`rho:registry:insertArbitrary\`), ret in {
+  return `new insertArbitrary(\`rho:registry:insertArbitrary\`), deployId(\`rho:rchain:deployId\`), ret in {
   insertArbitrary!(${record}, *ret) |
   for (@uri <- ret) { return!(uri) | deployId!(uri) }
 }`;
@@ -41,7 +41,12 @@ export class RholoRegistryMemory implements MemoryDurableBackend {
     const data=Uint8Array.from(bytes);
     if(await objectIdentity(data)!==id)throw new Error("publication hash mismatch");
     const sent=await deployTerm(this.config,memoryPublishProgram(id,data));
-    if(!sent.ok||!sent.sig)throw new Error("registry deploy not accepted");
+    if(!sent.ok||!sent.sig){
+      // Keep the rejection reason useful without echoing arbitrary long hex
+      // (payloads, signatures or keys) returned by a remote node.
+      const reason=sent.message.replace(/[0-9a-f]{32,}/gi,"[redacted hex]").replace(/[\r\n]+/g," ").slice(0,300);
+      throw new Error("registry deploy not accepted: "+reason);
+    }
     const verdict=await deployVerdict(this.config,sent.sig);
     if(!verdict?.ok)throw new Error("registry deploy outcome unavailable or failed");
     const uris=[...new Set(verdict.values.map(v=>v.replace(/^"|"$/g,"")).filter(uriOk))];

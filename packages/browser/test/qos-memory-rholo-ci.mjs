@@ -1,7 +1,7 @@
 // Real bundled Rholo witness, restricted to a fresh GitHub runner and loopback.
 // The second invocation has neither the source bytes nor the publisher's RAM.
 import {build} from "esbuild";
-import {fileURLToPath} from "node:url";
+import {fileURLToPath,pathToFileURL} from "node:url";
 import {dirname,join} from "node:path";
 import {readFile,writeFile} from "node:fs/promises";
 import assert from "node:assert/strict";
@@ -25,7 +25,10 @@ const bundle=await build({stdin:{contents:`
  export {QosEventLog,QosProcessRoom} from "./src/qos-process.ts";
  export {newDynCapState} from "./src/dyncap.ts";
 `,resolveDir:root,loader:"ts",sourcefile:"rholo-memory-witness.ts"},bundle:true,format:"esm",platform:"node",write:false});
-const {QosMemoryBytes,objectIdentity,RholoRegistryMemory,replayQosKernel,previewCanonicalSyscall,QosEventLog,QosProcessRoom,newDynCapState}=await import("data:text/javascript;base64,"+Buffer.from(bundle.outputFiles[0].text).toString("base64"));
+// A named bundle keeps subsequent stack traces short and preserves the reason.
+const bundlePath=join(dir,"witness-"+mode+".mjs");
+await writeFile(bundlePath,bundle.outputFiles[0].text,{mode:0o600,flag:"wx"});
+const {QosMemoryBytes,objectIdentity,RholoRegistryMemory,replayQosKernel,previewCanonicalSyscall,QosEventLog,QosProcessRoom,newDynCapState}=await import(pathToFileURL(bundlePath).href);
 // Browser transport retains the nonce in localStorage; this process-private
 // shim performs no persistence and does not print the disposable key.
 const configStore=new Map();
