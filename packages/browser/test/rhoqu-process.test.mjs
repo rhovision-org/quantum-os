@@ -84,12 +84,12 @@ const liveResults = executeRhoProcessWithPollBindings(liveProcess, command => {
   if (command === "/poll new decision") { liveIds.add("poll-real-42"); return ["poll created"]; }
   return ["ran:" + command];
 }, () => [...liveIds]);
-ok("live dispatcher ID binds following command", liveCommands[1] === "/poll add poll-real-42");
+ok("live dispatcher ID binds following command", liveCommands[1] === "/poll add poll-real-42 Option A");
 ok("LAST_ID uses ID returned by live dispatcher", liveCommands[2] === "/poll status poll-real-42");
 ok("live integration results remain successful", liveResults.length === 3 && liveResults.every(r => r.ok));
 const noCreationIds = new Set();
 const noCreationCommands = [];
 executeRhoProcessWithPollBindings(liveProcess, command => { noCreationCommands.push(command); return ["no poll created"]; }, () => [...noCreationIds]);
-ok("failed poll creation leaves named binding unresolved", noCreationCommands[1] === "/poll add $pollId" && noCreationCommands[2] === "/poll status $LAST_ID");
+ok("failed poll creation leaves named binding unresolved", noCreationCommands[1] === "/poll add $pollId Option A" && noCreationCommands[2] === "/poll status $LAST_ID");
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-process.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
