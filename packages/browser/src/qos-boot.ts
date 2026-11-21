@@ -32,7 +32,8 @@ export function parseBootManifest(x:unknown):BootManifest{
  typeof d.rights==="number"&&Number.isSafeInteger(d.rights)&&d.rights>0&&(d.rights&~deviceRights(d.kind as DeviceKind))===0&&d.binding==="explicit"))
  throw Error("invalid boot device bindings");
  if(devices.some((d,i)=>i>0&&devices[i-1].id>=d.id))throw Error("boot devices must be unique and sorted");
- if(x.init.services.some(n=>!packages.some(p=>p.supervisor===x.init.supervisor&&p.name===n)))throw Error("missing init package");
+ const supervisor=x.init.supervisor;
+ if(x.init.services.some(n=>!packages.some(p=>p.supervisor===supervisor&&p.name===n)))throw Error("missing init package");
  return JSON.parse(JSON.stringify(x)) as BootManifest;
 }
 export async function bootAddress(value:unknown):Promise<string>{return sha256Hex(canonicalJson(parseBootManifest(value)));}
