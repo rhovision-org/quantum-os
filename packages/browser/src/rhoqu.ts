@@ -502,7 +502,7 @@ export function transpile(source: string, ctx?: RhoQuContext): string[] {
   const flatten = (nodes: readonly RhoProcessNode[]): string[] => nodes.flatMap((node) => {
     if (node.kind === "command") return [node.command];
     if (node.kind === "sequence") return flatten(node.steps);
-    if (node.kind === "parallel") return node.branches.flatMap(flatten);
+    if (node.kind === "parallel") return node.branches.flatMap((branch) => flatten([branch]));
     throw new RhoQuError("runtime when cannot be flattened by legacy transpile; use transpileProcess", 0, 0);
   });
   return flatten(process.steps);
