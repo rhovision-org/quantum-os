@@ -47,7 +47,7 @@ export const QOS_ALL_RIGHTS =
   QOS_RIGHTS.GRANT | QOS_RIGHTS.REVOKE | QOS_RIGHTS.ADMIN;
 
 export const QOS_SYSCALLS = [
-  "getpid", "getppid", "spawn", "exit", "wait", "signal",
+  "getpid", "getppid", "spawn", "exit", "wait", "signal", "proc_suspend", "proc_resume",
   "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open", ...MEMORY_OPS, ...VFS_OPS, ...SHELL_OPS, ...IDENTITY_OPS, ...DEVICE_OPS, ...INIT_OPS,
   "read", "write", "stat", "mkdir", "unlink", "rename", "mount", "unmount",
   "send", "recv", "listen", "connect", "accept",
@@ -1061,6 +1061,26 @@ export class QosKernel {
     return ok(true);
   }
 
+  /** #325 reconciled with the canonical kernel: explicit target handle at
+   * the syscall boundary; model-only callers may use their existing table. */
+  suspend(callerPid:string,targetPid:string,explicitHandle?:string):QosResult<true>{
+    return this.controlProcess(callerPid,targetPid,"suspend",explicitHandle);
+  }
+  resume(callerPid:string,targetPid:string,explicitHandle?:string):QosResult<true>{
+    return this.controlProcess(callerPid,targetPid,"resume",explicitHandle);
+  }
+  private controlProcess(callerPid:string,targetPid:string,transition:"suspend"|"resume",explicitHandle?:string):QosResult<true>{
+    const caller=this.processes.get(callerPid),target=this.processes.get(targetPid);
+    if(!caller||caller.state!=="running"||!target)return err("ENOENT","caller or target unavailable");
+    if(callerPid===targetPid)return err("EINVAL","cannot control self through another process handle");
+    const candidates=explicitHandle===undefined?[...caller.handles.values()]:[caller.handles.get(explicitHandle)];
+    if(!candidates.some(h=>h&&!h.revoked&&(h.rights&QOS_RIGHTS.SIGNAL)&&h.object==="proc:"+targetPid))return err("EACCES","no SIGNAL handle for target");
+    // Queued shell processes must be activated by sh_control, which also
+    // records job mode. Do not bypass the shell's start boundary.
+    if(transition==="resume"&&this.shellJobs.get(targetPid)?.mode==="queued")return err("EINVAL","queued shell job requires sh_control");
+    return this.replayLifecycle(targetPid,transition);
+  }
+
   /** Target-owner consent: grant only SIGNAL over oneself, with a revoker
    * retained by the target. No generic room-root open is exposed by replay. */
   grantSignal(targetPid: string, rootId: string, recipientPid: string, allocation: string): QosResult<{ revoker: QosHandleInfo; handle: QosHandleInfo }> {
@@ -1273,7 +1293,7 @@ export class QosKernel {
 export type QosCanonicalSyscallRequest = {
   schema: "qos.syscall/1";
   caller: string;
-  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp | MemoryOp | VfsOp | ShellOp | IdentityOp | DeviceOp | InitOp;
+  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | "proc_suspend" | "proc_resume" | SchedulerOp | MemoryOp | VfsOp | ShellOp | IdentityOp | DeviceOp | InitOp;
   args: Record<string, unknown>;
   observed?:string[];
 };
@@ -1308,6 +1328,13 @@ function parseSyscallRequest(payload: Record<string, unknown>, pid: string): Qos
       if (!exactKeys(args, keys) || typeof args.handle !== "string") return null;
       if (keys.includes("handleVersion") && (typeof args.handleVersion !== "string" || !/^[0-9a-f]{64}$/.test(args.handleVersion))) return null;
       if (payload.op === "cap_derive" && (typeof args.rights !== "number" || !Number.isSafeInteger(args.rights))) return null;
+      break;
+    }
+    case "proc_suspend":case "proc_resume":{
+      const keys=["handle","target","targetVersion"];
+      if(args&&typeof args==="object"&&Object.hasOwn(args,"handleVersion"))keys.push("handleVersion");
+      if(!exactKeys(args,keys)||typeof args.handle!=="string"||typeof args.target!=="string"||!isObjectId(args.targetVersion)||
+        (keys.includes("handleVersion")&&!isObjectId(args.handleVersion)))return null;
       break;
     }
     case "signal_grant":
@@ -1508,6 +1535,8 @@ function executeUnmeteredSyscall(kernel: QosKernel, request: QosCanonicalSyscall
     case "cap_derive": return kernel.capDerive(pid, request.args.handle as string, request.args.rights as number, requestHash === undefined ? undefined : `h:request:${requestHash}`);
     case "cap_close": return kernel.capClose(pid, request.args.handle as string);
     case "cap_revoke": return kernel.capRevoke(pid, request.args.handle as string);
+    case "proc_suspend": return kernel.suspend(pid,request.args.target as string,request.args.handle as string);
+    case "proc_resume": return kernel.resume(pid,request.args.target as string,request.args.handle as string);
     case "signal_grant": return requestHash === undefined ? err("EINVAL", "request hash required") :
       kernel.grantSignal(pid, request.args.handle as string, request.args.target as string, requestHash);
     case "signal": {
@@ -1560,7 +1589,7 @@ function syscallVersionsMatch(kernel: QosKernel, request: QosCanonicalSyscallReq
     if(observed&&Object.entries(observed).some(([k,v])=>args[k]!==v))return false;
     if(typeof args.dataHandle==="string"&&args.dataVersion!==kernel.handleVersion(pid,args.dataHandle))return false;
   }
-  if (request.op === "signal" || request.op === "signal_grant")
+  if (request.op === "signal" || request.op === "signal_grant" || request.op==="proc_suspend" || request.op==="proc_resume")
     return args.targetVersion === kernel.processVersion(args.target as string);
   return true;
 }
