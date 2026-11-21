@@ -64,7 +64,15 @@ creation; it says nothing about another room or another process's handles.
 
 ### Suspend / resume (ABI v0 model)
 
-The kernel model supports explicit `suspend(caller, target)` and `resume(caller, target)` transitions. Both require a live capability handle whose object is `proc:<target>` and whose rights include `SIGNAL`; self-suspend/self-resume is rejected (`EINVAL`). Suspend is valid only from `running`, resume only from `suspended`. These are deterministic state transitions, not scheduler preemption: the model does not yet implement CPU scheduling or execution queues. A suspended child remains active, so `wait` returns `EAGAIN`. Terminating signals may target a suspended process and move it to `exited`.
+The kernel model supports explicit `suspend(caller, target)` and `resume(caller, target)` transitions. Both require a live capability handle whose object is `proc:<target>` and whose rights include `SIGNAL`; self-suspend/self-resume is rejected (`EINVAL`). Suspend is valid only from `running`, resume only from `suspended`. These are deterministic state transitions, not scheduler preemption: the model does not yet implement CPU scheduling or execution queues. A suspended process is not a valid syscall caller; caller-side kernel operations fail with `ENOENT`. A suspended child remains active, so `wait` returns `EAGAIN`. Terminating signals may target a suspended process and move it to `exited`.
+
+| Transition | Preconditions | Result |
+|---|---|---|
+| `running → suspended` | caller running, target running, non-self, target `SIGNAL` handle | `ok(true)` |
+| `suspended → running` | caller running, target suspended, non-self, target `SIGNAL` handle | `ok(true)` |
+| repeated suspend / invalid resume | state precondition not met | `EINVAL` |
+| missing process-control capability | no live target `SIGNAL` handle | `EACCES` |
+| suspended child wait | direct child is suspended (not exited) | `EAGAIN` |
 
 The room-facing process table (`/qos status`, `/ps`) is a **view** of this kernel table
 plus the dyncap-attributed `qos.event/1` journal. The kernel model is the authority for v0

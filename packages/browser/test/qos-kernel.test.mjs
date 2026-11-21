@@ -131,6 +131,8 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   ok("self suspend is rejected", errno(selfSuspend) === "EINVAL", errno(selfSuspend));
   const suspended = k.suspend(init.pid, worker.value.pid);
   ok("SIGNAL handle suspends target", suspended.ok && k.getProcess(worker.value.pid)?.state === "suspended", errno(suspended));
+  const suspendedOpen = k.open(worker.value.pid, "resource:while-suspended", R.READ);
+  ok("suspended process cannot perform kernel operations", errno(suspendedOpen) === "ENOENT", errno(suspendedOpen));
   const repeatSuspend = k.suspend(init.pid, worker.value.pid);
   ok("suspend of an already suspended process is EINVAL", errno(repeatSuspend) === "EINVAL", errno(repeatSuspend));
   const suspendedWait = k.wait(init.pid, worker.value.pid);
