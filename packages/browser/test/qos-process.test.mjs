@@ -98,6 +98,33 @@ ok("an unknown type is rejected", Q.parseQosEvent({ kind: "qos-event", schema: Q
 ok("a non-event is rejected", Q.parseQosEvent(null) === null);
 ok("canonical JSON sorts keys recursively",
   Q.canonicalJson({ b: 2, a: { d: 4, c: 3 } }) === '{"a":{"c":3,"d":4},"b":2}');
+// Causal canonicalization must override stable tuple order when a dependency
+// exists, while using compareEvents only among ready events.
+{
+  const ev = (hash, source, seq, prev = "genesis", grant = "root") => ({ hash, source, seq, prev, grant });
+  const parent = ev("p", "z-source", 1);
+  const child = ev("c", "a-source", 1, "p");
+  const concurrent = ev("x", "m-source", 1);
+  const ordered = Q.canonicalEventOrder([child, concurrent, parent]);
+  ok("causal predecessor is ordered before its consumer", ordered.ordered.findIndex(e => e.hash === "p") < ordered.ordered.findIndex(e => e.hash === "c"));
+  ok("valid explicit dependencies produce no missing refs or cycles", ordered.missingDependencies.length === 0 && ordered.cyclicHashes.length === 0);
+  const permuted = Q.canonicalEventOrder([parent, child, concurrent]);
+  eq("arrival permutation preserves causal canonical order", permuted.ordered.map(e => e.hash), ordered.ordered.map(e => e.hash));
+  const permutations = [
+    [child, concurrent, parent], [child, parent, concurrent],
+    [concurrent, child, parent], [concurrent, parent, child],
+    [parent, child, concurrent], [parent, concurrent, child],
+  ];
+  ok("all permutations produce the same causal canonical order", permutations.every(input =>
+    JSON.stringify(Q.canonicalEventOrder(input).ordered.map(e => e.hash)) === JSON.stringify(ordered.ordered.map(e => e.hash))));
+  const grant = ev("g", "b-source", 2);
+  const granted = ev("q", "a-source", 3, "genesis", "g");
+  eq("grant dependency is ordered before its consumer", Q.canonicalEvents([granted, grant]).map(e => e.hash), ["g", "q"]);
+  const missing = Q.canonicalEventOrder([ev("m1", "a", 1, "missing-prev")]);
+  ok("missing dependencies are surfaced", missing.missingDependencies.length === 1 && missing.missingDependencies[0].kind === "prev");
+  const cycle = Q.canonicalEventOrder([ev("cy1", "a", 1, "cy2"), ev("cy2", "b", 1, "cy1")]);
+  eq("dependency cycles are surfaced deterministically", cycle.cyclicHashes, ["cy1", "cy2"]);
+}
 
 // ---------------------------------------------------------------------------
 // 2. Capability derivation and attenuation
