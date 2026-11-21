@@ -61,7 +61,7 @@ function validNode(value: unknown): value is RhoProcessNode {
   }
   return false;
 }
-function validPackageBase(value: unknown): value is Omit<RhoProcessPackage, "contentHash"> {
+function validPackageBase(value: unknown): boolean {
   return isRecord(value) && value.format === "rho-process-package" && value.version === 1
     && isRecord(value.provenance) && typeof value.provenance.authorAnchor === "string" && value.provenance.authorAnchor.length > 0
     && typeof value.provenance.exportedAt === "string"
@@ -82,9 +82,10 @@ export async function importRhoProcessPackage(raw: string | unknown): Promise<Im
     try { value = JSON.parse(raw); } catch { throw new Error("invalid process package JSON"); }
   }
   if (!isRecord(value) || typeof value.contentHash !== "string" || !validPackageBase(value)) throw new Error("invalid process package: schema validation failed");
-  const { contentHash, ...base } = value;
+  const pkg = value as unknown as RhoProcessPackage;
+  const { contentHash, ...base } = pkg;
   const expected = await sha256(canonicalJson(base));
   if (expected !== contentHash) throw new Error("process package hash mismatch");
-  return { process: value.process, provenance: value.provenance, contentHash: value.contentHash };
+  return { process: pkg.process, provenance: pkg.provenance, contentHash: pkg.contentHash };
 }
 
