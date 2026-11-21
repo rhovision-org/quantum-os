@@ -8174,8 +8174,18 @@ async function connect(): Promise<void> {
           const proposalRaw = d.proposal;
           if (!proposalRaw || typeof proposalRaw !== "object") return;
           const proposal = proposalRaw as Proposal;
-          if (!proposal.id || !Array.isArray(proposal.rows) || typeof proposal.expiresAt !== "number") return;
-          if (proposal.expiresAt < Date.now()) return;
+          if (typeof proposal.id !== "string" || !proposal.id || !Array.isArray(proposal.rows)
+              || !Number.isFinite(proposal.expiresAt) || typeof proposal.proposer !== "string"
+              || typeof proposal.proposerName !== "string"
+              || proposal.rows.some(r => !r || typeof r.participant !== "string" || !r.participant
+                  || !r.gives || typeof r.gives.currency !== "string" || !r.gives.currency
+                  || !Number.isSafeInteger(r.gives.denomination) || r.gives.denomination <= 0
+                  || !r.gets || typeof r.gets.currency !== "string" || !r.gets.currency
+                  || !Number.isSafeInteger(r.gets.denomination) || r.gets.denomination <= 0)) return;
+          if (proposal.proposer !== from || proposal.expiresAt < Date.now()
+              || proposal.rows.length < 2 || uniqueParticipants(proposal).length !== proposal.rows.length
+              || !proposal.rows.some(r => r.participant === from)
+              || !proposal.rows.some(r => r.participant === (qpeer?.peerId ?? ""))) return;
           if (!conservationCheck(proposal.rows)) {
             addMessage(from, `proposes rendezvous`, "peer", peerLabel(from));
             addMessage("", `  · refused: conservation violation`, "system");
@@ -8250,7 +8260,7 @@ async function connect(): Promise<void> {
           if (status.startsWith("  · refused")) return;
           const id = String(d.id ?? "");
           const state = proposals.get(id);
-          if (!state || state.role !== "proposer") return;
+          if (!state || state.role !== "proposer" || !state.proposal.rows.some(r => r.participant === from)) return;
           addMessage(from, `rejects rdv ${shortRdvId(id)}`, "peer", peerLabel(from));
           releaseLockedFor(id);
           if (qpeer) {
@@ -8273,7 +8283,7 @@ async function connect(): Promise<void> {
           if (!Array.isArray(rowsRaw)) return;
           const commitRows = rowsRaw as CommitRow[];
           const state = proposals.get(id);
-          if (!state || state.role !== "participant") return;
+          if (!state || state.role !== "participant" || from !== state.proposal.proposer) return;
           if (state.myStatus !== "accepted") return;
           const ok = applyCommit(state, commitRows);
           proposals.delete(id);
@@ -8290,7 +8300,7 @@ async function connect(): Promise<void> {
           const id = String(d.id ?? "");
           const reason = String(d.reason ?? "");
           const state = proposals.get(id);
-          if (!state) return;
+          if (!state || state.role !== "participant" || from !== state.proposal.proposer) return;
           releaseLockedFor(id);
           proposals.delete(id);
           clearProposalTimeout(id);
@@ -8316,6 +8326,20 @@ async function connect(): Promise<void> {
           if (!state) {
             addMessage(from, `counters rdv ${shortRdvId(id)}`, "peer", peerLabel(from));
             addMessage("", `  · refused: no matching proposal`, "system");
+            return;
+          }
+          const expectedOther = uniqueParticipants(state.proposal).find(p => p !== (qpeer?.peerId ?? ""));
+          const counterParticipants = uniqueParticipants({ ...state.proposal, rows: newRows });
+          if (uniqueParticipants(state.proposal).length !== 2
+              || !expectedOther || from !== expectedOther || newRows.length !== 2
+              || newRows.some(r => !r || typeof r.participant !== "string" || !r.participant
+                  || !r.gives || typeof r.gives.currency !== "string" || !r.gives.currency
+                  || !Number.isSafeInteger(r.gives.denomination) || r.gives.denomination <= 0
+                  || !r.gets || typeof r.gets.currency !== "string" || !r.gets.currency
+                  || !Number.isSafeInteger(r.gets.denomination) || r.gets.denomination <= 0)
+              || counterParticipants.length !== 2
+              || counterParticipants.some(p => !uniqueParticipants(state.proposal).includes(p))) {
+            addMessage("", `  · refused: counter sender or participant set mismatch`, "system");
             return;
           }
           if (!conservationCheck(newRows)) {
