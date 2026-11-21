@@ -629,7 +629,7 @@ export function compareEvents(a: QosEvent, b: QosEvent): number {
     compareStrings(a.hash, b.hash);
 }
 
-export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier" | "memory-frontier" | "vfs-version" | "shell-version" | "proxy-version";
+export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier" | "memory-frontier" | "vfs-version" | "shell-version" | "proxy-version" | "observed-receipt";
 export interface QosDependency { hash: string; kind: QosDependencyKind }
 /** Only schema-defined references are causal, never arbitrary payload strings. */
 export function eventDependencies(event: QosEvent): QosDependency[] {
@@ -692,6 +692,10 @@ export function eventDependencies(event: QosEvent): QosDependency[] {
     for(const key of ["handleVersion","targetVersion","proxyVersion","caretakerVersion","resourceVersion","rootVersion","targetProcessVersion","dataVersion"]){
       const hash=args[key];if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:key==="proxyVersion"?"proxy-version":key==="rootVersion"?"vfs-version":["targetVersion","caretakerVersion","targetProcessVersion"].includes(key)?"process-version":"handle-version"});
     }
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&
+    Array.isArray(event.payload.observed)&&event.payload.observed.length<=4096){
+    for(const hash of event.payload.observed)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"observed-receipt"});
   }
   return refs;
 }

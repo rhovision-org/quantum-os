@@ -276,6 +276,16 @@ export class QosCommand {
     const payload = { schema: "qos.syscall/1", caller: entry.id, op: operation.trim(), args };
     const current = () => replayQosKernel(this.room.log.events(), this.room.log.forkedSources);
     const before = current();
+    // The application has seen these admitted chain tips. Preserve causality
+    // across different peer/process chains instead of letting a later revoke
+    // or proxy-set retroactively precede an already-observed receipt.
+    const admitted=new Set(before.applied),tips=new Map<string,QosEvent>();
+    for(const e of this.room.log.events())if(admitted.has(e.hash)){
+      const key=e.source+"\u0000"+e.process,previous=tips.get(key);
+      if(!previous||e.seq>previous.seq)tips.set(key,e);
+    }
+    if(tips.size>4096){this.host.say("observed journal frontier exceeds limit");return;}
+    Object.assign(payload,{observed:[...new Set([...tips.values()].map(e=>e.hash))].sort()});
     if (args && typeof args === "object" && !Array.isArray(args) &&
         "handle" in args && typeof args.handle === "string" && !Object.hasOwn(args, "handleVersion")) {
       const version = before.kernel.handleVersion(entry.id, args.handle);

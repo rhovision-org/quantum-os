@@ -922,3 +922,11 @@ Group ownership and group-controlled proxy transfer remain blocked on #103:
 exists); group operations are explicitly ENOTSUP. A local roster, role,
 or a self-declared threshold is not group authority. #107's library/inbox/
 sync-consent and group-owner integration is outside this mediated OS slice.
+
+
+Permission commands preserve the causal receipts observed by the issuing
+client, including accepted tips on other process/source chains. Commands
+with an observed frontier depend on those exact receipt hashes in canonical
+order. Missing receipts fail closed. Older raw requests remain supported
+with their operation-specific version constraints; concurrent histories
+can still conflict. This is causal replay, not wall-clock finality.

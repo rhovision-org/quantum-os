@@ -997,6 +997,7 @@ export type QosCanonicalSyscallRequest = {
   caller: string;
   op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp | MemoryOp | VfsOp | ShellOp | IdentityOp;
   args: Record<string, unknown>;
+  observed?:string[];
 };
 export type QosCanonicalSyscallTrace = {
   requestHash: string;
@@ -1012,8 +1013,11 @@ function exactKeys(value: unknown, keys: string[]): value is Record<string, unkn
     Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 }
 function parseSyscallRequest(payload: Record<string, unknown>, pid: string): QosCanonicalSyscallRequest | null {
-  if (!exactKeys(payload, ["schema", "caller", "op", "args"]) ||
-      payload.schema !== "qos.syscall/1" || payload.caller !== pid) return null;
+  const keys=["schema","caller","op","args"];
+  if(Object.hasOwn(payload,"observed"))keys.push("observed");
+  if (!exactKeys(payload,keys) || payload.schema !== "qos.syscall/1" || payload.caller !== pid) return null;
+  if(keys.includes("observed")&&(!Array.isArray(payload.observed)||payload.observed.length>4096||
+    !payload.observed.every((h,i,a)=>isObjectId(h)&&(i===0||a[i-1]<h))))return null;
   const args = payload.args;
   switch (payload.op) {
     case "getpid": case "getppid":
