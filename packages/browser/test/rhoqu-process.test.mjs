@@ -124,6 +124,19 @@ const asyncResults = await executeRhoProcessAsync(parallelIR, async command => {
 ok("parallel branches overlap execution", maxAsync === 2);
 ok("parallel results preserve source order", asyncResults.map(r => r.command).join("|") === "/async one|/async two");
 ok("parallel commands dispatched successfully", asyncCommands.length === 2 && asyncResults.every(r => r.ok));
+// Failure semantics: sibling branches and following sequence commands still run; errors stay structured.
+const parallelFailureIR = processFromCommands(["/parallel before"]).steps;
+const failureParallel = { kind: "parallel", branches: [
+  { kind: "command", command: "/branch fail" },
+  { kind: "command", command: "/branch survive" },
+]};
+const failureOrder = [];
+const failureResults = await executeRhoProcessAsync({ kind: "sequence", steps: [...parallelFailureIR, failureParallel, { kind: "command", command: "/after parallel" }] }, async command => {
+  failureOrder.push(command); if (command === "/branch fail") throw new Error("branch synthetic failure"); return [command];
+});
+ok("parallel failure remains structured", failureResults.find(r => r.command === "/branch fail")?.ok === false && failureResults.find(r => r.command === "/branch fail")?.error === "branch synthetic failure");
+ok("parallel sibling survives branch failure", failureResults.find(r => r.command === "/branch survive")?.ok === true);
+ok("sequence continues after parallel failure", failureOrder.includes("/after parallel") && failureResults.at(-1)?.command === "/after parallel");
 let activeSequential = 0, maxSequential = 0;
 await executeRhoProcessAsync(processFromCommands(["/async first", "/async second"]), async command => {
   activeSequential++; maxSequential = Math.max(maxSequential, activeSequential);
