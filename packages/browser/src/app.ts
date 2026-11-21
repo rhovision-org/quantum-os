@@ -6293,19 +6293,7 @@ function handleCommand(raw: string): string[] {
       const handlersAfter = rhoquHandlers.length;
       sys(`· rhoqu transpiled to ${cmds.length} command${cmds.length === 1 ? "" : "s"}`);
       const process = processFromCommands(cmds);
-      const results = executeRhoProcess(process, (command) => {
-        // Poll creation is the first command with a stable structured ID that
-        // RhoQu can bind. Capture the ID from the poll store, not display text.
-        const before = command.trim().match(/^\/poll\s+new\b/i)
-          ? new Set(pollStore.keys())
-          : null;
-        const lines = runInput(command);
-        if (before) {
-          const created = [...pollStore.keys()].filter((id) => !before.has(id));
-          if (created.length === 1) return { lines, id: created[0] };
-        }
-        return lines;
-      });
+      const results = executeRhoProcess(process, (command) => runInput(command));
       const executed = results.filter((result) => result.ok).length;
       for (const result of results) {
         if (!result.ok) sys(`· rhoqu error on '${result.command}': ${result.error}`);
