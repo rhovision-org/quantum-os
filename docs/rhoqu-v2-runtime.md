@@ -43,3 +43,12 @@ observes exactly one new ID in the authoritative store. Unstructured output is
 never parsed to invent an ID. Binding state is sequential and isolated across
 parallel branches.
 
+
+## Process packages
+
+`/rhoqu package` opens the process-package UI. Source can be previewed and
+exported as a canonical JSON package; an existing package can be imported after
+schema and content-hash validation. Imported package content and provenance are
+shown for review. This UI is preview/import/export only: importing a package
+never executes commands or grants capabilities. Execution remains a separate,
+explicit action in the normal RhoQu command path.
