@@ -20,6 +20,7 @@ import { findDiscrepancies, losingPeersIn, normalizeValue,
          type Observation } from "./probe.js";
 import { transpileProcess as rhoquTranspileProcess, evaluateRhoQuRuntimeCondition, RhoQuError, type RhoQuContext, type RhoQuRuntimeSnapshot, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
 import { executeRhoProcessWithStoreBindingsAsync, countRhoProcessCommands, type RhoFlatProcess } from "./rhoqu-process.js";
+import { openRhoQuPackageUI } from "./rhoqu-package-ui.js";
 import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
          type Poll, type PollMethod, type PollOption } from "./polls.js";
 import { canonLemma, parseRefTokens, parseLemmaDecl, splitLemmaNameArg } from "./lemma-parse.js";
@@ -3624,6 +3625,7 @@ function handleCommand(raw: string): string[] {
         "  /macro [sub]     — write a +command: define · list · show · find · echo (a body of / commands, or of rholang)",
         "  +name <args>     — run a command somebody here defined (++text to send a literal + line)",
         "  /rhoqu <src>     — RhoQu macro: process/new/parallel/call → /commands",
+        "  /rhoqu package    — import/export validated process packages (preview only)",
         "  /rholang <sub>   — run rholang on rnode: eval · deploy · echo · read · status · config (multi-line, end with a blank line)",
         "  @name in args    — expand named lemma (e.g. /qucalc @major @minor)",
         "  [multi word]      — a spaced name: /lemma [all men are mortal]  ·  cite as @[all men are mortal]",
@@ -6240,6 +6242,7 @@ function handleCommand(raw: string): string[] {
 
     case "rhoqu": {
       const src = arg.trim();
+      if (src === "package") { openRhoQuPackageUI(dyncapState?.anchor); break; }
       // Subcommands for managing registered on-handlers.
       if (src === "list") {
         if (rhoquHandlers.length === 0) {
