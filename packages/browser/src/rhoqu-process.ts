@@ -39,20 +39,26 @@ export function executeRhoProcess(process: RhoProcessNode, executeCommand: (comm
   return results;
 }
 
-/** Live-dispatch adapter: capture /poll new IDs from the authoritative store. */
+/** Live-dispatch adapter: bind only a unique ID newly created in the authoritative store. */
+export function executeRhoProcessWithStoreBindings(
+  process: RhoProcessNode,
+  executeCommand: (command: string) => readonly string[] | RhoCommandExecution,
+  getIdsForCommand: (command: string) => readonly string[],
+): RhoCommandResult[] {
+  return executeRhoProcess(process, (command) => {
+    const before = new Set(getIdsForCommand(command));
+    const raw = executeCommand(command);
+    const execution: RhoCommandExecution = Array.isArray(raw) ? { lines: raw } : raw as RhoCommandExecution;
+    const created = getIdsForCommand(command).filter((id) => !before.has(id));
+    if (created.length === 1) return { ...execution, id: created[0] };
+    return raw;
+  });
+}
+/** Compatibility adapter for poll-only callers. */
 export function executeRhoProcessWithPollBindings(
   process: RhoProcessNode,
   executeCommand: (command: string) => readonly string[] | RhoCommandExecution,
   getPollIds: () => readonly string[],
 ): RhoCommandResult[] {
-  return executeRhoProcess(process, (command) => {
-    const before = /^\/poll\s+new\b/i.test(command) ? new Set(getPollIds()) : null;
-    const raw = executeCommand(command);
-    const execution: RhoCommandExecution = Array.isArray(raw) ? { lines: raw } : raw as RhoCommandExecution;
-    if (before) {
-      const created = getPollIds().filter((id) => !before.has(id));
-      if (created.length === 1) return { ...execution, id: created[0] };
-    }
-    return raw;
-  });
+  return executeRhoProcessWithStoreBindings(process, executeCommand, (command) => /^\/poll\s+new\b/i.test(command) ? getPollIds() : []);
 }

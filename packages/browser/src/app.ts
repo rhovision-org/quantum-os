@@ -19,7 +19,7 @@ import { findDiscrepancies, losingPeersIn, normalizeValue,
          SAMPLE_SIZE, PROBE_WINDOW_MS,
          type Observation } from "./probe.js";
 import { transpileProcess as rhoquTranspileProcess, RhoQuError, type RhoQuContext, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
-import { executeRhoProcessWithPollBindings, type RhoFlatProcess } from "./rhoqu-process.js";
+import { executeRhoProcessWithStoreBindings, type RhoFlatProcess } from "./rhoqu-process.js";
 import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
          type Poll, type PollMethod, type PollOption } from "./polls.js";
 import { canonLemma, parseRefTokens, parseLemmaDecl, splitLemmaNameArg } from "./lemma-parse.js";
@@ -6294,7 +6294,13 @@ function handleCommand(raw: string): string[] {
       const handlersAfter = rhoquHandlers.length;
       const cmds = process.steps.map((step) => step.command);
       sys(`· rhoqu transpiled to ${cmds.length} command${cmds.length === 1 ? "" : "s"}`);
-      const results = executeRhoProcessWithPollBindings(process, (command) => runInput(command), () => [...pollStore.keys()]);
+      const results = executeRhoProcessWithStoreBindings(process, (command) => runInput(command), (command) => {
+        if (/^\/poll\s+new\b/i.test(command)) return [...pollStore.keys()];
+        if (/^\/lemma\b/i.test(command)) return [...lemmaStore.keys()];
+        if (/^\/note\s+grant\b/i.test(command)) return [...noteStore.keys()];
+        if (/^\/rdv\s+swap\b/i.test(command)) return [...proposals.keys()];
+        return [];
+      });
       const executed = results.filter((result) => result.ok).length;
       for (const result of results) {
         if (!result.ok) sys(`· rhoqu error on '${result.command}': ${result.error}`);
