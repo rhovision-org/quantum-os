@@ -3144,7 +3144,7 @@ function requiresInteractiveApproval(command: string): boolean {
   // These command families include state mutation, transfer, consent, or
   // signed on-chain writes. Their subcommand surfaces evolve; runners without
   // a direct approval UI must not infer safety from a verb allowlist.
-  return /^(?:socket\s+(?:listen|connect)|rholang\s+(?:deploy|macro|(?:locker\s+install|register|bind|record|grant))|gov(?:\s|$)|note(?:\s|$)|reset(?:\s|$)|forget(?:\s|$)|remove(?:\s|$)|retract(?:\s|$)|rm(?:\s|$)|pass(?:\s|$)|persist(?:\s+accept\b|\s+reject\b)|channel\s+chain(?:\s|$)|rholang\s+key\s+(?:generate|forget|[0-9a-f]{64}))/i.test(normalized);
+  return /^(?:socket\s+(?:listen|connect)|rholang\s+(?:deploy|macro|(?:locker\s+install|register|bind|record|grant))|gov(?:\s|$)|note(?:\s|$)|reset(?:\s|$)|forget(?:\s|$)|remove(?:\s|$)|retract(?:\s|$)|rm(?:\s|$)|pass(?:\s|$)|grant(?:\s|$)|persist(?:\s+accept\b|\s+reject\b)|channel\s+chain(?:\s|$)|rholang\s+key\s+(?:generate|forget|[0-9a-f]{64}))/i.test(normalized);
 }
 
 
