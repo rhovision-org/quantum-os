@@ -6851,12 +6851,18 @@ function handleCommand(raw: string): string[] {
         const [_,conn,process,handle,...extra]=sParts;
         const socket=socketConns.get(conn),controller=qosCommandFor(cmdCtx);
         if(!socket||!controller||!process||!handle||extra.length){sys("usage: /socket device <connection-id> <process> <open-mesh-session>");break;}
-        const adopted=await controller.attachDevice(process,handle,"mesh-socket",()=>{
-          if(socketConns.get(conn)!==socket)throw Error("socket no longer available");
-          socketConns.delete(conn);socket.onData=null;socket.onClose=null;
+        const report=(message:string)=>{
+          const prev=activeRoom;setActiveRoom(cmdCtx);
+          try{addMessage("",message,"system");}finally{setActiveRoom(prev);}
+        };
+        const connections=socketConns;
+        void controller.attachDevice(process,handle,"mesh-socket",()=>{
+          if(connections.get(conn)!==socket)throw Error("socket no longer available");
+          connections.delete(conn);socket.onData=null;socket.onClose=null;
           return meshSocketDriver(socket);
-        });
-        sys(adopted?"socket transferred to device session":"device transfer refused");break;
+        }).then(adopted=>report(adopted?"socket transferred to device session":"device transfer refused"),
+          ()=>report("device transfer failed"));
+        break;
       }
 
       if (ssub === "listen") {
