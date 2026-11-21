@@ -6234,7 +6234,7 @@ function handleCommand(raw: string): string[] {
           };
           sys(`· requesting ${targetName} to also persist currency ${cname}`);
         }
-        if (payload) qpeer.send(targetId, payload);
+        if (payload) signedSend(targetId, payload);
       } else {
         sys(`unknown subcommand: /persist ${sub}`);
         sys("  /persist @<lemma> to <peer>        — request peer to also persist");
@@ -8314,6 +8314,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "persist-request") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const id = String(d.id ?? "");
           const persistKind = String(d.persistKind ?? "");
           const fromName = String(d.fromName ?? peerLabel(from));
