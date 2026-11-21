@@ -221,11 +221,12 @@ export class QosCommand {
     }
     const before = replayQosKernel(this.room.log.events(), this.room.log.forkedSources).kernel.getProcess(entry.id);
     const state = before?.state ?? "unknown";
+    const displayState = state === "exited" || state === "reaped" ? "terminated" : state;
     const allowed = verb === "suspend" ? state === "running"
       : verb === "resume" ? state === "suspended"
       : state === "running" || state === "suspended";
     if (!allowed) {
-      this.host.say(`cannot ${verb} **${entry.name}** from kernel state ${state}`);
+      this.host.say(`cannot ${verb} **${entry.name}** from ${displayState}`);
       return;
     }
     const grant = this.room.findGrant(entry.id, this.host.identity.anchor);
