@@ -195,6 +195,15 @@ jobs:
       - name: Calls test
         run: node packages/browser/test/calls.test.mjs
 
+      # The structured RhoQu process executor: ordering, nested sequences,
+      # failure isolation, and binding semantics.
+      - name: RhoQu process IR test
+        run: node packages/browser/test/rhoqu-process.test.mjs
+
+      # RhoQu bind syntax through parser, IR, and structured runtime IDs.
+      - name: RhoQu binding integration test
+        run: node packages/browser/test/rhoqu-binding.test.mjs
+
       # The browser peer against a stubbed clock, socket and RTCPeerConnection:
       # the retry sweep (wrong twice from live rooms), and the relayed control
       # plane — sealed frames, in-order queueing through a socket blip,

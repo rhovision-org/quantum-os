@@ -18,7 +18,9 @@ import { encryptVault, decryptVault, looksLikeVault } from "./vault.js";
 import { findDiscrepancies, losingPeersIn, normalizeValue,
          SAMPLE_SIZE, PROBE_WINDOW_MS,
          type Observation } from "./probe.js";
-import { transpile as rhoquTranspile, RhoQuError, type RhoQuContext, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
+import { transpileProcess as rhoquTranspileProcess, evaluateRhoQuRuntimeCondition, RhoQuError, type RhoQuContext, type RhoQuRuntimeSnapshot, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
+import { executeRhoProcessWithStoreBindingsAsync, countRhoProcessCommands, type RhoFlatProcess } from "./rhoqu-process.js";
+import { openRhoQuPackageUI } from "./rhoqu-package-ui.js";
 import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
          type Poll, type PollMethod, type PollOption } from "./polls.js";
 import { canonLemma, parseRefTokens, parseLemmaDecl, splitLemmaNameArg } from "./lemma-parse.js";
@@ -856,30 +858,29 @@ async function loadDyncap(): Promise<void> {
   }
 }
 
-// Sign-and-broadcast: enqueues the signing so seq order is preserved across
-// concurrent outbound envelopes. Falls back to an unsigned send if dyncap
-// hasn't been initialized yet (early-init edge cases).
+// Sign-and-broadcast: enqueues signing so sequence order is preserved across
+// concurrent outbound envelopes. Missing identity drops the message (fail closed).
 function signedBroadcast(envelope: Record<string, unknown>): void {
   signQueue = signQueue.then(async () => {
     if (!qpeer) return;
-    if (!dyncapState) { qpeer.broadcast(envelope); return; }
+    if (!dyncapState) return;
     const dyncap = await signEnvelope(dyncapState, activeRoom.roomId, envelope);
     saveDyncap();
     qpeer.broadcast({ ...envelope, dyncap });
   }).catch(() => { /* swallow signing errors so the queue keeps moving */ });
 }
 
-function signedSend(peerId: string, envelope: Record<string, unknown>): boolean {
-  // For direct sends we return synchronously (false if no peer/channel);
-  // signing is queued and fires on the same channel.
-  if (!qpeer) return false;
-  signQueue = signQueue.then(async () => {
-    if (!qpeer || !dyncapState) return;
+function signedSend(peerId: string, envelope: Record<string, unknown>): Promise<boolean> {
+  // Resolve only after signing and transport enqueue have both completed. The
+  // queue remains ordered and resilient to a prior rejected signing operation.
+  const send = signQueue.then(async () => {
+    if (!qpeer || !dyncapState) return false;
     const dyncap = await signEnvelope(dyncapState, activeRoom.roomId, envelope);
     saveDyncap();
-    qpeer.send(peerId, { ...envelope, dyncap });
-  }).catch(() => { /* swallow */ });
-  return true;
+    return qpeer.send(peerId, { ...envelope, dyncap });
+  }).catch(() => false);
+  signQueue = send.then(() => undefined, () => undefined);
+  return send;
 }
 
 /// The per-room `/qos` controller. Its transport reads the room context's peer
@@ -939,7 +940,7 @@ function goalsForIdentity(): GoalStore | null {
 /// affected peer is flagged contested and the user is notified.
 async function verifyDyncapIfPresent(from: string, d: Record<string, unknown>): Promise<string> {
   const raw = d.dyncap;
-  if (!raw || typeof raw !== "object") return "";
+  if (!raw || typeof raw !== "object") return "  · refused: unsigned envelope";
   const dyncap = raw as DyncapField;
   const prior = dyncapChains.get(from);
   const result: VerifyResult = await verifyEnvelope(prior, activeRoom.roomId, d, dyncap);
@@ -2187,6 +2188,11 @@ function detachFromFree(chosen: NoteEntry, N: number): { outgoing: string; chang
   return { outgoing: paid, change };
 }
 
+function restoreDetachedNote(chosen: NoteEntry, change: NoteEntry | null): void {
+  if (change) noteStore.delete(change.token);
+  noteStore.set(chosen.token, chosen);
+}
+
 function lockToken(token: string, entry: NoteEntry, proposalId: string): void {
   lockedNotes.set(token, {
     token,
@@ -2235,7 +2241,7 @@ function proposalTimedOut(id: string): void {
   if (state.role === "proposer" && qpeer) {
     const self = qpeer.peerId;
     const targets = uniqueParticipants(state.proposal).filter(p => p !== self);
-    for (const t of targets) qpeer.send(t, { kind: "rdv-abort", id, reason: "timeout" });
+    for (const t of targets) signedSend(t, { kind: "rdv-abort", id, reason: "timeout" });
   }
   addMessage("", `· rendezvous ${shortRdvId(id)} expired`, "system");
 }
@@ -2245,30 +2251,56 @@ function proposalTimedOut(id: string): void {
 /// expectation is violated (in which case caller should not finalize state).
 function applyCommit(state: ProposalState, commitRows: CommitRow[]): boolean {
   const myId = qpeer?.peerId ?? "";
-  const myRows = state.proposal.rows.filter(r => r.participant === myId);
-  const matched: CommitRow[] = [];
-  const remaining = commitRows.filter(c => c.participant === myId);
-  for (const myRow of myRows) {
-    const idx = remaining.findIndex(c =>
-      parseNoteLabel(c.getsToken)?.currency === myRow.gets.currency &&
-      noteDenomination(c.getsToken) === myRow.gets.denomination &&
-      parseNoteLabel(c.getsToken)?.kind === "note" &&
-      validateCapability(c.getsToken));
-    if (idx < 0) return false;
-    matched.push(remaining[idx]);
-    remaining.splice(idx, 1);
+  const proposalRows = state.proposal.rows;
+  const participants = uniqueParticipants(state.proposal);
+  // Validate the complete assignment before mutating wallet/lock state. A
+  // commit must contain exactly one row per participant, preserve each row's
+  // token specs, form the proposal's token cycle, and include my actual lock.
+  if (commitRows.length !== proposalRows.length || participants.length !== proposalRows.length) return false;
+  const byParticipant = new Map<string, CommitRow>();
+  const gives = new Set<string>();
+  const gets = new Set<string>();
+  for (const cr of commitRows) {
+    if (byParticipant.has(cr.participant) || !participants.includes(cr.participant)) return false;
+    byParticipant.set(cr.participant, cr);
   }
-  for (const cr of matched) {
-    lockedNotes.delete(cr.givesToken);
-    const parsed = parseNoteLabel(cr.getsToken);
-    if (!parsed) continue;
-    noteStore.set(cr.getsToken, {
-      token: cr.getsToken,
-      currency: parsed.currency,
-      denomination: noteDenomination(cr.getsToken),
-      receivedFrom: state.proposal.proposerName,
-    });
+  if (participants.some(p => !byParticipant.has(p))) return false;
+  for (const row of proposalRows) {
+    const cr = byParticipant.get(row.participant)!;
+    const give = parseNoteLabel(cr.givesToken);
+    const get = parseNoteLabel(cr.getsToken);
+    if (!give || give.kind !== "note" || give.currency !== row.gives.currency
+        || noteDenomination(cr.givesToken) !== row.gives.denomination || !validateCapability(cr.givesToken)
+        || !get || get.kind !== "note" || get.currency !== row.gets.currency
+        || noteDenomination(cr.getsToken) !== row.gets.denomination || !validateCapability(cr.getsToken)
+        || gives.has(cr.givesToken) || gets.has(cr.getsToken)) return false;
+    gives.add(cr.givesToken);
+    gets.add(cr.getsToken);
   }
+  for (let i = 0; i < proposalRows.length; i++) {
+    const row = proposalRows[i];
+    const next = proposalRows[(i + 1) % proposalRows.length];
+    if (byParticipant.get(row.participant)!.getsToken !== byParticipant.get(next.participant)!.givesToken) return false;
+  }
+  const myRow = proposalRows.find(r => r.participant === myId);
+  if (!myRow) return false;
+  const myCommit = byParticipant.get(myId)!;
+  const myLock = lockedNotes.get(myCommit.givesToken);
+  if (!myLock || myLock.proposalId !== state.proposal.id
+      || myCommit.givesToken !== myLock.token
+      || myLock.currency !== myRow.gives.currency
+      || myLock.denomination !== myRow.gives.denomination) return false;
+
+  // Validation succeeded; settle only now.
+  lockedNotes.delete(myCommit.givesToken);
+  const parsed = parseNoteLabel(myCommit.getsToken);
+  if (!parsed) return false; // guarded above; defensive
+  noteStore.set(myCommit.getsToken, {
+    token: myCommit.getsToken,
+    currency: parsed.currency,
+    denomination: noteDenomination(myCommit.getsToken),
+    receivedFrom: state.proposal.proposerName,
+  });
   return true;
 }
 
@@ -2302,7 +2334,7 @@ function confirmDialog(title: string, body: string, okLabel = "OK"): Promise<boo
     h.style.cssText = "font-weight:600;font-size:15px;margin-bottom:8px";
     const p = document.createElement("div");
     p.textContent = body;
-    p.style.cssText = "font-size:13px;opacity:.85;white-space:pre-wrap;margin-bottom:14px";
+    p.style.cssText = "font-size:13px;opacity:.85;white-space:pre-wrap;margin-bottom:14px;max-height:55vh;overflow:auto";
     const row = document.createElement("div");
     row.style.cssText = "display:flex;gap:8px;justify-content:flex-end";
     const cancel = document.createElement("button");
@@ -2931,9 +2963,9 @@ function runRholangProgram(mode: "eval" | "deploy", source: string): void {
     }
 
     if (!cfg.key) { say("✗ no deploy key — /rholang key generate, or /rholang key <hex>"); return; }
-    const okToDeploy = await confirmDialog("Sign and deploy?",
-      `to ${cfg.url}\nphlo limit ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}`,
-      "Sign and deploy");
+    const okToDeploy = await confirmDialog("Review source — sign and deploy?",
+      `Target: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\nExpanded source (this exact source will be signed):\n\n${source}`,
+      "Approve · sign & deploy");
     if (!okToDeploy) { say("cancelled — nothing deployed"); return; }
     say("signing and deploying to " + cfg.url + "…");
     try {
@@ -3129,6 +3161,23 @@ let macroDepth = 0;
  * Run `+name args`. Returns the lines it printed, so /script and a body can
  * carry it the way they carry a slash command.
  */
+/** Commands whose dispatcher opens an asynchronous approval UI. They cannot be
+ * safely composed inside synchronous command macros, /script, or RhoQu processes:
+ * those runners would advance before the user's decision. Direct invocation stays
+ * available and retains its approval dialog.
+ */
+function requiresInteractiveApproval(command: string): boolean {
+  const normalized = command.trim().replace(/^\/+/, "");
+  // Dollar macros/programs can expand to eval/deploy and bypass the slash-command
+  // gate. Block them in synchronous/automatic runners; direct user input remains.
+  if (normalized.startsWith("$")) return true;
+  // These command families include state mutation, transfer, consent, or
+  // signed on-chain writes. Their subcommand surfaces evolve; runners without
+  // a direct approval UI must not infer safety from a verb allowlist.
+  return /^(?:socket\s+(?:listen|connect)|rholang\s+(?:deploy|macro|(?:locker\s+install|register|bind|record|grant))|gov(?:\s|$)|note(?:\s|$)|reset(?:\s|$)|forget(?:\s|$)|remove(?:\s|$)|retract(?:\s|$)|rm(?:\s|$)|pass(?:\s|$)|grant(?:\s|$)|cap(?:\s|$)|name(?:\s|$)|lemma(?:\s|$)|poll(?:\s|$)|macro(?:\s|$)|goal(?:\s|$)|persist(?:\s|$)|channel(?:\s|$)|share(?:\s|$)|room(?:\s|$)|rhoqu(?:\s|$)|rholang\s+key\s+(?:generate|forget|[0-9a-f]{64}))/i.test(normalized);
+}
+
+
 function runMacroLine(line: string): string[] {
   const out: string[] = [];
   const say = (t: string) => { addMessage("", t, "system"); out.push(t); };
@@ -3157,6 +3206,11 @@ function runMacroLine(line: string): string[] {
   catch (e) { say(`· ${e instanceof MacroError ? e.message : String(e)}`); return out; }
   for (const err of expansion.errors) say(`· ${err.message}`);
   if (expansion.commands.length === 0) { say(`· +${def.name} expanded to nothing`); return out; }
+  const blocked = expansion.commands.find(requiresInteractiveApproval);
+  if (blocked) {
+    say(`· +${def.name}: '${blocked}' requires interactive approval and cannot run inside a synchronous macro`);
+    return out;
+  }
 
   macroDepth++;
   let ran = 0;
@@ -3378,9 +3432,13 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
   // a refusal or any other answer is reported as a failure, never as done.
   const signed = (label: string, program: string, expect: ChannelVerb | "install", done?: (v: unknown, raw: string[]) => void) => {
     if (!cfg.key) { sys("no key — /rholang key generate first"); return; }
-    sys(`${label}…`);
     void (async () => {
       try {
+        const approved = await confirmDialog("Review Channel deploy — sign and submit?",
+          `Action: ${label}\nTarget: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\nExact source to sign:\n\n${program}`,
+          "Approve · sign & deploy");
+        if (!approved) { sys(`cancelled — ${label}; nothing deployed`); return; }
+        sys(`${label}…`);
         const r = await deployTerm(cfg, program);
         if (!r.ok || !r.sig) { say(`✗ ${label}: ${r.message}`); return; }
         const out = await deployVerdict(cfg, r.sig);
@@ -3623,6 +3681,7 @@ function handleCommand(raw: string): string[] {
         "  /macro [sub]     — write a +command: define · list · show · find · echo (a body of / commands, or of rholang)",
         "  +name <args>     — run a command somebody here defined (++text to send a literal + line)",
         "  /rhoqu <src>     — RhoQu macro: process/new/parallel/call → /commands",
+        "  /rhoqu package    — import/export validated process packages (preview only)",
         "  /rholang <sub>   — run rholang on rnode: eval · deploy · echo · read · status · config (multi-line, end with a blank line)",
         "  @name in args    — expand named lemma (e.g. /qucalc @major @minor)",
         "  [multi word]      — a spaced name: /lemma [all men are mortal]  ·  cite as @[all men are mortal]",
@@ -4087,14 +4146,16 @@ function handleCommand(raw: string): string[] {
         if (verb === "install") {
           if (!isAdmin(g, meId, meAnchor)) { sys("only an admin installs the group's contracts"); whoIsAdmin(g, meId, meAnchor, sys); break; }
           if (!cfg.key) { sys("no key — /rholang key generate first"); break; }
-          sys("installing Inbox, Group and Issue — three deploys, one each…");
-          sys("  each uri is minted by the registry, so it comes back as that deploy's answer");
           void (async () => {
             const jobs: [keyof ChainRefs, string][] = [
               ["inbox", rgov.installInboxProgram()],
               ["group", rgov.installGroupProgram()],
               ["issue", rgov.installIssueProgram()],
             ];
+            const approved = await confirmDialog("Review governance contract installation",
+              `Group: ${g.name}\nTarget: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\nThree signed deploys:\n\n${jobs.map(([which, program]) => `--- ${which} ---\n${program}`).join("\n\n")}`,
+              "Approve · install contracts");
+            if (!approved) { sys("cancelled — no contracts deployed"); return; }
             const found: ChainRefs = {};
             for (const [which, program] of jobs) {
               const r = await deployTerm(cfg, program);
@@ -4183,6 +4244,10 @@ function handleCommand(raw: string): string[] {
                 }
               }
             }
+            const approved = await confirmDialog("Review governance push",
+              `Group: ${g.name}\nTarget: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\n${steps.map(([what, program]) => `--- ${what} ---\n${program}`).join("\n\n")}`,
+              "Approve · push governance");
+            if (!approved) { addMessage("", "cancelled — nothing pushed", "system"); return; }
             addMessage("", `pushing ${steps.length} row${steps.length === 1 ? "" : "s"}, one deploy each…`, "system");
             for (const [what, program] of steps) {
               const r = await deployTerm(cfg, program);
@@ -4266,12 +4331,15 @@ function handleCommand(raw: string): string[] {
           if (!refs.inbox) { sys("no inbox contract — an admin: /gov chain install"); break; }
           if (!cfg.key) { sys("no key — /rholang key generate first"); break; }
           if (verb === "inbox") {
-            sys("opening your locker if needed, then receiving…");
             void (async () => {
               const seq: [string, string][] = [
                 ["locker", rgov.newLockerProgram(refs.inbox!, "inbox", "open")],
                 ["receive", rgov.receiveProgram(refs.inbox!, "inbox")],
               ];
+              const approved = await confirmDialog("Review inbox receive",
+                `Group: ${g.name}\nTarget: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\nThis operation may consume incoming messages/capabilities:\n\n${seq.map(([what, program]) => `--- ${what} ---\n${program}`).join("\n\n")}`,
+                "Approve · receive");
+              if (!approved) { addMessage("", "cancelled — nothing received", "system"); return; }
               for (const [what, program] of seq) {
                 const r = await deployTerm(cfg, program);
                 if (!r.ok || !r.sig) { addMessage("", `✗ ${what}: ${r.message}`, "system"); return; }
@@ -4295,7 +4363,12 @@ function handleCommand(raw: string): string[] {
           if (!to) { sys(`no chain address for ${who} — they run /gov chain push first`); break; }
           void (async () => {
             const msg = `{"type": "msg", "body": ${JSON.stringify(text)}}`;
-            const r = await deployTerm(cfg, rgov.sendProgram(refs.inbox!, to, "inbox", msg));
+            const program = rgov.sendProgram(refs.inbox!, to, "inbox", msg);
+            const approved = await confirmDialog("Review governance inbox send",
+              `Group: ${g.name}\nRecipient: ${who}\nTarget: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\nExact source to sign:\n\n${program}`,
+              "Approve · send");
+            if (!approved) { addMessage("", "cancelled — nothing sent", "system"); return; }
+            const r = await deployTerm(cfg, program);
             if (!r.ok || !r.sig) { addMessage("", `✗ ${r.message}`, "system"); return; }
             const answer = await deployAnswer(cfg, r.sig);
             addMessage("", `  ${(answer ?? ["(no answer)"]).join(" ")}`, "system");
@@ -5271,13 +5344,29 @@ function handleCommand(raw: string): string[] {
       if (!passEntry) { sys(`you don't hold ${lemmaRefStr(passLemma)} — nothing to pass`); break; }
       const targetId = findPeerByName(targetName);
       if (!targetId) { sys(`unknown peer: '${targetName}'  (check Peers list for exact name)`); break; }
-      const sent = qpeer.send(targetId, { kind: "lemma-pass", name: passLemma, twists: passEntry.twists, cap: passEntry.cap });
-      if (!sent) { sys(`cannot reach ${targetName} — data channel not open`); break; }
-      lemmaStore.delete(passLemma);
-      saveLemmas();
-      renderLemmas();
-      sys(`· ${lemmaRefStr(passLemma)} transferred to ${targetName} — removed from your lemmas`);
-      if (passEntry.cap) sys(`  cap: ${passEntry.cap}`);
+      const envelope = { kind: "lemma-pass", name: passLemma, twists: passEntry.twists, cap: passEntry.cap };
+      const send = signQueue.then(async () => {
+        if (!qpeer || !dyncapState) return false;
+        const dyncap = await signEnvelope(dyncapState, activeRoom.roomId, envelope);
+        saveDyncap();
+        return qpeer.send(targetId, { ...envelope, dyncap });
+      });
+      signQueue = send.then(() => undefined, () => undefined);
+      void send.then((sent) => {
+        if (!sent) { addMessage("", `cannot reach ${targetName} — data channel not open; lemma retained`, "system"); return; }
+        const current = lemmaStore.get(passLemma);
+        // Do not remove a changed entry if another local action replaced it while signing.
+        if (!current || current.twists !== passEntry.twists || current.cap !== passEntry.cap) {
+          addMessage("", `transfer sent, but local ${lemmaRefStr(passLemma)} changed meanwhile; retained locally`, "system");
+          return;
+        }
+        lemmaStore.delete(passLemma);
+        saveLemmas();
+        renderLemmas();
+        addMessage("", `· ${lemmaRefStr(passLemma)} transferred to ${targetName} — removed from your lemmas`, "system");
+        if (passEntry.cap) addMessage("", `  cap: ${passEntry.cap}`, "system");
+      }).catch((e) => addMessage("", `transfer failed; lemma retained: ${String(e)}`, "system"));
+      sys(`· signing transfer to ${targetName}…`);
       break;
     }
 
@@ -5458,18 +5547,20 @@ function handleCommand(raw: string): string[] {
           const detached = detach(chosen, N);
           if (!detached) { sys("split failed"); break; }
           const passTerms = seriesTerms.get(currency);
-          const sent = qpeer.send(targetId, { kind: "note-pass", currency, denomination: N, token: detached.outgoing,
-            ...(passTerms ? { terms: passTerms.terms, termsHash: passTerms.termsHash } : {}) });
-          if (!sent) {
-            undoDetach(chosen, detached.change);
-            sys(`cannot reach ${targetName} — data channel not open`);
-            break;
-          }
-          saveNotes();
-          renderNotes();
-          sys(`· ${currency} ${N} → ${targetName}`);
-          sys(`  ${detached.outgoing}`);
-          if (detached.change) sys(`  (change ${detached.change.denomination} returned to your wallet)`);
+          void signedSend(targetId, { kind: "note-pass", currency, denomination: N, token: detached.outgoing,
+            ...(passTerms ? { terms: passTerms.terms, termsHash: passTerms.termsHash } : {}) }).then((sent) => {
+            if (!sent) {
+              restoreDetachedNote(chosen, detached.change);
+              saveNotes(); renderNotes();
+              addMessage("", `transfer to ${targetName} failed — note restored to wallet`, "system");
+              return;
+            }
+            saveNotes(); renderNotes();
+            addMessage("", `· ${currency} ${N} → ${targetName}`, "system");
+            addMessage("", `  ${detached.outgoing}`, "system");
+            if (detached.change) addMessage("", `  (change ${detached.change.denomination} returned to your wallet)`, "system");
+          });
+          sys(`· signing note transfer to ${targetName}…`);
           break;
         }
 
@@ -5496,17 +5587,19 @@ function handleCommand(raw: string): string[] {
           if (!issuerId) { sys(`unknown peer: '${issuerName}'`); break; }
           const detached = detach(chosen, N);
           if (!detached) { sys("split failed"); break; }
-          const sent = qpeer.send(issuerId, { kind: "note-redeem", currency, denomination: N, token: detached.outgoing });
-          if (!sent) {
-            undoDetach(chosen, detached.change);
-            sys(`cannot reach ${issuerName} — data channel not open`);
-            break;
-          }
-          saveNotes();
-          renderNotes();
-          sys(`· redeemed ${currency} ${N} → ${issuerName}`);
-          sys(`  awaiting receipt…`);
-          if (detached.change) sys(`  (change ${detached.change.denomination} returned to your wallet)`);
+          void signedSend(issuerId, { kind: "note-redeem", currency, denomination: N, token: detached.outgoing }).then((sent) => {
+            if (!sent) {
+              restoreDetachedNote(chosen, detached.change);
+              saveNotes(); renderNotes();
+              addMessage("", `redemption send to ${issuerName} failed — note restored to wallet`, "system");
+              return;
+            }
+            saveNotes(); renderNotes();
+            addMessage("", `· redeemed ${currency} ${N} → ${issuerName}`, "system");
+            addMessage("", `  awaiting receipt…`, "system");
+            if (detached.change) addMessage("", `  (change ${detached.change.denomination} returned to your wallet)`, "system");
+          });
+          sys(`· signing redemption to ${issuerName}…`);
           break;
         }
 
@@ -5682,20 +5775,20 @@ function handleCommand(raw: string): string[] {
           saveNotes();
           renderNotes();
 
-          const sent = qpeer.send(targetId, { kind: "rdv-propose", proposal });
-          if (!sent) {
-            releaseLockedFor(id);
-            proposals.delete(id);
-            clearProposalTimeout(id);
-            saveNotes();
-            renderNotes();
-            sys(`cannot reach ${targetName} — data channel not open`);
-            break;
-          }
-          sys(`· proposed rendezvous ${shortRdvId(id)} to ${targetName}`);
-          sys(`  you give ${giveCur} ${giveN}, get ${getCur} ${getN}`);
-          sys(`  expires in ${Math.round(RDV_TIMEOUT_MS / 1000)}s — /rdv abort ${shortRdvId(id)} to cancel`);
-          if (detached.change) sys(`  (change ${detached.change.denomination} returned to your wallet)`);
+          void signedSend(targetId, { kind: "rdv-propose", proposal }).then((sent) => {
+            if (!sent) {
+              releaseLockedFor(id); proposals.delete(id); clearProposalTimeout(id);
+              saveNotes(); renderNotes();
+              addMessage("", `proposal send to ${targetName} failed — reservation released`, "system");
+              return;
+            }
+            saveNotes(); renderNotes();
+            addMessage("", `· proposed rendezvous ${shortRdvId(id)} to ${targetName}`, "system");
+            addMessage("", `  you give ${giveCur} ${giveN}, get ${getCur} ${getN}`, "system");
+            addMessage("", `  expires in ${Math.round(RDV_TIMEOUT_MS / 1000)}s — /rdv abort ${shortRdvId(id)} to cancel`, "system");
+            if (detached.change) addMessage("", `  (change ${detached.change.denomination} returned to your wallet)`, "system");
+          });
+          sys(`· signing rendezvous proposal to ${targetName}…`);
           break;
         }
 
@@ -5757,36 +5850,38 @@ function handleCommand(raw: string): string[] {
             });
             for (const p of participants) {
               if (p === myId) continue;
-              qpeer.send(p, { kind: "rdv-commit", id: state.proposal.id, rows: commitRows });
+              signedSend(p, { kind: "rdv-commit", id: state.proposal.id, rows: commitRows });
             }
             const ok = applyCommit(state, commitRows);
-            proposals.delete(state.proposal.id);
-            clearProposalTimeout(state.proposal.id);
+            if (ok) {
+              proposals.delete(state.proposal.id);
+              clearProposalTimeout(state.proposal.id);
+            }
             saveNotes();
             renderNotes();
-            sys(ok ? `  · committed rdv ${shortRdvId(state.proposal.id)}` : `  · commit application failed locally`);
+            sys(ok ? `  · committed rdv ${shortRdvId(state.proposal.id)}` : `  · commit application failed locally; proposal retained for recovery/timeout`);
             break;
           }
 
           // Participant path — original behavior.
-          state.myStatus = "accepted";
-          saveNotes();
-          renderNotes();
-
-          const sent = qpeer.send(state.proposal.proposer, {
+          void signedSend(state.proposal.proposer, {
             kind: "rdv-accept", id: state.proposal.id, token: detached.outgoing,
+          }).then((sent) => {
+            if (!sent) {
+              lockedNotes.delete(detached.outgoing);
+              restoreDetachedNote(chosen, detached.change);
+              state.myStatus = "pending";
+              saveNotes(); renderNotes();
+              addMessage("", "accept send failed — note restored and proposal remains pending", "system");
+              return;
+            }
+            state.myStatus = "accepted";
+            saveNotes(); renderNotes();
+            addMessage("", `· accepted rendezvous ${shortRdvId(state.proposal.id)}`, "system");
+            addMessage("", `  locked ${row.gives.currency} ${row.gives.denomination}; awaiting commit…`, "system");
+            if (detached.change) addMessage("", `  (change ${detached.change.denomination} returned to your wallet)`, "system");
           });
-          if (!sent) {
-            releaseLockedFor(state.proposal.id);
-            state.myStatus = "pending";
-            saveNotes();
-            renderNotes();
-            sys("cannot reach proposer — try again");
-            break;
-          }
-          sys(`· accepted rendezvous ${shortRdvId(state.proposal.id)}`);
-          sys(`  locked ${row.gives.currency} ${row.gives.denomination}; awaiting commit…`);
-          if (detached.change) sys(`  (change ${detached.change.denomination} returned to your wallet)`);
+          sys("· signing rendezvous acceptance…");
           break;
         }
 
@@ -5797,7 +5892,7 @@ function handleCommand(raw: string): string[] {
           if (!state) { sys(`no proposal matching '${prefix}'`); break; }
           if (state.role !== "participant") { sys("you proposed this; use /rdv abort instead"); break; }
           if (state.myStatus !== "pending") { sys(`already ${state.myStatus}`); break; }
-          if (qpeer) qpeer.send(state.proposal.proposer, { kind: "rdv-reject", id: state.proposal.id });
+          if (qpeer) signedSend(state.proposal.proposer, { kind: "rdv-reject", id: state.proposal.id });
           proposals.delete(state.proposal.id);
           clearProposalTimeout(state.proposal.id);
           saveNotes();
@@ -5816,7 +5911,7 @@ function handleCommand(raw: string): string[] {
           if (qpeer) {
             const self = qpeer.peerId;
             const targets = uniqueParticipants(state.proposal).filter(p => p !== self);
-            for (const t of targets) qpeer.send(t, { kind: "rdv-abort", id: state.proposal.id, reason: "proposer-cancel" });
+            for (const t of targets) signedSend(t, { kind: "rdv-abort", id: state.proposal.id, reason: "proposer-cancel" });
           }
           proposals.delete(state.proposal.id);
           clearProposalTimeout(state.proposal.id);
@@ -5854,11 +5949,16 @@ function handleCommand(raw: string): string[] {
           const otherId = uniqueParticipants(state.proposal).find(p => p !== myId);
           if (!otherId) { sys("no other participant to counter to"); break; }
 
-          // Release current locks (both my own and the other's, if any).
-          releaseLockedFor(state.proposal.id);
+          // Keep old reservations until the counter envelope is accepted by
+          // transport. Snapshot proposal state for rollback.
+          const previousRows = state.proposal.rows;
+          const previousName = state.proposal.proposerName;
+          const previousExpiry = state.proposal.expiresAt;
+          const previousAccepted = new Map(state.acceptedBy);
+          const previousStatus = state.myStatus;
           state.acceptedBy.clear();
 
-          // Replace the proposal's rows with the new cyclic swap.
+          // Replace proposal rows temporarily; rollback if sending fails.
           const myName2 = myName || shortId(myId);
           const newRows: Row[] = cyclicSwap(
             myId,    { currency: giveCur, denomination: giveN },
@@ -5891,19 +5991,34 @@ function handleCommand(raw: string): string[] {
           // Send the counter envelope, including the token I just locked so
           // the recipient can record it in their acceptedBy for the eventual
           // commit construction.
-          const sent = qpeer.send(otherId, {
+          void signedSend(otherId, {
             kind: "rdv-counter", id: state.proposal.id, rows: newRows,
             proposerName: myName2, token: detached.outgoing,
-          });
-          if (!sent) {
+          }).then((sent) => {
+            if (!sent) {
+              lockedNotes.delete(detached.outgoing);
+              restoreDetachedNote(chosen, detached.change);
+              state.proposal.rows = previousRows;
+              state.proposal.proposerName = previousName;
+              state.proposal.expiresAt = previousExpiry;
+              state.acceptedBy.clear();
+              for (const [peer, tok] of previousAccepted) state.acceptedBy.set(peer, tok);
+              state.myStatus = previousStatus;
+              clearProposalTimeout(state.proposal.id);
+              scheduleProposalTimeout(state.proposal.id, Math.max(0, previousExpiry - Date.now()));
+              saveNotes(); renderNotes();
+              addMessage("", "counter send failed — previous terms and reservations restored", "system");
+              return;
+            }
+            lockedNotes.delete(detached.outgoing);
             releaseLockedFor(state.proposal.id);
-            state.acceptedBy.delete(myId);
-            sys("cannot reach the other participant — counter not delivered");
-            break;
-          }
-          sys(`· counter sent for rendezvous ${shortRdvId(state.proposal.id)}`);
-          sys(`  new terms: you give ${giveCur} ${giveN}, get ${getCur} ${getN}`);
-          if (detached.change) sys(`  (change ${detached.change.denomination} returned to your wallet)`);
+            lockToken(detached.outgoing, lockEntry, state.proposal.id);
+            saveNotes(); renderNotes();
+            addMessage("", `· counter sent for rendezvous ${shortRdvId(state.proposal.id)}`, "system");
+            addMessage("", `  new terms: you give ${giveCur} ${giveN}, get ${getCur} ${getN}`, "system");
+            if (detached.change) addMessage("", `  (change ${detached.change.denomination} returned to your wallet)`, "system");
+          });
+          sys("· signing rendezvous counter…");
           break;
         }
 
@@ -6177,7 +6292,7 @@ function handleCommand(raw: string): string[] {
           };
           sys(`· requesting ${targetName} to also persist currency ${cname}`);
         }
-        if (payload) qpeer.send(targetId, payload);
+        if (payload) signedSend(targetId, payload);
       } else {
         sys(`unknown subcommand: /persist ${sub}`);
         sys("  /persist @<lemma> to <peer>        — request peer to also persist");
@@ -6224,7 +6339,7 @@ function handleCommand(raw: string): string[] {
         if (!name || !text) { sys("usage: /channel send <name> <text>"); break; }
         if (!qpeer) { sys("not connected"); break; }
         // Tagged broadcast. Receivers without a matching subscription drop it.
-        qpeer.broadcast({ kind: "channel-msg", channel: name, payload: text });
+        signedBroadcast({ kind: "channel-msg", channel: name, payload: text });
         sys(`· sent on channel '${name}': ${text}`);
       } else {
         sys(`unknown subcommand: /channel ${sub}`);
@@ -6239,6 +6354,7 @@ function handleCommand(raw: string): string[] {
 
     case "rhoqu": {
       const src = arg.trim();
+      if (src === "package") { openRhoQuPackageUI(dyncapState?.anchor); break; }
       // Subcommands for managing registered on-handlers.
       if (src === "list") {
         if (rhoquHandlers.length === 0) {
@@ -6261,7 +6377,9 @@ function handleCommand(raw: string): string[] {
         sys("  /rhoqu list                          — show registered on-handlers");
         sys("  /rhoqu clear                         — drop all on-handlers in this room");
         sys("  process P(a, b) { /grant $a; /lemma $b; } P(fork-a, alice);");
+        sys("  bind pollId /poll new Decision; /poll add $pollId Option A;");
         sys("  if has(@met-bob) { /qucalc @met-bob; } else { /lemma met-bob ^v; }");
+        sys("  when peers() >= 2 { /poll new shared; } else { /lemma solo ^v; } — runtime branch");
         sys("  on forks(msg) { /qucalc @msg; }      — register a channel-msg handler");
         break;
       }
@@ -6281,22 +6399,54 @@ function handleCommand(raw: string): string[] {
         myCurrentSeq: () => dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
         registerOnHandler: (h) => { rhoquHandlers.push(h); },
       };
-      let cmds: string[];
+      let process: RhoFlatProcess;
       try {
-        cmds = rhoquTranspile(src, rhoCtx);
+        process = rhoquTranspileProcess(src, rhoCtx);
       } catch (e) {
         if (e instanceof RhoQuError) sys(`· ${e.message}`);
         else sys(`· rhoqu parse error: ${String(e)}`);
         break;
       }
       const handlersAfter = rhoquHandlers.length;
-      sys(`· rhoqu transpiled to ${cmds.length} command${cmds.length === 1 ? "" : "s"}`);
-      let executed = 0;
-      for (const c of cmds) {
-        try { runInput(c); executed++; }
-        catch (err) { sys(`· rhoqu error on '${c}': ${String(err)}`); }
-      }
-      sys(`· rhoqu: ${executed} executed${handlersAfter > 0 ? `, ${handlersAfter} on-handler${handlersAfter === 1 ? "" : "s"} active` : ""}`);
+      const commandCount = countRhoProcessCommands(process);
+      sys("RhoQu IR contains " + commandCount + " commands; runtime branches evaluate at execution.");
+      const runtimeSnapshot = (): RhoQuRuntimeSnapshot => {
+        const balances: Record<string, number> = {};
+        for (const note of noteStore.values()) balances[note.currency] = (balances[note.currency] ?? 0) + note.denomination;
+        return {
+          lemmaNames: [...lemmaStore.keys()].map(canonLemma),
+          balances,
+          declaredCurrencies: [...knownCurrencies.values()].map((entry) => entry.currency),
+          peerCount: peers.size,
+          connected: qpeer !== null,
+          currentSeq: dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
+        };
+      };
+      void executeRhoProcessWithStoreBindingsAsync(process, async (command) => {
+        if (requiresInteractiveApproval(command)) {
+          const message = `blocked '${command}': this operation requires interactive approval; invoke it directly outside RhoQu`;
+          throw new Error(message);
+        }
+        return runInput(command);
+      }, async (command) => {
+        if (/^\/poll\s+new\b/i.test(command)) return [...pollStore.keys()];
+        if (/^\/lemma\b/i.test(command)) return [...lemmaStore.keys()];
+        if (/^\/note\s+(?:grant|merge)\b/i.test(command)) return [...noteStore.keys()];
+        if (/^\/rdv\s+swap\b/i.test(command)) return [...proposals.keys()];
+        if (/^\/qos\s+start\b/i.test(command)) {
+          await signQueue;
+          return qosCommandFor(activeRoom)?.list().map((process) => process.id) ?? [];
+        }
+        return [];
+      }, {
+        evaluateWhen: (condition, env) => evaluateRhoQuRuntimeCondition(condition, env, runtimeSnapshot()),
+      }).then((results) => {
+        const executed = results.filter((result) => result.ok).length;
+        for (const result of results) {
+          if (!result.ok) sys(`· rhoqu error on '${result.command}': ${result.error}`);
+        }
+        sys(`· rhoqu: ${executed}/${results.length} executed${handlersAfter > 0 ? `, ${handlersAfter} on-handler${handlersAfter === 1 ? "" : "s"} active` : ""}`);
+      }).catch((error) => sys(`· rhoqu execution error: ${String(error)}`));
       break;
     }
 
@@ -6320,6 +6470,10 @@ function handleCommand(raw: string): string[] {
       for (const seg of segments) {
         if (seg.startsWith("//")) { skipped++; continue; }
         const cmdStr = seg.startsWith("/") || seg.startsWith("+") ? seg : "/" + seg;
+        if (requiresInteractiveApproval(cmdStr)) {
+          sys(`· script blocked '${cmdStr}': requires interactive approval; run it directly`);
+          continue;
+        }
         try {
           runInput(cmdStr);
           executed++;
@@ -6372,6 +6526,13 @@ function handleCommand(raw: string): string[] {
       // room with the bridge peer's dyncap chain in *that* room — no new
       // wire kinds, no infrastructure relay.
       const runIn = (ctx: RoomContext, cmd: string): string[] => {
+        // Sharing is delegated execution into another room, not a fresh direct
+        // user invocation there. Enforce the same approval policy as every
+        // non-interactive runner before switching context or dispatching.
+        if (requiresInteractiveApproval(cmd)) {
+          sys(`· share blocked '${cmd}': requires direct interactive approval in the target room`);
+          return [];
+        }
         const prev = activeRoom; setActiveRoom(ctx);
         try { return handleCommand(cmd); } finally { setActiveRoom(prev); }
       };
@@ -6767,7 +6928,8 @@ function handleCommand(raw: string): string[] {
       // directly and only: never an arbitrary external host (no browser
       // ever can), and never through the chat flood relay (a socket is
       // point-to-point by definition — see peer.ts's SocketChannelKind).
-      // No capability gating yet — anyone can /socket listen or connect.
+      // Socket listeners and outbound connections require explicit local approval.
+      // RhoQu and /script reach this same dispatcher, so the gate applies there too.
       if (!qpeer || !posixNet) { sys("not connected to a room"); break; }
       const net = posixNet;
       // accept()/onData/onClose fire later, possibly after the user has
@@ -6801,15 +6963,24 @@ function handleCommand(raw: string): string[] {
         if (!Number.isInteger(port) || port < 0) { sys("usage: /socket listen <port> [stream|dgram]"); break; }
         const key = `${type}:${port}`;
         if (socketListeners.has(key)) { sys(`already listening on ${key}`); break; }
-        const unlisten = net.listen(port, type, (socket, fromPeerId) => {
-          const prev = activeRoom; setActiveRoom(cmdCtx);
-          try {
-            addMessage("", `↳ ${peerLabel(fromPeerId)} connected on ${key}  (conn ${socket.connId})`, "system");
-            wireSocket(socket, peerLabel(fromPeerId));
-          } finally { setActiveRoom(prev); }
-        });
-        socketListeners.set(key, { port, type, unlisten });
-        sys(`✓ listening on ${key}`);
+        void (async () => {
+          const ok = await confirmDialog(
+            "Approve socket listener?",
+            `Allow incoming mesh connections on ${key}? This exposes a socket endpoint to peers in this room.`,
+            "Start listener",
+          );
+          if (!ok) { sys(`socket listen ${key}: cancelled`); return; }
+          if (socketListeners.has(key)) { sys(`already listening on ${key}`); return; }
+          const unlisten = net.listen(port, type, (socket, fromPeerId) => {
+            const prev = activeRoom; setActiveRoom(cmdCtx);
+            try {
+              addMessage("", `↳ ${peerLabel(fromPeerId)} connected on ${key}  (conn ${socket.connId})`, "system");
+              wireSocket(socket, peerLabel(fromPeerId));
+            } finally { setActiveRoom(prev); }
+          });
+          socketListeners.set(key, { port, type, unlisten });
+          sys(`✓ listening on ${key}`);
+        })();
         break;
       }
 
@@ -6832,18 +7003,26 @@ function handleCommand(raw: string): string[] {
         const targetId = resolvePeer(targetToken);
         if (!targetId || !Number.isInteger(port)) { sys("usage: /socket connect <peer> <port> [stream|dgram]"); break; }
         const label = peerLabel(targetId);
-        sys(`connecting to ${label}:${port} (${type})…`);
-        void net.connect(targetId, port, type).then((socket) => {
+        void (async () => {
+          const ok = await confirmDialog(
+            "Approve socket connection?",
+            `Connect to ${label} (${targetId}) on port ${port} using ${type}? This opens a direct peer socket.`,
+            "Connect",
+          );
+          if (!ok) { sys(`socket connect ${label}:${port}: cancelled`); return; }
+          sys(`connecting to ${label}:${port} (${type})…`);
+          void net.connect(targetId, port, type).then((socket) => {
           const prev = activeRoom; setActiveRoom(cmdCtx);
           try {
             wireSocket(socket, label);
             addMessage("", `✓ connected to ${label}:${port} — conn ${socket.connId}`, "system");
           } finally { setActiveRoom(prev); }
-        }).catch((e: Error) => {
-          const prev = activeRoom; setActiveRoom(cmdCtx);
-          try { addMessage("", `✗ ${label}:${port} — ${e.message}`, "system"); }
-          finally { setActiveRoom(prev); }
-        });
+          }).catch((e: Error) => {
+            const prev = activeRoom; setActiveRoom(cmdCtx);
+            try { addMessage("", `✗ ${label}:${port} — ${e.message}`, "system"); }
+            finally { setActiveRoom(prev); }
+          });
+        })();
         break;
       }
 
@@ -7182,10 +7361,15 @@ function handleCommand(raw: string): string[] {
           // sent and nothing has to be read back to learn it.
           if (rest === "install") {
             if (!cfg.key) { sys("no key — /rholang key generate first"); break; }
-            sys("installing the locker…");
-            sys("  its uri is minted by the registry, so it comes back as the deploy's answer");
             void (async () => {
-              const r = await deployTerm(cfg, installProgram());
+              const program = installProgram();
+              const approved = await confirmDialog("Review locker installation",
+                `Target: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\nExact source to sign:\n\n${program}`,
+                "Approve · install locker");
+              if (!approved) { sys("cancelled — locker not installed"); return; }
+              sys("installing the locker…");
+              sys("  its uri is minted by the registry, so it comes back as the deploy's answer");
+              const r = await deployTerm(cfg, program);
               addMessage("", (r.ok ? "✓ " : "✗ ") + r.message, "system");
               if (!r.ok || r.resultNonce === undefined) return;
               const fresh = await readResultsFresh(cfg, r.resultNonce, 40);
@@ -7702,6 +7886,12 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "lemma-pass") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (!d.dyncap || status.startsWith("  · refused")) {
+            addMessage(from, `passes ${lemmaRefStr(String(d.name ?? ""))}`, "peer", peerLabel(from));
+            addMessage("", "  · refused: lemma transfers require a verified signed envelope", "system");
+            return;
+          }
           const name = canonLemma(String(d.name ?? ""));
           const twists = String(d.twists ?? "").trim();
           const cap = d.cap ? String(d.cap) : undefined;
@@ -7751,6 +7941,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "note-pass") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const currency = String(d.currency ?? "");
           const N        = Number(d.denomination ?? 0);
           const token    = String(d.token ?? "");
@@ -7784,6 +7976,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "note-redeem") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const currency = String(d.currency ?? "");
           const N        = Number(d.denomination ?? 0);
           const token    = String(d.token ?? "");
@@ -7804,19 +7998,20 @@ async function connect(): Promise<void> {
           }
           const receipt = mintReceipt(currency, N);
           const myLabel = myName || (qpeer ? shortId(qpeer.peerId) : "local");
-          redemptionsHonored.set(token, { token, currency, denomination: N, redeemer: who, at: Date.now() });
-          saveNotes();
-          renderNotes();
-          const ok = qpeer?.send(from, { kind: "note-receipt", currency, denomination: N, token: receipt, original: token, issuer: myLabel });
-          if (!ok) {
-            addMessage("", `  · receipt minted but could not deliver — peer unreachable`, "system");
+          const receiptSent = await signedSend(from, { kind: "note-receipt", currency, denomination: N, token: receipt, original: token, issuer: myLabel });
+          if (!receiptSent) {
+            addMessage("", `  · receipt send failed — redemption remains retryable`, "system");
             return;
           }
+          redemptionsHonored.set(token, { token, currency, denomination: N, redeemer: who, at: Date.now() });
+          saveNotes(); renderNotes();
           addMessage("", `  · honored: ${currency} ${N} for ${who}`, "system");
           addMessage("", `    receipt: ${receipt}`, "system");
           return;
         }
         if (d.kind === "note-receipt") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const currency = String(d.currency ?? "");
           const N        = Number(d.denomination ?? 0);
           const token    = String(d.token ?? "");
@@ -7866,6 +8061,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "sync-series") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const raw = d.entries;
           if (!Array.isArray(raw)) return;
           let added = 0;
@@ -7885,6 +8082,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "sync-lemmas") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const raw = d.entries;
           if (!Array.isArray(raw)) return;
           if (ignoredForSync.has(from)) {
@@ -7920,6 +8119,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "sync-currencies") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const raw = d.entries;
           if (!Array.isArray(raw)) return;
           if (ignoredForSync.has(from)) {
@@ -7950,7 +8151,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "state-discrepancy") {
-          await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const storeName = String(d.storeName ?? "");
           const key       = String(d.key       ?? "");
           const obsRaw    = d.observations;
@@ -7968,11 +8170,23 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "rdv-propose") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const proposalRaw = d.proposal;
           if (!proposalRaw || typeof proposalRaw !== "object") return;
           const proposal = proposalRaw as Proposal;
-          if (!proposal.id || !Array.isArray(proposal.rows) || typeof proposal.expiresAt !== "number") return;
-          if (proposal.expiresAt < Date.now()) return;
+          if (typeof proposal.id !== "string" || !proposal.id || !Array.isArray(proposal.rows)
+              || !Number.isFinite(proposal.expiresAt) || typeof proposal.proposer !== "string"
+              || typeof proposal.proposerName !== "string"
+              || proposal.rows.some(r => !r || typeof r.participant !== "string" || !r.participant
+                  || !r.gives || typeof r.gives.currency !== "string" || !r.gives.currency
+                  || !Number.isSafeInteger(r.gives.denomination) || r.gives.denomination <= 0
+                  || !r.gets || typeof r.gets.currency !== "string" || !r.gets.currency
+                  || !Number.isSafeInteger(r.gets.denomination) || r.gets.denomination <= 0)) return;
+          if (proposal.proposer !== from || proposal.expiresAt < Date.now()
+              || proposal.rows.length < 2 || uniqueParticipants(proposal).length !== proposal.rows.length
+              || !proposal.rows.some(r => r.participant === from)
+              || !proposal.rows.some(r => r.participant === (qpeer?.peerId ?? ""))) return;
           if (!conservationCheck(proposal.rows)) {
             addMessage(from, `proposes rendezvous`, "peer", peerLabel(from));
             addMessage("", `  · refused: conservation violation`, "system");
@@ -7995,6 +8209,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "rdv-accept") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const id = String(d.id ?? "");
           const token = String(d.token ?? "");
           const state = proposals.get(id);
@@ -8029,27 +8245,31 @@ async function connect(): Promise<void> {
           if (qpeer) {
             for (const p of participants) {
               if (p === self) continue;
-              qpeer.send(p, { kind: "rdv-commit", id, rows: commitRows });
+              signedSend(p, { kind: "rdv-commit", id, rows: commitRows });
             }
           }
           const ok = applyCommit(state, commitRows);
-          proposals.delete(id);
-          clearProposalTimeout(id);
+          if (ok) {
+            proposals.delete(id);
+            clearProposalTimeout(id);
+          }
           saveNotes();
           renderNotes();
-          addMessage("", ok ? `  · committed rdv ${shortRdvId(id)}` : `  · commit application failed locally`, "system");
+          addMessage("", ok ? `  · committed rdv ${shortRdvId(id)}` : `  · commit application failed locally; proposal retained for recovery/timeout`, "system");
           return;
         }
         if (d.kind === "rdv-reject") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const id = String(d.id ?? "");
           const state = proposals.get(id);
-          if (!state || state.role !== "proposer") return;
+          if (!state || state.role !== "proposer" || !state.proposal.rows.some(r => r.participant === from)) return;
           addMessage(from, `rejects rdv ${shortRdvId(id)}`, "peer", peerLabel(from));
           releaseLockedFor(id);
           if (qpeer) {
             const self = qpeer.peerId;
             const targets = uniqueParticipants(state.proposal).filter(p => p !== self && p !== from);
-            for (const t of targets) qpeer.send(t, { kind: "rdv-abort", id, reason: "peer-rejected" });
+            for (const t of targets) signedSend(t, { kind: "rdv-abort", id, reason: "peer-rejected" });
           }
           proposals.delete(id);
           clearProposalTimeout(id);
@@ -8059,27 +8279,33 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "rdv-commit") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const id = String(d.id ?? "");
           const rowsRaw = d.rows;
           if (!Array.isArray(rowsRaw)) return;
           const commitRows = rowsRaw as CommitRow[];
           const state = proposals.get(id);
-          if (!state || state.role !== "participant") return;
+          if (!state || state.role !== "participant" || from !== state.proposal.proposer) return;
           if (state.myStatus !== "accepted") return;
           const ok = applyCommit(state, commitRows);
-          proposals.delete(id);
-          clearProposalTimeout(id);
+          if (ok) {
+            proposals.delete(id);
+            clearProposalTimeout(id);
+          }
           saveNotes();
           renderNotes();
           addMessage(from, `commits rdv ${shortRdvId(id)}`, "peer", peerLabel(from));
-          addMessage("", ok ? `  · rdv ${shortRdvId(id)} settled` : `  · commit application failed`, "system");
+          addMessage("", ok ? `  · rdv ${shortRdvId(id)} settled` : `  · commit application failed; proposal retained for recovery/timeout`, "system");
           return;
         }
         if (d.kind === "rdv-abort") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const id = String(d.id ?? "");
           const reason = String(d.reason ?? "");
           const state = proposals.get(id);
-          if (!state) return;
+          if (!state || state.role !== "participant" || from !== state.proposal.proposer) return;
           releaseLockedFor(id);
           proposals.delete(id);
           clearProposalTimeout(id);
@@ -8090,6 +8316,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "rdv-counter") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           // The other participant proposed new terms for an in-flight rdv.
           // Validate, release any locks we hold for it (terms changed —
           // any token we had reserved is no longer the right one), and
@@ -8103,6 +8331,20 @@ async function connect(): Promise<void> {
           if (!state) {
             addMessage(from, `counters rdv ${shortRdvId(id)}`, "peer", peerLabel(from));
             addMessage("", `  · refused: no matching proposal`, "system");
+            return;
+          }
+          const expectedOther = uniqueParticipants(state.proposal).find(p => p !== (qpeer?.peerId ?? ""));
+          const counterParticipants = uniqueParticipants({ ...state.proposal, rows: newRows });
+          if (uniqueParticipants(state.proposal).length !== 2
+              || !expectedOther || from !== expectedOther || newRows.length !== 2
+              || newRows.some(r => !r || typeof r.participant !== "string" || !r.participant
+                  || !r.gives || typeof r.gives.currency !== "string" || !r.gives.currency
+                  || !Number.isSafeInteger(r.gives.denomination) || r.gives.denomination <= 0
+                  || !r.gets || typeof r.gets.currency !== "string" || !r.gets.currency
+                  || !Number.isSafeInteger(r.gets.denomination) || r.gets.denomination <= 0)
+              || counterParticipants.length !== 2
+              || counterParticipants.some(p => !uniqueParticipants(state.proposal).includes(p))) {
+            addMessage("", `  · refused: counter sender or participant set mismatch`, "system");
             return;
           }
           if (!conservationCheck(newRows)) {
@@ -8156,6 +8398,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "persist-request") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const id = String(d.id ?? "");
           const persistKind = String(d.persistKind ?? "");
           const fromName = String(d.fromName ?? peerLabel(from));
@@ -8182,6 +8426,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "channel-msg") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const ch = String(d.channel ?? "");
           const payload = String(d.payload ?? "");
           // Subscribed channels surface in chat; unsubscribed channels are
@@ -8200,6 +8446,13 @@ async function connect(): Promise<void> {
               if (cmds.length === 0) continue;
               addMessage("", `  · rhoqu on ${ch}(${h.binding}=${payload}) → ${cmds.length} cmd${cmds.length === 1 ? "" : "s"}`, "system");
               for (const c of cmds) {
+                // Channel handlers are automatic/asynchronous and have no approval
+                // UI context. Never let inbound messages trigger approval-gated
+                // operations (deploys, key changes, claims, resets, sockets).
+                if (requiresInteractiveApproval(c)) {
+                  addMessage("", `  · rhoqu on-handler blocked '${c}': requires direct interactive approval`, "system");
+                  continue;
+                }
                 try { handleCommand(c); }
                 catch (err) { addMessage("", `  · rhoqu trigger error: ${String(err)}`, "system"); }
               }
@@ -8654,7 +8907,7 @@ async function connect(): Promise<void> {
           if (!accepted) addMessage("", `⚠ refused a QOS event from ${peerLabel(from)}`, "system");
           return;
         }
-        if (d.kind === "file-start") { attachments.fileStart(d); return; }
+        if (d.kind === "file-start") { attachments.fileStart(from, d); return; }
         if (d.kind === "file-chunk") { attachments.fileChunk(from, d); return; }
         if (d.kind === "call-start") {
           addMessage("", `📞 ${peerLabel(from)} started a call — click Call to join`, "system");
