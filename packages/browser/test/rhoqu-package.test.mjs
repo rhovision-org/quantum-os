@@ -58,6 +58,13 @@ try { await importRhoProcessPackage({ format: "rho-process-package", version: 1,
 ok("import rejects deeply nested process trees", depthRejected);
 let oversizedRejected = false;	ry { await importRhoProcessPackage(" ".repeat(1_048_577)); } catch (error) { oversizedRejected = String(error).includes("size limit"); }
 ok("import rejects oversized package input", oversizedRejected);
+const oversizedObjectProcess = { kind: "sequence", steps: Array.from({ length: 180 }, () => ({ kind: "command", command: "/" + "x".repeat(6000) })) };
+let oversizedObjectRejected = false;
+try { await importRhoProcessPackage({ format: "rho-process-package", version: 1, provenance, process: oversizedObjectProcess, contentHash: "0".repeat(64) }); } catch (error) { oversizedObjectRejected = String(error).includes("size limit"); }
+ok("object import rejects oversized canonical package before hash verification", oversizedObjectRejected);
+let oversizedCreationRejected = false;
+try { await createRhoProcessPackage(oversizedObjectProcess, provenance); } catch (error) { oversizedCreationRejected = String(error).includes("size limit"); }
+ok("package creation rejects oversized canonical payload", oversizedCreationRejected);
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-package.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
 

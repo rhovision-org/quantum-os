@@ -32,12 +32,13 @@ export interface LintResult {
 export async function lintRholang(source: string): Promise<LintResult> {
   try {
     const mod = (await import("@quantum-os/zfa-core")) as any;
-    const ok: boolean = mod.wasm_lint_ok ? mod.wasm_lint_ok(source) : true;
-    const errors: string[] = mod.wasm_lint_errors
-      ? String(mod.wasm_lint_errors(source) ?? "")
-          .split("\n")
-          .filter(Boolean)
-      : [];
+    if (typeof mod.wasm_lint_ok !== "function" || typeof mod.wasm_lint_errors !== "function") {
+      return { ok: false, errors: ["WASM linter exports unavailable; deploy blocked"] };
+    }
+    const ok: boolean = mod.wasm_lint_ok(source);
+    const errors: string[] = String(mod.wasm_lint_errors(source) ?? "")
+      .split("\n")
+      .filter(Boolean);
     return { ok, errors };
   } catch {
     // Missing or broken validation must fail closed: never sign code when the
