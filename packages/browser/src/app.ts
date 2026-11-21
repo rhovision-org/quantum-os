@@ -19,7 +19,7 @@ import { findDiscrepancies, losingPeersIn, normalizeValue,
          SAMPLE_SIZE, PROBE_WINDOW_MS,
          type Observation } from "./probe.js";
 import { transpileProcess as rhoquTranspileProcess, RhoQuError, type RhoQuContext, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
-import { executeRhoProcessWithPollBindings, type RhoProcess } from "./rhoqu-process.js";
+import { executeRhoProcessWithPollBindings, type RhoFlatProcess } from "./rhoqu-process.js";
 import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
          type Poll, type PollMethod, type PollOption } from "./polls.js";
 import { canonLemma, parseRefTokens, parseLemmaDecl, splitLemmaNameArg } from "./lemma-parse.js";
@@ -6283,7 +6283,7 @@ function handleCommand(raw: string): string[] {
         myCurrentSeq: () => dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
         registerOnHandler: (h) => { rhoquHandlers.push(h); },
       };
-      let process: RhoProcess;
+      let process: RhoFlatProcess;
       try {
         process = rhoquTranspileProcess(src, rhoCtx);
       } catch (e) {

@@ -21,7 +21,7 @@
 /// `transpile` remains source → string[] for legacy callers; `transpileProcess`
 /// retains bindings in structured command IR for live execution.
 
-import type { RhoProcess, RhoCommandNode } from "./rhoqu-process.js";
+import type { RhoFlatProcess, RhoCommandNode } from "./rhoqu-process.js";
 
 // ---------------------------------------------------------------------------
 // Tokens
@@ -477,7 +477,7 @@ function substitute(text: string, env: Map<string, string>): string {
 /// Conditions in `if` statements are evaluated at transpile time against
 /// `ctx`, so the chosen branch's commands are what gets emitted.
 /// Throws RhoQuError on parse or expansion failure.
-export function transpileProcess(source: string, ctx?: RhoQuContext): RhoProcess {
+export function transpileProcess(source: string, ctx?: RhoQuContext): RhoFlatProcess {
   const tokens = tokenize(source);
   const program = new Parser(tokens).parseProgram();
   const out: string[] = [];
