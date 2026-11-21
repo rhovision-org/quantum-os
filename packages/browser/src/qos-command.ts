@@ -9,6 +9,7 @@
 // change `/poll` or `/gov`, and does not call a chain. Every lifecycle
 // transition is the dyncap-attributed event `QosProcessRoom` already knows how to make.
 
+import {createSnapshot,verifySnapshot,traceRows,recoveryName,type KernelSnapshot} from "./qos-observe.js";
 import { INIT_OPS,type InitOp } from "./qos-init.js";
 import { DEVICE_OPS,DEVICE_KINDS,deviceRequest,type DeviceOp,type DeviceDescriptor } from "./qos-device.js";
 import { DeviceBroker,deviceFailure,type DeviceDriver } from "./qos-device-host.js";
@@ -42,6 +43,9 @@ export interface QosCommandHost {
   deviceDriver?: (descriptor:DeviceDescriptor)=>Promise<DeviceDriver|null>;
   loadJournal?: () => unknown;
   saveJournal?: (events:QosEvent[]) => void;
+  loadSnapshot?: (name:string)=>unknown;
+  saveSnapshot?: (name:string,snapshot:KernelSnapshot)=>void;
+  isolated?:boolean;
 }
 
 interface TrackedProcess {
@@ -75,6 +79,8 @@ export class QosCommand {
   private readonly byName = new Map<string, string>();
   private commandQueue: Promise<void> = Promise.resolve();
   private readonly deviceBroker=new DeviceBroker();
+  private snapshots=new Map<string,KernelSnapshot>();
+  private branches=new Map<string,QosCommand>();
   private deviceEpoch=0;
   private shellSelection:{pid:string;namespace:string}|null=null;
   private readonly restored:Promise<void>;
@@ -171,6 +177,8 @@ export class QosCommand {
         return this.fs(rest);
       case "dev":return this.deviceCommand(rest);
       case "pkg":case "svc":return this.initCommand(sub,rest);
+      case "top":case "dmesg":case "trace":case "stat":return this.inspectKernel(sub,rest);
+      case "snapshot":case "restore":case "branch":return this.recoveryCommand(sub,rest);
       case "whoami":case "id":
         if(!rest){this.host.say("UID "+this.host.identity.anchor+" · dyncap TOFU continuity; no superuser");return;}
         return this.identityCommand("id_info",rest);
@@ -474,6 +482,58 @@ export class QosCommand {
     }
   }
 
+
+  private async inspectKernel(op:string,rest:string){
+    const events=this.room.log.events(),r=replayQosKernel(events,this.room.log.forkedSources),k=r.kernel;
+    const ref=this.resolve(rest)?.id??rest;
+    if(op==="top"){this.host.say("top "+JSON.stringify({processes:k.list().slice(0,128),quota:k.quotaView().slice(0,128),tick:k.scheduleView().tick,digest:await k.stateDigest()}));return;}
+    if(op==="trace"||op==="dmesg"){
+      const rows=traceRows(events,r,32,op==="trace"&&rest?ref:undefined);
+      for(const row of rows)this.host.say(op+" "+JSON.stringify(row));
+      this.host.say(op+" digest "+await k.stateDigest());return;
+    }
+    const state=k.state();
+    if(rest&& !k.getProcess(ref)){this.host.say("process absent");return;}
+    // Bounded views, without emitting the full source, byte or package data.
+    const array=(key:string)=>Array.isArray(state[key])?(state[key] as unknown[]):[];
+    this.host.say("stat "+JSON.stringify({digest:await k.stateDigest(),process:rest?k.getProcess(ref):null,
+     quota:k.quotaView().filter(q=>!rest||q.pid===ref).slice(0,128),memory:k.memoryView().objects.length,
+     namespaces:array("vfs").length,devices:array("devices").length,deviceTickets:array("deviceTickets").length,
+     pending:r.pendingSyscalls.length,rejected:r.rejected.length}));
+  }
+  private async recoveryCommand(op:string,rest:string){
+    const say=(s:string)=>this.host.say(s);
+    if(this.host.isolated){say("nested recovery unavailable");return;}
+    const [head,...parts]=rest.split("|"),name=head.trim();
+    if(!recoveryName(name)){say("snapshot/restore <name>; branch <name> | <command>");return;}
+    try{
+      if(op==="snapshot"){
+        if(parts.length||this.snapshots.has(name)||this.host.loadSnapshot?.(name)||this.snapshots.size>=8)throw Error("snapshot exists or quota");
+        const snap=await createSnapshot(this.room.log);
+        this.host.saveSnapshot?.(name,snap);this.snapshots.set(name,snap);
+        say("snapshot "+name+" · "+snap.id+" · digest "+snap.digest);return;
+      }
+      if(op==="restore"){
+        if(parts.length||this.branches.has(name)||this.branches.size>=4)throw Error("branch exists or quota");
+        const snap=await verifySnapshot(this.snapshots.get(name)??this.host.loadSnapshot?.(name),this.host.roomId);
+        // Share the CURRENT monotonic dyncap counter, never restore an old
+        // counter/seed. The continuation is local-only and not mergeable.
+        const branch=new QosCommand({roomId:this.host.roomId,identity:this.host.identity,isolated:true,
+          transport:{broadcast:()=>{}},say:s=>say("[branch "+name+"] "+s),onSigned:this.host.onSigned,
+          loadJournal:()=>snap.events});
+        await branch.restored;
+        if(await branch.shellKernel().stateDigest()!==snap.digest)throw Error("restored digest mismatch");
+        this.branches.set(name,branch);
+        say("restored branch "+name+" · digest "+snap.digest+" · isolated, no host I/O or broadcast");return;
+      }
+      const branch=this.branches.get(name);if(!branch||!parts.length)throw Error("branch unavailable");
+      const command=parts.join("|").trim(),sub=command.split(/\s+/,1)[0];
+      // Existing syscall interpreter is pure. No memory/driver/transport
+      // adapters in the branch, and no command that dispatches external I/O.
+      if(!["start","status","list","ps","syscall","suspend","resume","terminate","top","trace","dmesg","stat","whoami"].includes(sub))throw Error("branch command not in isolated replay allowlist");
+      await branch.handle(command);
+    }catch(e){say("recovery refused: "+(e as Error).message);}
+  }
 
   private async initCommand(domain:string,rest:string):Promise<void>{
     const [head,...body]=rest.split("|"),[op,ref,name,...extra]=head.trim().split(/\s+/);

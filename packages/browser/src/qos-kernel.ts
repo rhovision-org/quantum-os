@@ -58,7 +58,7 @@ export type QosSyscallName = (typeof QOS_SYSCALLS)[number];
 export const QOS_SIGNALS = ["SIGTERM", "SIGINT", "SIGKILL", "SIGCHLD"] as const;
 export type QosSignal = (typeof QOS_SIGNALS)[number];
 
-export type QosErrno = "EACCES" | "ENOENT" | "EBADF" | "EAGAIN" | "EINVAL" | "ENOTSUP";
+export type QosErrno = "EACCES" | "ENOENT" | "EBADF" | "EAGAIN" | "EINVAL" | "ENOTSUP" | "ENOSPC";
 
 export type QosResult<T> =
   | { ok: true; value: T }
@@ -129,6 +129,44 @@ export class QosKernel {
   private scheduler = new QosScheduler();
   private memory = new QosMemoryGraph();
   private vfs = new QosVfs();
+  // A quota bounds committed syscall receipts, not adversarial wire traffic.
+  // Failed/refused receipts are retained for audit, with no resource mutation.
+  private quotaCalls=new Map<string,number>();
+  static readonly QUOTA={calls:512,handles:128,bytes:256*1024};
+  quotaView(){
+    return this.list().map(p=>{
+      const live=this.processes.get(p.pid)!;
+      const ids=new Set<string>();
+      let handles=0;
+      for(const h of live.handles.values())if(!h.revoked){
+        handles++;
+        if(h.object.startsWith("mem:"))ids.add(h.object.slice(4));
+        if(h.object.startsWith("fs:"))for(const id of this.vfs.fileIds(h.object.slice(3)))ids.add(id);
+      }
+      let bytes=0;for(const id of ids)bytes+=this.memory.stat(id)?.size??0;
+      return {pid:p.pid,calls:this.quotaCalls.get(p.pid)??0,handles,bytes,limits:{...QosKernel.QUOTA}};
+    });
+  }
+  private quotaExempt(op:string){
+    return ["getpid","getppid","mem_get","mem_stat","fs_stat","fs_ls","id_info","id_groups","id_cap","dev_list","pkg_list","svc_list","svc_status",
+      "cap_close","cap_revoke","mem_drop","mem_unlink","fs_unlink","fs_unmount","dev_close","dev_observe","svc_stop","pkg_remove","sh_wait","signal"].includes(op);
+  }
+  quotaBefore(pid:string,op:string):QosResult<true>{
+    // Cleanup remains possible at the limit.
+    if(this.quotaExempt(op))return ok(true);
+    return (this.quotaCalls.get(pid)??0)>=QosKernel.QUOTA.calls?err("EAGAIN","committed syscall quota exhausted"):ok(true);
+  }
+  quotaAfter(before:ReturnType<QosKernel["quotaView"]>,pid:string,op:string):QosResult<true>{
+    const old=new Map(before.map(q=>[q.pid,q]));
+    for(const q of this.quotaView()){
+      const prev=old.get(q.pid);
+      if(q.handles>QosKernel.QUOTA.handles&&q.handles>(prev?.handles??0))return err("ENOSPC","live handle quota");
+      if(q.bytes>QosKernel.QUOTA.bytes&&q.bytes>(prev?.bytes??0))return err("ENOSPC","reachable logical object bytes quota");
+    }
+    if(!this.quotaExempt(op))
+      this.quotaCalls.set(pid,(this.quotaCalls.get(pid)??0)+1);
+    return ok(true);
+  }
   private packages=new Map<string,Map<string,InstalledPackage>>();
   private services=new Map<string,Map<string,ServiceRecord>>();
   private initVersions=new Map<string,string>();
@@ -1123,6 +1161,7 @@ export class QosKernel {
     copy.scheduler = this.scheduler.clone();
     copy.memory = this.memory.clone();
     copy.vfs = this.vfs.clone();
+    copy.quotaCalls=new Map(this.quotaCalls);
     copy.packages=new Map([...this.packages].map(([pid,m])=>[pid,new Map([...m].map(([n,v])=>[n,JSON.parse(JSON.stringify(v)) as InstalledPackage]))]));
     copy.services=new Map([...this.services].map(([pid,m])=>[pid,new Map([...m].map(([n,v])=>[n,{...v}]))]));
     copy.initVersions=new Map(this.initVersions);
@@ -1151,6 +1190,7 @@ export class QosKernel {
   state(): Record<string, unknown> {
     return {
       abi: QOS_ABI_VERSION,
+      quota:this.quotaView(),
       scheduler: this.scheduler.state(),
       memory: this.memoryView(),
       vfs: this.fsState(),
@@ -1434,6 +1474,14 @@ function parseSyscallRequest(payload: Record<string, unknown>, pid: string): Qos
   return payload as QosCanonicalSyscallRequest;
 }
 function executeCanonicalSyscall(kernel: QosKernel, request: QosCanonicalSyscallRequest, requestHash?: string): QosResult<unknown> {
+  const allowed=kernel.quotaBefore(request.caller,request.op);if(!allowed.ok)return allowed;
+  const before=kernel.quotaView();
+  const result=executeUnmeteredSyscall(kernel,request,requestHash);
+  if(!result.ok)return result;
+  const quota=kernel.quotaAfter(before,request.caller,request.op);
+  return quota.ok?result:quota;
+}
+function executeUnmeteredSyscall(kernel: QosKernel, request: QosCanonicalSyscallRequest, requestHash?: string): QosResult<unknown> {
   const pid = request.caller;
   if (kernel.getProcess(pid)?.state !== "running") return err("ENOENT", "caller is not running");
   switch (request.op) {

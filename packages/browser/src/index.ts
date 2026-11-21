@@ -104,3 +104,5 @@ export * from "./qos-device.js";
 export * from "./qos-device-host.js";
 
 export * from "./qos-init.js";
+
+export * from "./qos-observe.js";

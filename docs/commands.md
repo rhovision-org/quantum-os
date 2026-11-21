@@ -1025,3 +1025,35 @@ macro and contract entrypoints are installable inert data; starting them
 fails closed until an authorized execution runtime is implemented.
 This is the deterministic init/core slice, not autonomous daemon service
 execution or an agent execution host. Package source is room journal data.
+
+### Observability and isolated recovery (#285)
+
+`/top`, `/dmesg`, `/trace [process]` and `/stat [process]` inspect
+canonical replay without authoring events. The trace shows the canonical
+position, event hash, caller, handle, operation, result or errno and rejection
+diagnostic. Display is bounded (32 recent trace rows, 128 process rows).
+The digest is a logical state digest, not a claim of physical byte availability.
+
+`/snapshot <name>` saves a bounded (2 MiB) clean, complete causal cut with
+admitted event evidence, room identity, state digest and canonical envelope
+hash. Forked, unresolved or pending syscall cuts fail closed.
+`/restore <name>` verifies admission and both hashes, then creates a separate
+local continuation. `/branch <name> | <command>` explicitly routes a supported
+pure command into that continuation. Neither restore nor branch commands
+replace or truncate the original room journal. A branch uses the current
+monotonic identity counter, not a restored seed or counter. Branch effects
+are isolated from room broadcast, byte adapters and host drivers. Snapshots
+persist locally; branch continuation is in memory and is not mergeable into
+the original room. This is not distributed rollback or a live failover.
+Snapshot integrity is not independent authentication of its author.
+
+Deterministic quotas: per process, 128 live handles, 256 KiB of distinct
+objects directly referenced by live memory or namespace handles, and 512
+committed chargeable syscall operations. Shared namespace changes are
+checked for all affected holders. Read-only inspection and cleanup
+operations are exempt from the operation budget. Limit refusals return
+ENOSPC/EAGAIN without committing speculative state; refusal receipts remain
+auditable. The operation budget is not a raw network-event admission limit,
+and logical bytes are not physical cache or transitive memory-graph bytes.
+No production wire-rate, governance-event or global process quotas are
+claimed. No wall-clock dependency.
