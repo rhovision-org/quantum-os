@@ -2237,7 +2237,7 @@ function proposalTimedOut(id: string): void {
   if (state.role === "proposer" && qpeer) {
     const self = qpeer.peerId;
     const targets = uniqueParticipants(state.proposal).filter(p => p !== self);
-    for (const t of targets) qpeer.send(t, { kind: "rdv-abort", id, reason: "timeout" });
+    for (const t of targets) signedSend(t, { kind: "rdv-abort", id, reason: "timeout" });
   }
   addMessage("", `· rendezvous ${shortRdvId(id)} expired`, "system");
 }
@@ -5517,7 +5517,7 @@ function handleCommand(raw: string): string[] {
           const detached = detach(chosen, N);
           if (!detached) { sys("split failed"); break; }
           const passTerms = seriesTerms.get(currency);
-          const sent = qpeer.send(targetId, { kind: "note-pass", currency, denomination: N, token: detached.outgoing,
+          const sent = signedSend(targetId, { kind: "note-pass", currency, denomination: N, token: detached.outgoing,
             ...(passTerms ? { terms: passTerms.terms, termsHash: passTerms.termsHash } : {}) });
           if (!sent) {
             undoDetach(chosen, detached.change);
@@ -5555,7 +5555,7 @@ function handleCommand(raw: string): string[] {
           if (!issuerId) { sys(`unknown peer: '${issuerName}'`); break; }
           const detached = detach(chosen, N);
           if (!detached) { sys("split failed"); break; }
-          const sent = qpeer.send(issuerId, { kind: "note-redeem", currency, denomination: N, token: detached.outgoing });
+          const sent = signedSend(issuerId, { kind: "note-redeem", currency, denomination: N, token: detached.outgoing });
           if (!sent) {
             undoDetach(chosen, detached.change);
             sys(`cannot reach ${issuerName} — data channel not open`);
@@ -5741,7 +5741,7 @@ function handleCommand(raw: string): string[] {
           saveNotes();
           renderNotes();
 
-          const sent = qpeer.send(targetId, { kind: "rdv-propose", proposal });
+          const sent = signedSend(targetId, { kind: "rdv-propose", proposal });
           if (!sent) {
             releaseLockedFor(id);
             proposals.delete(id);
@@ -5816,7 +5816,7 @@ function handleCommand(raw: string): string[] {
             });
             for (const p of participants) {
               if (p === myId) continue;
-              qpeer.send(p, { kind: "rdv-commit", id: state.proposal.id, rows: commitRows });
+              signedSend(p, { kind: "rdv-commit", id: state.proposal.id, rows: commitRows });
             }
             const ok = applyCommit(state, commitRows);
             proposals.delete(state.proposal.id);
@@ -5832,7 +5832,7 @@ function handleCommand(raw: string): string[] {
           saveNotes();
           renderNotes();
 
-          const sent = qpeer.send(state.proposal.proposer, {
+          const sent = signedSend(state.proposal.proposer, {
             kind: "rdv-accept", id: state.proposal.id, token: detached.outgoing,
           });
           if (!sent) {
@@ -5856,7 +5856,7 @@ function handleCommand(raw: string): string[] {
           if (!state) { sys(`no proposal matching '${prefix}'`); break; }
           if (state.role !== "participant") { sys("you proposed this; use /rdv abort instead"); break; }
           if (state.myStatus !== "pending") { sys(`already ${state.myStatus}`); break; }
-          if (qpeer) qpeer.send(state.proposal.proposer, { kind: "rdv-reject", id: state.proposal.id });
+          if (qpeer) signedSend(state.proposal.proposer, { kind: "rdv-reject", id: state.proposal.id });
           proposals.delete(state.proposal.id);
           clearProposalTimeout(state.proposal.id);
           saveNotes();
@@ -5875,7 +5875,7 @@ function handleCommand(raw: string): string[] {
           if (qpeer) {
             const self = qpeer.peerId;
             const targets = uniqueParticipants(state.proposal).filter(p => p !== self);
-            for (const t of targets) qpeer.send(t, { kind: "rdv-abort", id: state.proposal.id, reason: "proposer-cancel" });
+            for (const t of targets) signedSend(t, { kind: "rdv-abort", id: state.proposal.id, reason: "proposer-cancel" });
           }
           proposals.delete(state.proposal.id);
           clearProposalTimeout(state.proposal.id);
@@ -5950,7 +5950,7 @@ function handleCommand(raw: string): string[] {
           // Send the counter envelope, including the token I just locked so
           // the recipient can record it in their acceptedBy for the eventual
           // commit construction.
-          const sent = qpeer.send(otherId, {
+          const sent = signedSend(otherId, {
             kind: "rdv-counter", id: state.proposal.id, rows: newRows,
             proposerName: myName2, token: detached.outgoing,
           });
@@ -8104,6 +8104,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "rdv-propose") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const proposalRaw = d.proposal;
           if (!proposalRaw || typeof proposalRaw !== "object") return;
           const proposal = proposalRaw as Proposal;
@@ -8131,6 +8133,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "rdv-accept") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const id = String(d.id ?? "");
           const token = String(d.token ?? "");
           const state = proposals.get(id);
@@ -8165,7 +8169,7 @@ async function connect(): Promise<void> {
           if (qpeer) {
             for (const p of participants) {
               if (p === self) continue;
-              qpeer.send(p, { kind: "rdv-commit", id, rows: commitRows });
+              signedSend(p, { kind: "rdv-commit", id, rows: commitRows });
             }
           }
           const ok = applyCommit(state, commitRows);
@@ -8177,6 +8181,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "rdv-reject") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const id = String(d.id ?? "");
           const state = proposals.get(id);
           if (!state || state.role !== "proposer") return;
@@ -8185,7 +8191,7 @@ async function connect(): Promise<void> {
           if (qpeer) {
             const self = qpeer.peerId;
             const targets = uniqueParticipants(state.proposal).filter(p => p !== self && p !== from);
-            for (const t of targets) qpeer.send(t, { kind: "rdv-abort", id, reason: "peer-rejected" });
+            for (const t of targets) signedSend(t, { kind: "rdv-abort", id, reason: "peer-rejected" });
           }
           proposals.delete(id);
           clearProposalTimeout(id);
@@ -8195,6 +8201,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "rdv-commit") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const id = String(d.id ?? "");
           const rowsRaw = d.rows;
           if (!Array.isArray(rowsRaw)) return;
@@ -8212,6 +8220,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "rdv-abort") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const id = String(d.id ?? "");
           const reason = String(d.reason ?? "");
           const state = proposals.get(id);
@@ -8226,6 +8236,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "rdv-counter") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           // The other participant proposed new terms for an in-flight rdv.
           // Validate, release any locks we hold for it (terms changed —
           // any token we had reserved is no longer the right one), and
