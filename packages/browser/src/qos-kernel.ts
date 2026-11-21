@@ -7,10 +7,10 @@
 // is the kernel seam that contract will call.
 //
 // Not implemented here (reserved by the ABI, tracked in the roadmap):
-// read/write/stat/VFS, scheduler ticks, devices, services, and the qos.syscall/1
-// wire envelope.
+// read/write/stat/VFS, scheduler ticks, devices, services, and broader syscall
+// authority. The bounded root-attributed syscall event slice is below.
 
-import { canonicalJson, canonicalEventOrder, sha256Hex, type QosEvent } from "./qos-process.js";
+import { canonicalJson, canonicalEventOrder, brokenChainsIn, sha256Hex, type QosEvent } from "./qos-process.js";
 
 export const QOS_ABI_VERSION = 0;
 
@@ -94,7 +94,7 @@ const ok = <T>(value: T): QosResult<T> => ({ ok: true, value });
 const err = <T = never>(errno: QosErrno, detail?: string): QosResult<T> => ({ ok: false, errno, detail });
 
 function validRights(rights: number): boolean {
-  return Number.isInteger(rights) && rights > 0 && (rights & ~KNOWN_RIGHTS) === 0;
+  return Number.isInteger(rights) && rights > 0 && rights <= KNOWN_RIGHTS && (rights & ~KNOWN_RIGHTS) === 0;
 }
 
 function signalExitCode(sig: QosSignal): number {
@@ -406,12 +406,70 @@ export class QosKernel {
   }
 }
 
+/** Embedded payload only; no independent syscall stream. */
+export type QosCanonicalSyscallRequest = {
+  schema: "qos.syscall/1";
+  caller: string;
+  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke";
+  args: Record<string, unknown>;
+};
+export type QosCanonicalSyscallTrace = {
+  requestHash: string;
+  resultHash: string;
+  caller: string;
+  op: QosCanonicalSyscallRequest["op"];
+  args: Record<string, unknown>;
+  outcome: QosResult<unknown>;
+  position: number;
+};
+function exactKeys(value: unknown, keys: string[]): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+}
+function parseSyscallRequest(payload: Record<string, unknown>, pid: string): QosCanonicalSyscallRequest | null {
+  if (!exactKeys(payload, ["schema", "caller", "op", "args"]) ||
+      payload.schema !== "qos.syscall/1" || payload.caller !== pid) return null;
+  const args = payload.args;
+  switch (payload.op) {
+    case "getpid": case "getppid":
+      if (!exactKeys(args, [])) return null;
+      break;
+    case "cap_close": case "cap_revoke":
+      if (!exactKeys(args, ["handle"]) || typeof args.handle !== "string") return null;
+      break;
+    case "cap_derive":
+      if (!exactKeys(args, ["handle", "rights"]) || typeof args.handle !== "string" ||
+          typeof args.rights !== "number" || !Number.isSafeInteger(args.rights)) return null;
+      break;
+    default: return null;
+  }
+  return payload as QosCanonicalSyscallRequest;
+}
+function executeCanonicalSyscall(kernel: QosKernel, request: QosCanonicalSyscallRequest): QosResult<unknown> {
+  const pid = request.caller;
+  if (kernel.getProcess(pid)?.state !== "running") return err("ENOENT", "caller is not running");
+  switch (request.op) {
+    case "getpid": return kernel.getpid(pid);
+    case "getppid": return kernel.getppid(pid);
+    case "cap_derive": return kernel.capDerive(pid, request.args.handle as string, request.args.rights as number);
+    case "cap_close": return kernel.capClose(pid, request.args.handle as string);
+    case "cap_revoke": return kernel.capRevoke(pid, request.args.handle as string);
+  }
+}
+/** Predict the outcome without changing the source kernel. */
+export function previewCanonicalSyscall(kernel: QosKernel, payload: Record<string, unknown>, pid: string): QosResult<unknown> | null {
+  const request = parseSyscallRequest(payload, pid);
+  return request ? executeCanonicalSyscall(kernel.cloneForReplay(), request) : null;
+}
+
 export interface QosKernelReplayResult {
   kernel: QosKernel;
   applied: string[];
   rejected: { hash: string; reason: string }[];
   missingDependencies: { eventHash: string; dependencyHash: string; kind: "prev" | "grant" }[];
   cyclicHashes: string[];
+  syscalls: QosCanonicalSyscallTrace[];
+  pendingSyscalls: string[];
 }
 
 /** Reconstruct the kernel process table from a verified qos.event/1 event set.
@@ -422,7 +480,8 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
   const forked = new Set(forkedSources);
   const admitted = events.filter((event) => !forked.has(event.source));
   const order = canonicalEventOrder(admitted);
-  const kernel = new QosKernel();
+  const broken = brokenChainsIn(admitted);
+  let kernel = new QosKernel();
   const starts = new Map<string, QosEvent>();
   const invalidEventHashes = new Set(order.missingDependencies.map((item) => item.eventHash));
   for (const hash of order.cyclicHashes) invalidEventHashes.add(hash);
@@ -441,9 +500,21 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
     }
   }
   const applied: string[] = [];
-  const rejected: { hash: string; reason: string }[] = [];
+  const syscalls: QosCanonicalSyscallTrace[] = [];
+  const requests = new Map<string, { event: QosEvent; request: QosCanonicalSyscallRequest }>();
+  const consumed = new Set<string>();
+  const startCounts = new Map<string, number>();
   for (const event of order.ordered) {
-    if (invalidEventHashes.has(event.hash)) {
+    if (event.type === "process-start") startCounts.set(event.process, (startCounts.get(event.process) ?? 0) + 1);
+  }
+  const rejected: { hash: string; reason: string }[] = [];
+  const rejectSyscall = (event: QosEvent, reason: string) => {
+    invalidEventHashes.add(event.hash);
+    rejected.push({ hash: event.hash, reason });
+  };
+  for (const [position, event] of order.ordered.entries()) {
+    if (invalidEventHashes.has(event.hash) || invalidEventHashes.has(event.prev) || invalidEventHashes.has(event.grant)) {
+      invalidEventHashes.add(event.hash);
       rejected.push({ hash: event.hash, reason: "event has unresolved or cyclic causal dependencies" });
       continue;
     }
@@ -452,6 +523,46 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
       const result = kernel.createProcess({ name, owner: event.source, pid: event.process });
       if (!result.ok) rejected.push({ hash: event.hash, reason: result.detail ?? result.errno });
       else { starts.set(event.process, event); applied.push(event.hash); }
+      continue;
+    }
+    if (event.type === "syscall-request" || event.type === "syscall-result") {
+      const start = starts.get(event.process);
+      const scope = start?.payload.scope as { process?: unknown; events?: unknown } | undefined;
+      if (!start || startCounts.get(event.process) !== 1 || event.grant !== "root" ||
+          broken.some(chain => chain.process === event.process && chain.source === event.source) ||
+          event.source !== start.source || event.capability !== start.capability ||
+          start.payload.rootCapability !== start.capability || scope?.process !== event.process ||
+          !Array.isArray(scope.events) || !scope.events.includes(event.type)) {
+        rejectSyscall(event, "syscall event lacks explicit process-root authority"); continue;
+      }
+      if (event.type === "syscall-request") {
+        const request = parseSyscallRequest(event.payload, event.process);
+        if (!request) { rejectSyscall(event, "invalid or unsupported syscall payload"); continue; }
+        requests.set(event.hash, { event, request });
+        applied.push(event.hash);
+        continue;
+      }
+      const payload = event.payload;
+      const requestHash = payload.requestHash;
+      const pending = typeof requestHash === "string" ? requests.get(requestHash) : undefined;
+      if (!exactKeys(payload, ["schema", "requestHash", "outcome"]) ||
+          payload.schema !== "qos.syscall/1" || typeof requestHash !== "string" ||
+          requestHash !== event.prev || !pending || consumed.has(requestHash) ||
+          pending.event.process !== event.process || pending.event.source !== event.source ||
+          pending.event.capability !== event.capability) {
+        rejectSyscall(event, "unmatched or repeated syscall result"); continue;
+      }
+      const trial = kernel.cloneForReplay();
+      const outcome = executeCanonicalSyscall(trial, pending.request);
+      if (canonicalJson(outcome) !== canonicalJson(payload.outcome)) {
+        rejectSyscall(event, "syscall outcome differs from deterministic execution"); continue;
+      }
+      // Refusals are traceable but cannot publish speculative mutation.
+      if (outcome.ok) kernel = trial;
+      consumed.add(requestHash);
+      syscalls.push({ requestHash, resultHash: event.hash, caller: event.process, op: pending.request.op,
+                      args: { ...pending.request.args }, outcome, position });
+      applied.push(event.hash);
       continue;
     }
     if (event.type !== "process-suspend" && event.type !== "process-resume" && event.type !== "process-terminate") continue;
@@ -466,5 +577,5 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
     if (!result.ok) rejected.push({ hash: event.hash, reason: result.detail ?? result.errno });
     else applied.push(event.hash);
   }
-  return { kernel, applied, rejected, missingDependencies: order.missingDependencies, cyclicHashes: order.cyclicHashes };
+  return { kernel, applied, rejected, missingDependencies: order.missingDependencies, cyclicHashes: order.cyclicHashes, syscalls, pendingSyscalls: [...requests.keys()].filter(hash => !consumed.has(hash)) };
 }

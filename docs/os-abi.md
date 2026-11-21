@@ -124,9 +124,9 @@ for control flow.
 - A replay is the same ordered operation sequence; two kernels that receive it must
   produce the same `stateDigest()`.
 
-## Planned syscall event payload
+## Canonical syscall event payload (bounded #317 slice)
 
-This is the payload shape carried inside a `qos.event/1` event; v0 does not emit it.
+This is the payload shape carried inside a `qos.event/1` event. The bounded root-attributed implementation accepts getpid, getppid, cap_derive, cap_close and cap_revoke. Broader ops remain planned.
 `qos.syscall/1` never forms a parallel journal. The internal `qos.test-trace/1` harness is only a local test fixture: it is neither admitted to a room nor exposed as a public API. Its ordered test input does not establish network-order convergence; that remains a canonical event integration obligation.
 
 ```json
@@ -139,10 +139,8 @@ This is the payload shape carried inside a `qos.event/1` event; v0 does not emit
   "payload": {
     "schema": "qos.syscall/1",
     "caller": "qos:proc:…",
-    "op": "open",
-    "handle": "h:3",
-    "args": { "object": "file:notes/plan.md", "rights": 3 },
-    "nonce": "…"
+    "op": "cap_derive",
+    "args": { "handle": "h:1", "rights": 3 }
   }
 }
 ```
@@ -160,7 +158,17 @@ Validation order:
 5. the operation mutates only the caller's namespace or an object the handle names.
 
 A refused syscall is a recorded `syscall-result` event carrying the errno, not a local-only
-error, so every peer can audit and replay it.
+error, so every peer can audit and replay it. The result payload is
+`{schema:"qos.syscall/1", requestHash, outcome}` and must directly follow that
+request on the same process/source chain. A request is inert until a valid result
+recomputes at its canonical position; false results cannot commit trial state.
+A refused operation is a deterministic outcome, not a malformed-envelope rejection.
+New process roots explicitly include both event types; existing roots without the
+scope stay unauthorized. Older clients reject this event-vocabulary extension:
+coordinate support before deployment. `/qos syscall <name|id> | <op> | <JSON args>`
+exercises the bounded path; `/qos status` exposes the replayed kernel digest.
+Cross-process object/version dependencies, general operations, and distributed
+admission/coordination remain open.
 
 ## Security invariants
 

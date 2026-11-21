@@ -94,6 +94,21 @@ ok("ps names the process and owner", alice.said.some((l) => l.includes("Alpha") 
 await bob.cmd.handle("ps");
 ok("a peer sees the signed owner label", bob.said.some((l) => l.includes("Alpha") && l.includes("Alice")), JSON.stringify(bob.said.slice(-3)));
 
+// --- embedded canonical syscall --------------------------------------------
+await alice.cmd.handle("syscall Alpha | getpid | {}");
+ok("owner syscall emits request and result", alice.outbox.length === 2 && alice.outbox[0].type === "syscall-request" && alice.outbox[1].type === "syscall-result");
+ok("owner syscall reports canonical outcome", alice.said.some(line => line.includes("syscall getpid OK") && line.includes(id)));
+await drain(alice, bob);
+await bob.cmd.handle("syscall Alpha | getpid | {}");
+ok("non-owner syscall refused before emission", bob.outbox.length === 0 && bob.said.some(line => line.includes("only the process owner can issue")));
+await alice.cmd.handle('syscall Alpha | cap_close | {"handle":"h:unknown"}');
+ok("refused syscall is broadcast and reports errno", alice.outbox.length === 2 && alice.outbox[1].payload.outcome.errno === "EBADF" && alice.said.some(line => line.includes("cap_close EBADF")));
+await drain(alice, bob);
+await alice.cmd.handle("status Alpha");
+await bob.cmd.handle("status Alpha");
+ok("both peers display same replayed kernel digest", alice.said.filter(l => l.includes("kernel digest:")).at(-1) === bob.said.filter(l => l.includes("kernel digest:")).at(-1));
+ok("both peers report the two canonical syscall outcomes", bob.said.some(l => l.includes("canonical syscalls: 2")));
+
 // --- suspend ---------------------------------------------------------------
 await alice.cmd.handle("suspend Alpha | resting");
 ok("suspend says so", alice.said.some((l) => l.includes("suspended")));

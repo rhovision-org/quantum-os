@@ -15,8 +15,8 @@ const root = join(here, "..");
 const bundle = await build({
   stdin: {
     contents: `
-      export { QosKernel, replayQosKernel, QOS_ABI_VERSION, QOS_RIGHTS, QOS_ALL_RIGHTS, QOS_SYSCALLS, QOS_SIGNALS } from "./src/qos-kernel.ts";
-      export { QosProcessRoom } from "./src/qos-process.ts";
+      export { QosKernel, replayQosKernel, previewCanonicalSyscall, QOS_ABI_VERSION, QOS_RIGHTS, QOS_ALL_RIGHTS, QOS_SYSCALLS, QOS_SIGNALS } from "./src/qos-kernel.ts";
+      export { QosProcessRoom, QosEventLog } from "./src/qos-process.ts";
       export { newDynCapState } from "./src/dyncap.ts";
     `,
     resolveDir: root,
@@ -29,7 +29,7 @@ const bundle = await build({
   write: false,
 });
 const mod = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { QosKernel, replayQosKernel, QosProcessRoom, newDynCapState, QOS_ABI_VERSION, QOS_RIGHTS, QOS_ALL_RIGHTS, QOS_SYSCALLS, QOS_SIGNALS } = mod;
+const { QosKernel, replayQosKernel, previewCanonicalSyscall, QosProcessRoom, QosEventLog, newDynCapState, QOS_ABI_VERSION, QOS_RIGHTS, QOS_ALL_RIGHTS, QOS_SYSCALLS, QOS_SIGNALS } = mod;
 
 let pass = 0, fail = 0;
 const ok = (label, cond, detail = "") => {
@@ -179,6 +179,50 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   ok("replay refuses lifecycle without its causal start", incomplete.kernel.list().length === 0 && incomplete.rejected.length > 0);
   ok("replay rejects all descendants of missing causal input", incomplete.rejected.length === events.length - 1);
   ok("replay reports missing causal dependencies", incomplete.missingDependencies.length > 0);
+}
+
+// --- canonical syscall request/result/refusal round-trip -------------------
+{
+  const identity = await newDynCapState(new Uint8Array(32).fill(37));
+  const roomId = "cap:room:03010563656127610341634101250325";
+  const room = new QosProcessRoom({ roomId, identity, transport: { broadcast: () => {} } });
+  const started = await room.startProcess("syscall-worker", { entropyHex: "ab" });
+  const pid = started.processId;
+  const invoke = async (op, args) => {
+    const payload = { schema: "qos.syscall/1", caller: pid, op, args };
+    const request = await room.emit(pid, started.event, "syscall-request", payload);
+    const replay = replayQosKernel(room.log.events());
+    const outcome = previewCanonicalSyscall(replay.kernel, payload, pid);
+    assert.ok(outcome);
+    await room.emit(pid, started.event, "syscall-result", { schema: "qos.syscall/1", requestHash: request.hash, outcome });
+    return outcome;
+  };
+  const root = replayQosKernel(room.log.events()).kernel.getProcess(pid).root;
+  const initial = await invoke("getpid", {});
+  const derived = await invoke("cap_derive", { handle: root, rights: R.READ });
+  const refused = await invoke("cap_close", { handle: "h:unknown" });
+  ok("canonical getpid round-trips", initial.ok && initial.value === pid);
+  ok("canonical capability derivation returns handle", derived.ok && derived.value.rights === R.READ);
+  ok("canonical refusal carries EBADF", !refused.ok && refused.errno === "EBADF");
+  const events = room.log.events();
+  const forward = new QosEventLog(roomId), reverse = new QosEventLog(roomId);
+  for (const log of [forward, reverse]) for (const event of log === forward ? events : [...events].reverse()) assert.equal((await log.ingest(event)).ok, true);
+  const a = replayQosKernel(forward.events()), b = replayQosKernel(reverse.events());
+  ok("independent logs replay identical canonical syscall traces", JSON.stringify(a.syscalls) === JSON.stringify(b.syscalls) && a.syscalls.length === 3);
+  ok("independent peer delivery yields identical state digest", await a.kernel.stateDigest() === await b.kernel.stateDigest());
+  ok("result contains request hash, caller, handle, outcome and position", a.syscalls[2].caller === pid && a.syscalls[2].args.handle === "h:unknown" && a.syscalls[2].position === 6);
+  ok("all admitted canonical events accounted for", a.rejected.length === 0 && a.pendingSyscalls.length === 0 && a.applied.length === events.length);
+  const pendingPayload = { schema: "qos.syscall/1", caller: pid, op: "cap_derive", args: { handle: root, rights: R.READ } };
+  const before = await a.kernel.stateDigest();
+  const request = await room.emit(pid, started.event, "syscall-request", pendingPayload);
+  const pendingReplay = replayQosKernel(room.log.events());
+  ok("unanswered request changes no state", await pendingReplay.kernel.stateDigest() === before && pendingReplay.pendingSyscalls[0] === request.hash);
+  await room.emit(pid, started.event, "syscall-result", { schema: "qos.syscall/1", requestHash: request.hash, outcome: { ok: false, errno: "EINVAL" } });
+  const bad = replayQosKernel(room.log.events());
+  ok("valid-envelope false outcome cannot mutate kernel", bad.rejected.some(e => e.reason.includes("outcome differs")) && await bad.kernel.stateDigest() === before);
+  const wide = previewCanonicalSyscall(a.kernel, { schema: "qos.syscall/1", caller: pid, op: "cap_derive", args: { handle: root, rights: 2 ** 32 + 1 } }, pid);
+  ok("oversized rights cannot wrap into allowed mask", !wide.ok && wide.errno === "EINVAL");
+  ok("caller cannot name another process", previewCanonicalSyscall(a.kernel, { schema: "qos.syscall/1", caller: "other", op: "getpid", args: {} }, pid) === null);
 }
 
 // --- deterministic replay -------------------------------------------------

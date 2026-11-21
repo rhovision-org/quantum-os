@@ -92,7 +92,7 @@ console.log("\nevent model");
 eq("the event vocabulary is finite and explicit", Q.QOS_EVENT_TYPES, [
   "process-start", "process-suspend", "process-resume", "process-terminate",
   "capability-grant", "nomination", "poll-open", "ballot", "poll-close",
-  "lemma", "anchor",
+  "lemma", "anchor", "syscall-request", "syscall-result",
 ]);
 ok("an unknown type is rejected", Q.parseQosEvent({ kind: "qos-event", schema: Q.QOS_EVENT_SCHEMA, type: "unknown" }) === null);
 ok("a non-event is rejected", Q.parseQosEvent(null) === null);

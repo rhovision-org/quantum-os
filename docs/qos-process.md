@@ -78,6 +78,8 @@ The finite event vocabulary:
 | `poll-close` | Root-attributed: stop accepting ballots. |
 | `lemma` | Root-attributed lemma-of-record carrying the tally `recordHash`. |
 | `anchor` | Optional, anchor-authorized event carrying a deploy reference. |
+| `syscall-request` | Root-attributed embedded qos.syscall/1 request; no mutation yet. |
+| `syscall-result` | Root-attributed matching deterministic outcome, including errno; replay commits only a verified success. |
 
 Canonical JSON sorts object keys recursively and preserves array order. Both a
 room peer and a rholo/rholalc consumer hash the same bytes, so a payload hash

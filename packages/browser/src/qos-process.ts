@@ -44,7 +44,7 @@ export { optionId };
 export const QOS_EVENT_SCHEMA = "qos.event/1";
 
 /// The finite event vocabulary. There is no open-ended `kind` payload: every
-/// transition the gate names has a type here, and adding one is a schema bump.
+/// transition the gate names has a type here. The #317 extension requires coordinated client support; older decoders reject new types.
 export const QOS_EVENT_TYPES = [
   "process-start",
   "process-suspend",
@@ -57,6 +57,8 @@ export const QOS_EVENT_TYPES = [
   "poll-close",
   "lemma",
   "anchor",
+  "syscall-request",
+  "syscall-result",
 ] as const;
 
 export type QosEventType = (typeof QOS_EVENT_TYPES)[number];
@@ -256,7 +258,7 @@ export function isCapabilityAttenuated(parentToken: string, childToken: string):
 export function newRootScope(process: string): QosCapabilityScope {
   return {
     process,
-    events: ["nomination", "ballot"],
+    events: ["nomination", "ballot", "syscall-request", "syscall-result"],
     canLifecycle: true,
     canGrant: true,
     canClose: true,
