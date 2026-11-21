@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import {pathToFileURL} from "node:url";
 import {writeFile} from "node:fs/promises";
+import {liveDevices} from "./qos-device-live-browser.mjs";
 assert.equal(process.env.GITHUB_ACTIONS,"true","CI-only browser witness");
 assert.ok(process.env.QOS_PLAYWRIGHT_MODULE);
 const {chromium}=await import(pathToFileURL(process.env.QOS_PLAYWRIGHT_MODULE).href);
@@ -93,7 +94,9 @@ try{
  const val=receipt(await command(page,"/dev ioctl devices "+zh+" zfa | 0001","syscall dev_observe OK")).value.observation;
  check("actual app ZFA ioctl returns closure observation",val.ok&&Buffer.from(val.hex,"hex").toString()==="true");
  await command(page,"/dev close devices "+zh,"syscall dev_close OK");
+ stage="dedicated live RTC, media and mesh";
+ for(const name of await liveDevices(page))check(name,true);
  check("local device operations issue zero chain RPC",rpc===0);
- await writeFile("qos283-opfs-evidence.json",JSON.stringify({schema:"qos.device.browser-witness/1",commit:process.env.GITHUB_SHA,run_id:process.env.GITHUB_RUN_ID,content_id:id,chain_rpc_attempts:rpc,checks,verdict:"PASS",scope:"actual Chromium UI, OPFS scratch, ZFA wrapper and passive reload; not external hardware attestation"},null,2)+"\n");
+ await writeFile("qos283-opfs-evidence.json",JSON.stringify({schema:"qos.device.browser-witness/1",commit:process.env.GITHUB_SHA,run_id:process.env.GITHUB_RUN_ID,content_id:id,chain_rpc_attempts:rpc,checks,verdict:"PASS",scope:"actual Chromium UI, OPFS scratch, ZFA wrapper, dedicated live RTC, canvas MediaStreamTrack, PosixNet over RTC and passive replay; no physical media capture or public network"},null,2)+"\n");
 }catch(e){console.error("browser device failed at "+stage+": "+e.name);throw e;}
 finally{await context.close();await browser.close();}

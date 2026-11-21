@@ -8,7 +8,7 @@ on:
       - "packages/browser/src/qos-*.ts"
       - "packages/browser/src/app.ts"
       - "packages/browser/src/palette.ts"
-      - "packages/browser/test/qos-device-opfs-ci.mjs"
+      - "packages/browser/test/qos-device*.mjs"
       - "scripts/localnet/qos-vfs-opfs-ci.py"
       - ".github/workflows/qos-device-browser.yml"
 permissions:

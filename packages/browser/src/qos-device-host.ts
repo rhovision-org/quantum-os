@@ -18,6 +18,11 @@ type Lease={pid:string;handle:string;version:string;driver:DeviceDriver;abort:Ab
 export class DeviceBroker{
  private leases=new Map<string,Lease>();
  private attempted=new Set<string>();
+ hasLease(handle:string){return this.leases.has(handle);}
+ async releaseAll(){
+  const results=await Promise.allSettled([...this.leases.keys()].map(h=>this.release(h)));
+  if(results.some(r=>r.status==="rejected"))throw Error("one or more device leases failed to close");
+ }
  bind(current:()=>QosKernel,pid:string,handle:string,driver:DeviceDriver){
   const session=current().deviceSession(pid,handle);
   if(!session||!session.version||session.descriptor.kind!==driver.kind||this.leases.has(handle))return false;
@@ -31,10 +36,9 @@ export class DeviceBroker{
   await lease.driver.close();
  }
  async reconcile(current:()=>QosKernel){
-  for(const [handle,l] of [...this.leases]){
-   const session=current().deviceSession(l.pid,handle);
-   if(!session||session.version!==l.version)await this.release(handle);
-  }
+  const stale=[...this.leases].filter(([handle,l])=>{const session=current().deviceSession(l.pid,handle);return !session||session.version!==l.version;});
+  const results=await Promise.allSettled(stale.map(([handle])=>this.release(handle)));
+  if(results.some(r=>r.status==="rejected"))throw Error("device release failed");
  }
  async perform(current:()=>QosKernel,pid:string,ticketId:string):Promise<DeviceObservation>{
   const ticket=current().deviceTicket(ticketId);
@@ -48,13 +52,15 @@ export class DeviceBroker{
   try{
    const timeout=new AbortController();
    let timer:ReturnType<typeof setTimeout>|undefined;
+   let onAbort:(()=>void)|undefined;
    try{
     const raw=await Promise.race([
       lease.driver.perform(ticket.request,AbortSignal.any([lease.abort.signal,timeout.signal])),
+      new Promise<DeviceObservation>(resolve=>{onAbort=()=>resolve(deviceFailure("EINTR","unknown"));lease.abort.signal.addEventListener("abort",onAbort,{once:true});if(lease.abort.signal.aborted)onAbort();}),
       new Promise<DeviceObservation>(resolve=>{timer=setTimeout(()=>{timeout.abort();resolve(deviceFailure("EINTR","unknown"));},15000);})
     ]);
     result=deviceObservation(raw,ticket.request)??deviceFailure("EIO","unknown");
-   }finally{if(timer!==undefined)clearTimeout(timer);}
+   }finally{if(timer!==undefined)clearTimeout(timer);if(onAbort)lease.abort.signal.removeEventListener("abort",onAbort);}
    if(timeout.signal.aborted){await this.release(ticket.handle).catch(()=>{});return deviceFailure("EINTR","unknown");}
   }catch{result=deviceFailure("EIO","unknown");}
   if(!current().deviceAuthorized(pid,ticketId)||lease.abort.signal.aborted)return deviceFailure("EACCES","unknown");

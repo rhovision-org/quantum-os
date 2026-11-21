@@ -74,6 +74,7 @@ export class QosCommand {
   private readonly byName = new Map<string, string>();
   private commandQueue: Promise<void> = Promise.resolve();
   private readonly deviceBroker=new DeviceBroker();
+  private deviceEpoch=0;
   private shellSelection:{pid:string;namespace:string}|null=null;
   private readonly restored:Promise<void>;
   private saveJournal():void {
@@ -467,6 +468,26 @@ export class QosCommand {
   }
 
 
+  /** An embedding host explicitly transfers a dedicated, already-authorized
+   * resource. Factory is never invoked on an invalid handle or wrong kind. */
+  async attachDevice(ref:string,handle:string,kind:DeviceDescriptor["kind"],factory:()=>DeviceDriver):Promise<boolean>{
+    const epoch=this.deviceEpoch;
+    await this.restored;
+    const entry=this.resolve(ref),k=()=>this.shellKernel();
+    if(epoch!==this.deviceEpoch||!entry||entry.ownerAnchor!==this.host.identity.anchor||this.deviceBroker.hasLease(handle))return false;
+    const session=k().deviceSession(entry.id,handle);
+    if(!session||session.descriptor.kind!==kind)return false;
+    const driver=factory();
+    if(this.deviceBroker.bind(k,entry.id,handle,driver))return true;
+    await driver.close();return false;
+  }
+  /** Shutdown host effects, not journal state. Reconnection requires rebind. */
+  async releaseDevices():Promise<void>{
+    this.deviceEpoch++;
+    try{await this.deviceBroker.releaseAll();}
+    catch{this.host.say("device resource release failed at host boundary");}
+  }
+
   private async reconcileDevices(){
     try{await this.deviceBroker.reconcile(()=>this.shellKernel());}
     catch{this.host.say("device resource release failed at host boundary");}
@@ -487,11 +508,12 @@ export class QosCommand {
     if(op==="open"&&arg&&!mask&&!body.length){await call("dev_open",{handle,rights:Number(arg)});return;}
     if(op==="close"&&!arg&&!body.length){await call("dev_close",{handle});return;}
     if(op==="bind"&&!arg&&!body.length){
-      const session=k().deviceSession(pid,handle);
+      const epoch=this.deviceEpoch,session=k().deviceSession(pid,handle);
+      if(this.deviceBroker.hasLease(handle)){say("device already bound");return;}
       if(!session||!this.host.deviceDriver){say("no live device session or explicit host adapter");return;}
       const driver=await this.host.deviceDriver(session.descriptor);
       if(!driver){say("explicit resource binding unavailable for this device kind");return;}
-      if(!this.deviceBroker.bind(k,pid,handle,driver)){await driver.close();say("device binding refused");return;}
+      if(epoch!==this.deviceEpoch||!this.deviceBroker.bind(k,pid,handle,driver)){await driver.close();say("device binding refused");return;}
       say("device bound: "+handle);return;
     }
     if(op==="abandon"&&!arg&&!body.length){
