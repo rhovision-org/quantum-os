@@ -725,7 +725,7 @@ export class QosKernel {
     p.state = "exited";
     p.exitCode = code;
     p.handles.clear();
-    this.terminateShellChildren(pid);
+    this.terminateShellChildren(callerPid);
     return ok(true);
   }
 
