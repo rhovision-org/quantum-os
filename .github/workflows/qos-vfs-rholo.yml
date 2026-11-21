@@ -45,3 +45,42 @@ jobs:
             qos280-rholo-evidence.json
             qos280-rholo-evidence.SHA256SUMS
           if-no-files-found: error
+
+  browser-opfs:
+    name: Chromium /fs OPFS persistence and local-only reload
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm build:wasm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:signaling
+      - name: Install disposable Chromium
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qos280-playwright" --no-save --no-package-lock playwright@1.65.1
+          "$RUNNER_TEMP/qos280-playwright/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Actual browser local-only VFS reload
+        env:
+          QOS_PLAYWRIGHT_MODULE: ${{ runner.temp }}/qos280-playwright/node_modules/playwright/index.mjs
+        run: python3 scripts/localnet/qos-vfs-opfs-ci.py
+      - name: Upload verified browser evidence
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qos280-browser-opfs
+          path: |
+            qos280-opfs-evidence.json
+            qos280-opfs-evidence.SHA256SUMS
+          if-no-files-found: error
