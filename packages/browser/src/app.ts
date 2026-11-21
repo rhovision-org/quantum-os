@@ -6281,7 +6281,7 @@ function handleCommand(raw: string): string[] {
         if (!name || !text) { sys("usage: /channel send <name> <text>"); break; }
         if (!qpeer) { sys("not connected"); break; }
         // Tagged broadcast. Receivers without a matching subscription drop it.
-        qpeer.broadcast({ kind: "channel-msg", channel: name, payload: text });
+        signedBroadcast({ kind: "channel-msg", channel: name, payload: text });
         sys(`· sent on channel '${name}': ${text}`);
       } else {
         sys(`unknown subcommand: /channel ${sub}`);
@@ -8340,6 +8340,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "channel-msg") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const ch = String(d.channel ?? "");
           const payload = String(d.payload ?? "");
           // Subscribed channels surface in chat; unsubscribed channels are
