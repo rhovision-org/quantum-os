@@ -60,7 +60,6 @@ check("reverse trace replay reproduces same digest",await replayQosKernel(f.even
 // Focused atomic quota checks: generate real canonical journal receipts for
 // a short bytes quota path, then exercise the exact kernel preview at the
 // handle/call thresholds without producing hundreds of cryptographic events.
-const id=-1;
 for(let i=1;i<=4;i++){
  const descriptor={id:i.toString(16).padStart(64,"0"),size:65536,locator:null};
  val(await call("syscall lab | mem_put | "+JSON.stringify({handle,descriptor}),"mem_put"));
