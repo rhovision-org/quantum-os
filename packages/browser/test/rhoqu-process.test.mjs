@@ -4,10 +4,10 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const bundle = await build({
-  stdin: { contents: 'export { processFromCommands, executeRhoProcess, executeRhoProcessAsync, executeRhoProcessWithPollBindings, executeRhoProcessWithStoreBindingsAsync, countRhoProcessCommands } from "./src/rhoqu-process.ts"; export { transpileProcess, evaluateRhoQuRuntimeCondition } from "./src/rhoqu.ts";', resolveDir: root, loader: "ts", sourcefile: "rhoqu-process-test-entry.ts" },
+  stdin: { contents: 'export { processFromCommands, executeRhoProcess, executeRhoProcessAsync, executeRhoProcessWithPollBindings, executeRhoProcessWithStoreBindingsAsync, countRhoProcessCommands } from "./src/rhoqu-process.ts"; export { transpile, transpileProcess, evaluateRhoQuRuntimeCondition } from "./src/rhoqu.ts";', resolveDir: root, loader: "ts", sourcefile: "rhoqu-process-test-entry.ts" },
   bundle: true, format: "esm", platform: "node", write: false,
 });
-const { processFromCommands, executeRhoProcess, executeRhoProcessAsync, executeRhoProcessWithPollBindings, executeRhoProcessWithStoreBindingsAsync, countRhoProcessCommands, transpileProcess, evaluateRhoQuRuntimeCondition } = await import(
+const { processFromCommands, executeRhoProcess, executeRhoProcessAsync, executeRhoProcessWithPollBindings, executeRhoProcessWithStoreBindingsAsync, countRhoProcessCommands, transpile, transpileProcess, evaluateRhoQuRuntimeCondition } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
 let pass = 0, fail = 0;
