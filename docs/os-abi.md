@@ -169,6 +169,13 @@ coordinate support before deployment. `/qos syscall <name|id> | <op> | <JSON arg
 exercises the bounded path; `/qos status` exposes the replayed kernel digest.
 Replay refuses multiple starts for the same PID rather than selecting an owner,
 requires the declared process identity/root scope, and checks lifecycle rights.
+Canonical replay roots use `h:start:<process-start hash>`, and cap_derive
+successes use `h:request:<syscall-request hash>`. Neither consumes the local
+sequential handle allocator. This keeps IDs and outcomes stable when unrelated
+earlier event chains arrive. The standalone kernel fixture API still uses local
+numbered handles. Existing experimental canonical histories containing numbered
+handle IDs have no automatic migration: coordinated clients must start a new
+journal or explicitly migrate its receipts rather than reinterpret them.
 Cross-process object/version dependencies, general operations, and distributed
 admission/coordination remain open.
 

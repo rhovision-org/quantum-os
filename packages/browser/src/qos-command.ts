@@ -228,7 +228,7 @@ export class QosCommand {
     const request = await this.room.emit(entry.id, entry.start, "syscall-request", payload);
     this.host.onSigned?.();
     const requested = current();
-    const outcome = previewCanonicalSyscall(requested.kernel, payload, entry.id);
+    const outcome = previewCanonicalSyscall(requested.kernel, payload, entry.id, request.hash);
     if (!requested.pendingSyscalls.includes(request.hash) || outcome === null) {
       this.host.say("syscall request rejected by canonical replay");
       return;

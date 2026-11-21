@@ -219,7 +219,7 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
     const payload = { schema: "qos.syscall/1", caller: pid, op, args };
     const request = await room.emit(pid, started.event, "syscall-request", payload);
     const replay = replayQosKernel(room.log.events());
-    const outcome = previewCanonicalSyscall(replay.kernel, payload, pid);
+    const outcome = previewCanonicalSyscall(replay.kernel, payload, pid, request.hash);
     assert.ok(outcome);
     await room.emit(pid, started.event, "syscall-result", { schema: "qos.syscall/1", requestHash: request.hash, outcome });
     return outcome;
@@ -252,6 +252,35 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   ok("caller cannot name another process", previewCanonicalSyscall(a.kernel, { schema: "qos.syscall/1", caller: "other", op: "getpid", args: {} }, pid) === null);
 }
 
+// Unrelated earlier history must not renumber a process's root or derived handle.
+{
+  const roomId = "cap:room:03010563656127610341634101250325";
+  const identities = await Promise.all([newDynCapState(new Uint8Array(32).fill(91)),newDynCapState(new Uint8Array(32).fill(92))]);
+  identities.sort((a,b) => a.anchor < b.anchor ? -1 : a.anchor > b.anchor ? 1 : 0);
+  const make = identity => new QosProcessRoom({roomId, identity, transport:{broadcast:()=>{}}});
+  const late = make(identities[0]), original = make(identities[1]);
+  const start = await original.startProcess("original", {entropyHex:"ab"});
+  const pid = start.processId;
+  const root = replayQosKernel(original.log.events()).kernel.getProcess(pid).root;
+  const payload = {schema:"qos.syscall/1",caller:pid,op:"cap_derive",args:{handle:root,rights:R.READ}};
+  const req = await original.emit(pid,start.event,"syscall-request",payload);
+  const outcome = previewCanonicalSyscall(replayQosKernel(original.log.events()).kernel,payload,pid,req.hash);
+  assert.ok(outcome.ok);
+  await original.emit(pid,start.event,"syscall-result",{schema:"qos.syscall/1",requestHash:req.hash,outcome});
+  const independent = await late.startProcess("independent",{entropyHex:"cd"});
+  const old = replayQosKernel(original.log.events());
+  const union = [independent.event,...original.log.events()];
+  const merged = replayQosKernel(union), reverse = replayQosKernel([...union].reverse());
+  ok("root ID anchored to the process-start event", root === "h:start:" + start.event.hash);
+  ok("derived ID anchored to the request, not global counter", outcome.value.id === "h:request:" + req.hash);
+  ok("unrelated earlier start preserves existing syscall result", merged.rejected.length === 0 && merged.syscalls.length === 1 && JSON.stringify(merged.syscalls[0].outcome) === JSON.stringify(old.syscalls[0].outcome));
+  ok("unrelated earlier start preserves process object IDs", JSON.stringify(merged.kernel.getProcess(pid)) === JSON.stringify(old.kernel.getProcess(pid)));
+  ok("merged history delivery permutations converge", await merged.kernel.stateDigest() === await reverse.kernel.stateDigest());
+  const k = new QosKernel();
+  assert.ok(k.createProcess({name:"reserved",owner:"a",pid:"proc:1"}).ok);
+  const auto = k.createProcess({name:"auto",owner:"a"});
+  ok("automatic PIDs skip existing explicit allocations", auto.ok && auto.value.pid === "proc:2");
+}
 // --- deterministic replay -------------------------------------------------
 {
   const run = async () => {

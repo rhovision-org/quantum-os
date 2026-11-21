@@ -117,7 +117,7 @@ export class QosKernel {
 
   /** Bootstrap a process. The caller supplies the owner identity; this is the
    *  equivalent of the room admitting the initial process, not a syscall. */
-  createProcess(input: { name: string; owner: string; parent?: string | null; pid?: string }): QosResult<QosProcessInfo> {
+  createProcess(input: { name: string; owner: string; parent?: string | null; pid?: string; rootId?: string }): QosResult<QosProcessInfo> {
     const name = String(input.name ?? "").trim();
     const owner = String(input.owner ?? "").trim();
     if (!name || !owner) return err("EINVAL", "name and owner are required");
@@ -128,10 +128,11 @@ export class QosKernel {
       if (!p || p.state !== "running") return err("ENOENT", "parent process is not running");
     }
 
-    const pid = input.pid ?? `proc:${this.nextPid++}`;
+    const pid = input.pid ?? this.allocatePid();
     if (this.processes.has(pid)) return err("EINVAL", "pid already exists");
 
-    const rootHandle = this.makeHandle("room", QOS_ALL_RIGHTS, null);
+    if (input.rootId !== undefined && this.lineage.has(input.rootId)) return err("EINVAL", "handle ID already allocated");
+    const rootHandle = this.makeHandle("room", QOS_ALL_RIGHTS, null, input.rootId);
     const proc: QosProcess = {
       pid, name, owner, parent, state: "running", exitCode: null, root: rootHandle.id, handles: new Map(), pending: [],
     };
@@ -161,7 +162,7 @@ export class QosKernel {
     const label = String(name ?? "").trim();
     if (!label) return err("EINVAL", "name is required");
 
-    const pid = `proc:${this.nextPid++}`;
+    const pid = this.allocatePid();
     // The child's root is a derived image capability, never broader than the image.
     const rootHandle = this.makeHandle(image.value.object, image.value.rights, image.value.id);
     const child: QosProcess = {
@@ -191,7 +192,7 @@ export class QosKernel {
   }
 
   /** Derive a narrower handle from an existing one. */
-  capDerive(callerPid: string, handleId: string, rights: number): QosResult<QosHandleInfo> {
+  capDerive(callerPid: string, handleId: string, rights: number, allocatedId?: string): QosResult<QosHandleInfo> {
     const caller = this.processes.get(callerPid);
     if (!caller || caller.state !== "running") return err("ENOENT", "caller is not running");
     if (!validRights(rights)) return err("EINVAL", "rights must be a non-empty known mask");
@@ -199,7 +200,8 @@ export class QosKernel {
     if (!parent.ok) return parent;
     if (!(parent.value.rights & QOS_RIGHTS.GRANT)) return err("EACCES", "handle lacks GRANT");
     if ((rights & ~parent.value.rights) !== 0) return err("EACCES", "cannot widen rights");
-    const h = this.makeHandle(parent.value.object, rights, parent.value.id);
+    if (allocatedId !== undefined && this.lineage.has(allocatedId)) return err("EINVAL", "handle ID already allocated");
+    const h = this.makeHandle(parent.value.object, rights, parent.value.id, allocatedId);
     caller.handles.set(h.id, h);
     return ok(this.handleInfo(h));
   }
@@ -333,7 +335,7 @@ export class QosKernel {
   }
 
   list(): QosProcessInfo[] {
-    return [...this.processes.values()].map((p) => this.info(p)).sort((a, b) => a.pid.localeCompare(b.pid));
+    return [...this.processes.values()].map((p) => this.info(p)).sort((a, b) => a.pid < b.pid ? -1 : a.pid > b.pid ? 1 : 0);
   }
 
   /** Copy every replay-relevant field, including allocation counters.
@@ -361,7 +363,7 @@ export class QosKernel {
       nextHandle: this.nextHandle,
       lineage: [...this.lineage.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
       processes: [...this.processes.values()]
-        .sort((a, b) => a.pid.localeCompare(b.pid))
+        .sort((a, b) => a.pid < b.pid ? -1 : a.pid > b.pid ? 1 : 0)
         .map((p) => ({
           pid: p.pid,
           name: p.name,
@@ -372,7 +374,7 @@ export class QosKernel {
           root: p.root,
           pending: [...p.pending],
           handles: [...p.handles.values()]
-            .sort((a, b) => a.id.localeCompare(b.id))
+            .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
             .map((h) => ({ id: h.id, object: h.object, rights: h.rights, parent: h.parent, revoked: h.revoked })),
         })),
     };
@@ -382,8 +384,16 @@ export class QosKernel {
     return sha256Hex(canonicalJson(this.state()));
   }
 
-  private makeHandle(object: string, rights: number, parent: string | null): QosHandle {
-    const id = `h:${this.nextHandle++}`;
+  private allocatePid(): string {
+    let pid: string;
+    do { pid = `proc:${this.nextPid++}`; } while (this.processes.has(pid));
+    return pid;
+  }
+
+  private makeHandle(object: string, rights: number, parent: string | null, stableId?: string): QosHandle {
+    let id: string;
+    if (stableId !== undefined) id = stableId;
+    else { do { id = `h:${this.nextHandle++}`; } while (this.lineage.has(id)); }
     this.lineage.set(id, parent);
     return { id, object, rights, parent, revoked: false };
   }
@@ -408,7 +418,7 @@ export class QosKernel {
       state: p.state,
       exitCode: p.exitCode,
       root: p.root,
-      handles: [...p.handles.keys()].sort((a, b) => a.localeCompare(b)),
+      handles: [...p.handles.keys()].sort((a, b) => a < b ? -1 : a > b ? 1 : 0),
       pending: [...p.pending],
     };
   }
@@ -453,21 +463,21 @@ function parseSyscallRequest(payload: Record<string, unknown>, pid: string): Qos
   }
   return payload as QosCanonicalSyscallRequest;
 }
-function executeCanonicalSyscall(kernel: QosKernel, request: QosCanonicalSyscallRequest): QosResult<unknown> {
+function executeCanonicalSyscall(kernel: QosKernel, request: QosCanonicalSyscallRequest, requestHash?: string): QosResult<unknown> {
   const pid = request.caller;
   if (kernel.getProcess(pid)?.state !== "running") return err("ENOENT", "caller is not running");
   switch (request.op) {
     case "getpid": return kernel.getpid(pid);
     case "getppid": return kernel.getppid(pid);
-    case "cap_derive": return kernel.capDerive(pid, request.args.handle as string, request.args.rights as number);
+    case "cap_derive": return kernel.capDerive(pid, request.args.handle as string, request.args.rights as number, requestHash === undefined ? undefined : `h:request:${requestHash}`);
     case "cap_close": return kernel.capClose(pid, request.args.handle as string);
     case "cap_revoke": return kernel.capRevoke(pid, request.args.handle as string);
   }
 }
 /** Predict the outcome without changing the source kernel. */
-export function previewCanonicalSyscall(kernel: QosKernel, payload: Record<string, unknown>, pid: string): QosResult<unknown> | null {
+export function previewCanonicalSyscall(kernel: QosKernel, payload: Record<string, unknown>, pid: string, requestHash?: string): QosResult<unknown> | null {
   const request = parseSyscallRequest(payload, pid);
-  return request ? executeCanonicalSyscall(kernel.cloneForReplay(), request) : null;
+  return request ? executeCanonicalSyscall(kernel.cloneForReplay(), request, requestHash) : null;
 }
 
 export interface QosKernelReplayResult {
@@ -534,7 +544,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
           processIdFor(name, event.capability) !== event.process || !scope || scope.process !== event.process) {
         rejectSyscall(event, "conflicting or invalid process-start"); continue;
       }
-      const result = kernel.createProcess({ name, owner: event.source, pid: event.process });
+      const result = kernel.createProcess({ name, owner: event.source, pid: event.process, rootId: `h:start:${event.hash}` });
       if (!result.ok) rejected.push({ hash: event.hash, reason: result.detail ?? result.errno });
       else { starts.set(event.process, event); applied.push(event.hash); }
       continue;
@@ -567,7 +577,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         rejectSyscall(event, "unmatched or repeated syscall result"); continue;
       }
       const trial = kernel.cloneForReplay();
-      const outcome = executeCanonicalSyscall(trial, pending.request);
+      const outcome = executeCanonicalSyscall(trial, pending.request, requestHash);
       if (canonicalJson(outcome) !== canonicalJson(payload.outcome)) {
         rejectSyscall(event, "syscall outcome differs from deterministic execution"); continue;
       }
