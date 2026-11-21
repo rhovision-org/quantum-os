@@ -91,5 +91,9 @@ const noCreationIds = new Set();
 const noCreationCommands = [];
 executeRhoProcessWithPollBindings(liveProcess, command => { noCreationCommands.push(command); return ["no poll created"]; }, () => [...noCreationIds]);
 ok("failed poll creation leaves named binding unresolved", noCreationCommands[1] === "/poll add $pollId Option A" && noCreationCommands[2] === "/poll status $LAST_ID");
+let reservedBindingRejected = false;
+try { transpileProcess("bind LAST_ID /poll new reserved;"); }
+catch (error) { reservedBindingRejected = String(error).includes("LAST_ID is reserved"); }
+ok("LAST_ID cannot be shadowed by a named binding", reservedBindingRejected);
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-process.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);

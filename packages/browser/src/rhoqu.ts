@@ -415,9 +415,12 @@ class Parser {
 
   private parseBindCommand(): Stmt {
     this.expect("bind");
-    const name = this.expect("ident").value;
+    const nameToken = this.expect("ident");
+    if (nameToken.value === "LAST_ID") {
+      throw new RhoQuError("LAST_ID is reserved and cannot be a named binding", nameToken.line, nameToken.col);
+    }
     const command = this.expect("command");
-    return { kind: "cmd", text: command.value, bind: name };
+    return { kind: "cmd", text: command.value, bind: nameToken.value };
   }
 
   private parseCall(): Stmt {
