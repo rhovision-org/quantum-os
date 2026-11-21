@@ -69,13 +69,15 @@ function validPackageBase(value: unknown): boolean {
   return isRecord(value) && value.format === "rho-process-package" && value.version === 1
     && isRecord(value.provenance) && typeof value.provenance.authorAnchor === "string" && /^[0-9a-f]{64}$/i.test(value.provenance.authorAnchor)
     && typeof value.provenance.exportedAt === "string" && Number.isFinite(Date.parse(value.provenance.exportedAt))
-    && (value.provenance.source === undefined || typeof value.provenance.source === "string")
+    && (value.provenance.source === undefined || (typeof value.provenance.source === "string" && value.provenance.source.length <= 8192))
     && validSequence(value.process);
 }
 export async function createRhoProcessPackage(process: RhoSequenceNode, provenance: RhoProcessProvenance): Promise<RhoProcessPackage> {
   const base = { format: "rho-process-package" as const, version: 1 as const, provenance, process };
   if (!validPackageBase(base)) throw new Error("invalid process package: schema validation failed");
-  return { ...base, contentHash: await sha256(canonicalJson(base)) };
+  const canonical = canonicalJson(base);
+  if (new TextEncoder().encode(canonical).length > MAX_PACKAGE_BYTES) throw new Error("invalid process package: size limit exceeded");
+  return { ...base, contentHash: await sha256(canonical) };
 }
 export async function serializeRhoProcessPackage(process: RhoSequenceNode, provenance: RhoProcessProvenance): Promise<string> {
   return canonicalJson(await createRhoProcessPackage(process, provenance));
@@ -83,13 +85,15 @@ export async function serializeRhoProcessPackage(process: RhoSequenceNode, prove
 export async function importRhoProcessPackage(raw: string | unknown): Promise<ImportedRhoProcessPackage> {
   let value: unknown = raw;
   if (typeof raw === "string") {
-    if (raw.length > MAX_PACKAGE_BYTES) throw new Error("invalid process package: size limit exceeded");
+    if (new TextEncoder().encode(raw).length > MAX_PACKAGE_BYTES) throw new Error("invalid process package: size limit exceeded");
     try { value = JSON.parse(raw); } catch { throw new Error("invalid process package JSON"); }
   }
   if (!isRecord(value) || typeof value.contentHash !== "string" || !validPackageBase(value)) throw new Error("invalid process package: schema validation failed");
   const pkg = value as unknown as RhoProcessPackage;
   const { contentHash, ...base } = pkg;
-  const expected = await sha256(canonicalJson(base));
+  const canonical = canonicalJson(base);
+  if (new TextEncoder().encode(canonical).length > MAX_PACKAGE_BYTES) throw new Error("invalid process package: size limit exceeded");
+  const expected = await sha256(canonical);
   if (expected !== contentHash) throw new Error("process package hash mismatch");
   return { process: pkg.process, provenance: pkg.provenance, contentHash: pkg.contentHash };
 }
