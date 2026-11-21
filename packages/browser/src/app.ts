@@ -4116,14 +4116,16 @@ function handleCommand(raw: string): string[] {
         if (verb === "install") {
           if (!isAdmin(g, meId, meAnchor)) { sys("only an admin installs the group's contracts"); whoIsAdmin(g, meId, meAnchor, sys); break; }
           if (!cfg.key) { sys("no key — /rholang key generate first"); break; }
-          sys("installing Inbox, Group and Issue — three deploys, one each…");
-          sys("  each uri is minted by the registry, so it comes back as that deploy's answer");
           void (async () => {
             const jobs: [keyof ChainRefs, string][] = [
               ["inbox", rgov.installInboxProgram()],
               ["group", rgov.installGroupProgram()],
               ["issue", rgov.installIssueProgram()],
             ];
+            const approved = await confirmDialog("Review governance contract installation",
+              `Group: ${g.name}\nTarget: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\nThree signed deploys:\n\n${jobs.map(([which, program]) => `--- ${which} ---\n${program}`).join("\n\n")}`,
+              "Approve · install contracts");
+            if (!approved) { sys("cancelled — no contracts deployed"); return; }
             const found: ChainRefs = {};
             for (const [which, program] of jobs) {
               const r = await deployTerm(cfg, program);
@@ -4212,6 +4214,10 @@ function handleCommand(raw: string): string[] {
                 }
               }
             }
+            const approved = await confirmDialog("Review governance push",
+              `Group: ${g.name}\nTarget: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\n${steps.map(([what, program]) => `--- ${what} ---\n${program}`).join("\n\n")}`,
+              "Approve · push governance");
+            if (!approved) { addMessage("", "cancelled — nothing pushed", "system"); return; }
             addMessage("", `pushing ${steps.length} row${steps.length === 1 ? "" : "s"}, one deploy each…`, "system");
             for (const [what, program] of steps) {
               const r = await deployTerm(cfg, program);
@@ -4295,12 +4301,15 @@ function handleCommand(raw: string): string[] {
           if (!refs.inbox) { sys("no inbox contract — an admin: /gov chain install"); break; }
           if (!cfg.key) { sys("no key — /rholang key generate first"); break; }
           if (verb === "inbox") {
-            sys("opening your locker if needed, then receiving…");
             void (async () => {
               const seq: [string, string][] = [
                 ["locker", rgov.newLockerProgram(refs.inbox!, "inbox", "open")],
                 ["receive", rgov.receiveProgram(refs.inbox!, "inbox")],
               ];
+              const approved = await confirmDialog("Review inbox receive",
+                `Group: ${g.name}\nTarget: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\nThis operation may consume incoming messages/capabilities:\n\n${seq.map(([what, program]) => `--- ${what} ---\n${program}`).join("\n\n")}`,
+                "Approve · receive");
+              if (!approved) { addMessage("", "cancelled — nothing received", "system"); return; }
               for (const [what, program] of seq) {
                 const r = await deployTerm(cfg, program);
                 if (!r.ok || !r.sig) { addMessage("", `✗ ${what}: ${r.message}`, "system"); return; }
@@ -4324,7 +4333,12 @@ function handleCommand(raw: string): string[] {
           if (!to) { sys(`no chain address for ${who} — they run /gov chain push first`); break; }
           void (async () => {
             const msg = `{"type": "msg", "body": ${JSON.stringify(text)}}`;
-            const r = await deployTerm(cfg, rgov.sendProgram(refs.inbox!, to, "inbox", msg));
+            const program = rgov.sendProgram(refs.inbox!, to, "inbox", msg);
+            const approved = await confirmDialog("Review governance inbox send",
+              `Group: ${g.name}\nRecipient: ${who}\nTarget: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\nExact source to sign:\n\n${program}`,
+              "Approve · send");
+            if (!approved) { addMessage("", "cancelled — nothing sent", "system"); return; }
+            const r = await deployTerm(cfg, program);
             if (!r.ok || !r.sig) { addMessage("", `✗ ${r.message}`, "system"); return; }
             const answer = await deployAnswer(cfg, r.sig);
             addMessage("", `  ${(answer ?? ["(no answer)"]).join(" ")}`, "system");
