@@ -10,6 +10,9 @@ on:
       - "packages/browser/src/palette.ts"
       - "packages/browser/test/qos-device*.mjs"
       - "scripts/localnet/qos-vfs-opfs-ci.py"
+      - "scripts/localnet/qos-memory-ci.py"
+      - "scripts/localnet/run-node.sh"
+      - "bin/rnode"
       - ".github/workflows/qos-device-browser.yml"
 permissions:
   contents: read
@@ -51,4 +54,36 @@ jobs:
           path: |
             qos283-opfs-evidence.json
             qos283-opfs-evidence.SHA256SUMS
+          if-no-files-found: error
+
+  real-rholo-device:
+    name: Disposable Rholo read-only device and absent-host replay
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm build:wasm
+      - run: pnpm install --frozen-lockfile
+      - name: Real device status and independent replay
+        run: python3 scripts/localnet/qos-memory-ci.py device
+      - name: Upload verified evidence
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qos283-real-rholo-device
+          path: |
+            qos283-rholo-evidence.json
+            qos283-rholo-evidence.SHA256SUMS
           if-no-files-found: error

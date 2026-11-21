@@ -979,3 +979,18 @@ journal data; never pass secrets.
 
 This is not full #283 acceptance until actual browser/adapter and resource
 release witnesses are green. It does not resolve #103 or expand #107.
+
+
+Explicit host-resource adoption: an embedding host may call
+`QosCommand.attachDevice(process, session, kind, factory)` after obtaining a
+dedicated pre-authorized resource. The factory is not invoked for an
+invalid, foreign, closed, already-bound, or wrong-kind session.
+`/socket device <connection-id> <process> <open-mesh-session>` surrenders an
+existing user-created mesh connection to the device lease and removes it
+from the legacy socket command map. No active chat channel or physical
+capture is acquired implicitly. Disconnect, room close and identity
+replacement release live leases; journal state remains intact.
+Browser CI uses real dedicated RTC channels, PosixNet over a separate RTC
+channel, and a synthetic canvas MediaStreamTrack (metadata and stop only).
+Rholo device CI uses an owned disposable bundled node and GET /api/status
+only; replay is verified in a separate process forbidden to perform RPC.
