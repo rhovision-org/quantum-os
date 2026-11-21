@@ -9,6 +9,7 @@
 // change `/poll` or `/gov`, and does not call a chain. Every lifecycle
 // transition is the dyncap-attributed event `QosProcessRoom` already knows how to make.
 
+import { SCHEDULER_OPS, type SchedulerOp } from "./qos-scheduler.js";
 import type { DynCapState } from "./dyncap.js";
 import { replayQosKernel, previewCanonicalSyscall, canonicalSyscallReady } from "./qos-kernel.js";
 import {
@@ -188,6 +189,7 @@ export class QosCommand {
       }
       this.host.say(`  state digest: ${view.stateDigest}`);
       this.host.say(`  kernel digest: ${await kernel.kernel.stateDigest()}`);
+      this.host.say(`  scheduler: ${JSON.stringify(kernel.kernel.scheduleView())}`);
       this.host.say(`  canonical syscalls: ${kernel.syscalls.filter(item => item.caller === entry.id).length}`);
       if (view.finalDigest) this.host.say(`  final digest: ${view.finalDigest}`);
       return;
@@ -234,6 +236,9 @@ export class QosCommand {
       const version = before.kernel.processVersion(args.target);
       if (version !== undefined) Object.assign(args, { targetVersion: version });
     }
+    if (args && typeof args === "object" && !Array.isArray(args) &&
+        SCHEDULER_OPS.includes(operation.trim() as SchedulerOp) && !Object.hasOwn(args,"scheduleFrontier"))
+      Object.assign(args,{scheduleFrontier:before.kernel.schedulerFrontier()});
     if (!canonicalSyscallReady(before.kernel, payload, entry.id)) {
       this.host.say("invalid, unsupported or stale canonical syscall");
       return;

@@ -60,6 +60,10 @@ export type {
   QosResult, QosRightName, QosSignal, QosSyscallName, QosKernelReplayResult,
 } from "./qos-kernel.js";
 
+// Cooperative logical scheduler (#278); canonical replay owns admission.
+export { QosScheduler, SCHEDULER_OPS, MAX_PRIORITY, MAX_SLEEP_TICKS } from "./qos-scheduler.js";
+export type { ScheduleView, SchedulerOp, SchedulerLifecycle } from "./qos-scheduler.js";
+
 // Personal success-framework goals — identity-scoped, local-only by default.
 export { GoalStore, GOAL_PRIORITIES, parseGoalAdd } from "./goal-store.js";
 export type {
