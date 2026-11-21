@@ -345,7 +345,13 @@ export class QosCommand {
     }
     if(args&&typeof args==="object"&&!Array.isArray(args)&&IDENTITY_OPS.includes(operation.trim() as IdentityOp)){
       const a=args as Record<string,unknown>,op=operation.trim();
-      if(op==="proxy_set"&&typeof a.token==="string"&&!Object.hasOwn(a,"proxyVersion"))a.proxyVersion=before.kernel.proxyVersion(a.token);
+      if(op==="id_cap"||op==="id_chmod"){
+        if(!Object.hasOwn(a,"authorityFrontier"))a.authorityFrontier=before.kernel.handleFrontier(entry.id,op==="id_chmod"?a.handle as string:undefined);
+      }
+      if(op==="proxy_set"&&typeof a.token==="string"){
+        if(!Object.hasOwn(a,"proxyVersion"))a.proxyVersion=before.kernel.proxyVersion(a.token);
+        if(!Object.hasOwn(a,"observedUses"))a.observedUses=before.kernel.proxyObservedUses(a.token);
+      }
       if(op==="proxy_use"&&typeof a.token==="string"){
         const observation=before.kernel.proxyObservation(entry.id,a.token);
         if(observation)for(const [key,value] of Object.entries(observation))if(!Object.hasOwn(a,key))a[key]=value;

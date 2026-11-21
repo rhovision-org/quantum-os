@@ -126,6 +126,18 @@ export class QosKernel {
   private memory = new QosMemoryGraph();
   private vfs = new QosVfs();
   private proxies=new Map<string,AuthorityProxy>();
+  private proxyUses=new Map<string,Set<string>>();
+  proxyObservedUses(token:string){return [...(this.proxyUses.get(token)??[])].sort();}
+  proxyUseKnown(token:string,hash:string){return this.proxyUses.get(token)?.has(hash)??false;}
+  handleFrontier(pid:string,root?:string){
+    const p=this.processes.get(pid);
+    if(!p)return [];
+    const affected=new Set(root?[root]:[...p.handles.keys()]);
+    if(root){
+      let changed=true;while(changed){changed=false;for(const [id,parent] of this.lineage)if(parent&&affected.has(parent)&&!affected.has(id)){affected.add(id);changed=true;}}
+    }
+    return [...new Set([...affected].flatMap(id=>{const v=this.versions.get(id);return v?[v.hash]:[];}))].sort();
+  }
   proxyVersion(token:string){return this.proxies.get(token)?.version;}
   proxyState(){return [...this.proxies.values()].sort((a,b)=>a.token<b.token?-1:a.token>b.token?1:0).map(p=>({...p}));}
   private proxyTarget(pid:string,handle:string,rights:number):QosResult<QosHandle>{
@@ -162,10 +174,13 @@ export class QosKernel {
     const meta=this.memory.stat(file.value);
     return meta?ok(meta):err("ENOENT","file metadata absent");
   }
-  recordIdentity(op:QosCanonicalSyscallRequest["op"],outcome:QosResult<unknown>,eventHash:string){
+  recordIdentity(op:QosCanonicalSyscallRequest["op"],outcome:QosResult<unknown>,eventHash:string,args:Record<string,unknown>){
     if(!outcome.ok)return;
     if(op==="proxy_create"||op==="proxy_set"){
       const p=this.proxies.get((outcome.value as {token:string}).token);if(p)p.version=eventHash;
+    }else if(op==="proxy_use"&&["mkdir","unlink","put","signal"].includes(args.action as string)){
+      const token=args.token as string;
+      const uses=this.proxyUses.get(token)??new Set<string>();uses.add(eventHash);this.proxyUses.set(token,uses);
     }
   }
   executeIdentity(pid:string,op:IdentityOp,args:Record<string,unknown>,allocation?:string):QosResult<unknown>{
@@ -230,6 +245,7 @@ export class QosKernel {
     if(!observation||Object.entries(observation).some(([key,value])=>args[key]!==value))return err("EAGAIN","resource observation changed");
     const target=this.proxyTarget(proxy.ownerPid,proxy.targetHandle,proxy.rights);if(!target.ok)return target;
     const action=args.action;
+    if(["mkdir","unlink","put","signal"].includes(action as string)&&(this.proxyUses.get(token)?.size??0)>=4096)return err("EINVAL","proxy mutation history limit");
     if(action==="read")return this.proxyReadDescriptor(pid,token,args.path as string,proxy.version);
     if(action==="signal"){
       if(!(proxy.rights&QOS_RIGHTS.SIGNAL)||!target.value.object.startsWith("proc:"))return err("EACCES","proxy lacks SIGNAL");
@@ -879,6 +895,7 @@ export class QosKernel {
     copy.memory = this.memory.clone();
     copy.vfs = this.vfs.clone();
     copy.proxies=new Map([...this.proxies].map(([id,p])=>[id,{...p}]));
+    copy.proxyUses=new Map([...this.proxyUses].map(([id,uses])=>[id,new Set(uses)]));
     copy.shellContexts=new Map([...this.shellContexts].map(([pid,c])=>[pid,{...c,env:{...c.env}}]));
     copy.shellJobs=new Map([...this.shellJobs].map(([pid,j])=>[pid,JSON.parse(JSON.stringify(j)) as ShellJob]));
     copy.nextPid = this.nextPid;
@@ -904,6 +921,7 @@ export class QosKernel {
       memory: this.memoryView(),
       vfs: this.fsState(),
       proxies:this.proxyState(),
+      proxyUses:[...this.proxyUses.entries()].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([id,uses])=>[id,[...uses].sort()]),
       shellContexts:[...this.shellContexts.entries()].sort(([a],[b])=>a<b?-1:a>b?1:0),
       shellJobs:[...this.shellJobs.values()].sort((a,b)=>a.pid<b.pid?-1:a.pid>b.pid?1:0),
       nextPid: this.nextPid,
@@ -1094,20 +1112,27 @@ function parseSyscallRequest(payload: Record<string, unknown>, pid: string): Qos
         !args.memoryFrontier.every((v,i,a)=>isObjectId(v)&&(i===0||a[i-1]<v))))return null;
       break;
     }
-    case "id_info":case "id_groups":case "id_cap":case "group_action":
+    case "id_info":case "id_groups":case "group_action":
       if(!exactKeys(args,[]))return null;break;
+    case "id_cap":
+      if(!exactKeys(args,["authorityFrontier"])||!Array.isArray(args.authorityFrontier)||args.authorityFrontier.length>4096||
+          !args.authorityFrontier.every((v,i,a)=>isObjectId(v)&&(i===0||a[i-1]<v)))return null;
+      break;
     case "id_chmod":case "id_chown":case "proxy_create":case "proxy_set":{
       const disabled=payload.op==="proxy_set"&&!!args&&typeof args==="object"&&(args as Record<string,unknown>).enabled===false;
       const keys=disabled?[]:["handle","handleVersion"];
-      if(payload.op==="id_chmod")keys.push("rights");
+      if(payload.op==="id_chmod")keys.push("rights","authorityFrontier");
       if(payload.op==="id_chown")keys.push("target","targetVersion");
       if(payload.op==="proxy_create")keys.push("rights","holder");
-      if(payload.op==="proxy_set")keys.push("rights","token","proxyVersion","enabled");
+      if(payload.op==="proxy_set")keys.push("rights","token","proxyVersion","enabled","observedUses");
       if(!exactKeys(args,keys)||(!disabled&&(typeof args.handle!=="string"||args.handle.length>256||!isObjectId(args.handleVersion))))return null;
       if(keys.includes("rights")&&(typeof args.rights!=="number"||!validRights(args.rights)))return null;
       if(payload.op==="id_chown"&&(typeof args.target!=="string"||args.target.length>256||!isObjectId(args.targetVersion)))return null;
       if(payload.op==="proxy_create"&&!isUid(args.holder))return null;
       if(payload.op==="proxy_set"&&(!isProxyToken(args.token)||!isObjectId(args.proxyVersion)||typeof args.enabled!=="boolean"))return null;
+      for(const key of ["authorityFrontier","observedUses"]){
+        if(keys.includes(key)&&(!Array.isArray(args[key])||args[key].length>4096||!args[key].every((v,i,a)=>isObjectId(v)&&(i===0||a[i-1]<v))))return null;
+      }
       break;
     }
     case "proxy_use":{
@@ -1186,8 +1211,11 @@ function syscallVersionsMatch(kernel: QosKernel, request: QosCanonicalSyscallReq
       if(request.op==="sh_finish"&&canonicalJson(args.memoryFrontier)!==canonicalJson(kernel.memoryFrontier()))return false;
     }
   }
+  if(request.op==="id_cap"||request.op==="id_chmod")
+    return canonicalJson(args.authorityFrontier)===canonicalJson(kernel.handleFrontier(pid,request.op==="id_chmod"?args.handle as string:undefined));
   if(request.op==="id_chown")return args.targetVersion===kernel.processVersion(args.target as string);
-  if(request.op==="proxy_set")return args.proxyVersion===kernel.proxyVersion(args.token as string);
+  if(request.op==="proxy_set")return args.proxyVersion===kernel.proxyVersion(args.token as string)&&
+    (args.observedUses as string[]).every(hash=>kernel.proxyUseKnown(args.token as string,hash));
   if(request.op==="proxy_use"){
     if(args.proxyVersion!==kernel.proxyVersion(args.token as string))return false;
     const observed=kernel.proxyObservation(pid,args.token as string);
@@ -1325,7 +1353,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         rejectSyscall(event, VFS_OPS.includes(pending.request.op as VfsOp)&&!outcome.ok&&outcome.errno==="EAGAIN"?"VFS conflict: "+outcome.detail:"syscall outcome differs from deterministic execution"); continue;
       }
       // Refusals are traceable but cannot publish speculative mutation.
-      if (outcome.ok) { trial.recordVfs(pending.request.op,outcome,event.hash); trial.recordShell(event.process,pending.request.op,outcome,event.hash); trial.recordIdentity(pending.request.op,outcome,event.hash); trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); trial.recordMemory(beforeMemory,event.hash,MEMORY_OPS.includes(pending.request.op as MemoryOp)?pending.request.op as MemoryOp:pending.request.op==="sh_finish"&&(outcome.value as {namespace?:string}).namespace?"mem_put":undefined); kernel = trial; }
+      if (outcome.ok) { trial.recordVfs(pending.request.op,outcome,event.hash); trial.recordShell(event.process,pending.request.op,outcome,event.hash); trial.recordIdentity(pending.request.op,outcome,event.hash,pending.request.args); trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); trial.recordMemory(beforeMemory,event.hash,MEMORY_OPS.includes(pending.request.op as MemoryOp)?pending.request.op as MemoryOp:pending.request.op==="sh_finish"&&(outcome.value as {namespace?:string}).namespace?"mem_put":undefined); kernel = trial; }
       consumed.add(requestHash);
       syscalls.push({ requestHash, resultHash: event.hash, caller: event.process, op: pending.request.op,
                       args: { ...pending.request.args }, outcome, position });

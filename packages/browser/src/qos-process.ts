@@ -685,8 +685,10 @@ export function eventDependencies(event: QosEvent): QosDependency[] {
     }
   }
   if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&typeof event.payload.op==="string"&&
-     ["id_chmod","id_chown","proxy_create","proxy_set","proxy_use"].includes(event.payload.op)&&isRecord(event.payload.args)){
+     ["id_cap","id_chmod","id_chown","proxy_create","proxy_set","proxy_use"].includes(event.payload.op)&&isRecord(event.payload.args)){
     const args=event.payload.args;
+    for(const key of ["authorityFrontier","observedUses"])
+      if(Array.isArray(args[key])&&args[key].length<=4096)for(const hash of args[key])if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:key==="observedUses"?"proxy-version":"handle-version"});
     for(const key of ["handleVersion","targetVersion","proxyVersion","caretakerVersion","resourceVersion","rootVersion","targetProcessVersion","dataVersion"]){
       const hash=args[key];if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:key==="proxyVersion"?"proxy-version":key==="rootVersion"?"vfs-version":["targetVersion","caretakerVersion","targetProcessVersion"].includes(key)?"process-version":"handle-version"});
     }
