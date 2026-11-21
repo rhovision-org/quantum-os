@@ -7,7 +7,7 @@
     "build": "vite build",
     "dev": "vite",
     "typecheck": "tsc --noEmit",
-    "test": "node test/calls.test.mjs && node test/rhoqu-process.test.mjs && node test/rhoqu-binding.test.mjs && node test/rhoqu-success-recipes.test.mjs"
+    "test": "node test/calls.test.mjs && node test/rhoqu-process.test.mjs && node test/rhoqu-binding.test.mjs && node test/rhoqu-package.test.mjs && node test/rhoqu-success-recipes.test.mjs"
   },
   "dependencies": {
     "@noble/curves": "^2.3.0",
