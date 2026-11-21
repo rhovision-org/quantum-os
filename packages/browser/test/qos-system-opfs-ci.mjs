@@ -106,13 +106,13 @@ try{
  const queued=(await page.locator("#messages .msg").allTextContents()).filter(t=>t.includes(" queued")).at(-1);
  const job=queued.match(/h:job:[0-9a-f]{64}/)?.[0];assert.ok(job);
  await command(page,"/bg "+job,"background job ready");
- const ps=await page.evaluate(async({room})=>{
+ const browserProcesses=await page.evaluate(async({room})=>{
   const {QosEventLog}=await import("/quantum-os/src/qos-process.ts"),{replayQosKernel}=await import("/quantum-os/src/qos-kernel.ts");
   const key=Object.keys(localStorage).find(k=>k.startsWith("qos-journal-v1:")&&!k.includes(":snapshot:"));const log=new QosEventLog(room);
   for(const e of JSON.parse(localStorage.getItem(key)))await log.ingest(e);
   return replayQosKernel(log.events(),log.forkedSources).kernel.list();
  },{room});
- const pid=ps.find(p=>p.name==="echo"&&p.state==="running")?.pid;assert.ok(pid);
+ const pid=browserProcesses.find(p=>p.name==="echo"&&p.state==="running")?.pid;assert.ok(pid);
  const control=op=>"/qos syscall init | "+op+" | "+JSON.stringify({handle:job,target:pid});
  await command(page,control("proc_suspend"),"syscall proc_suspend OK");
  await command(page,"/jobs",job+" · suspended");
