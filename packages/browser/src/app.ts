@@ -3138,6 +3138,9 @@ let macroDepth = 0;
  */
 function requiresInteractiveApproval(command: string): boolean {
   const normalized = command.trim().replace(/^\/+/, "");
+  // Dollar macros/programs can expand to eval/deploy and bypass the slash-command
+  // gate. Block them in synchronous/automatic runners; direct user input remains.
+  if (normalized.startsWith("$")) return true;
   return /^(?:socket\s+(?:listen|connect)|rholang\s+deploy|rholang\s+macro|gov\s+claim|reset(?:\s|$)|rholang\s+key\s+(?:generate|forget|[0-9a-f]{64}))\b/i.test(normalized);
 }
 
@@ -8277,6 +8280,13 @@ async function connect(): Promise<void> {
               if (cmds.length === 0) continue;
               addMessage("", `  · rhoqu on ${ch}(${h.binding}=${payload}) → ${cmds.length} cmd${cmds.length === 1 ? "" : "s"}`, "system");
               for (const c of cmds) {
+                // Channel handlers are automatic/asynchronous and have no approval
+                // UI context. Never let inbound messages trigger approval-gated
+                // operations (deploys, key changes, claims, resets, sockets).
+                if (requiresInteractiveApproval(c)) {
+                  addMessage("", `  · rhoqu on-handler blocked '${c}': requires direct interactive approval`, "system");
+                  continue;
+                }
                 try { handleCommand(c); }
                 catch (err) { addMessage("", `  · rhoqu trigger error: ${String(err)}`, "system"); }
               }
