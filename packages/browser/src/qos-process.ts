@@ -633,7 +633,7 @@ export function eventDependencies(event: QosEvent): QosDependency[] {
     refs.push({ hash: event.payload.requestHash, kind: "request" });
   }
   if (event.type === "syscall-request" && event.payload?.schema === "qos.syscall/1" &&
-      ["cap_derive", "cap_close", "cap_revoke"].includes(String(event.payload.op)) &&
+      typeof event.payload.op === "string" && ["cap_derive", "cap_close", "cap_revoke"].includes(event.payload.op) &&
       isRecord(event.payload.args) && typeof event.payload.args.handleVersion === "string" &&
       HEX64.test(event.payload.args.handleVersion)) {
     refs.push({ hash: event.payload.args.handleVersion, kind: "handle-version" });

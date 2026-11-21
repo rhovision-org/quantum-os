@@ -389,7 +389,7 @@ export class QosKernel {
       abi: QOS_ABI_VERSION,
       nextPid: this.nextPid,
       nextHandle: this.nextHandle,
-      versions: [...this.versions.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
+      versions: [...this.versions.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([id, v]) => [id, { ...v }]),
       lineage: [...this.lineage.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
       processes: [...this.processes.values()]
         .sort((a, b) => a.pid < b.pid ? -1 : a.pid > b.pid ? 1 : 0)
