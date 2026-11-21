@@ -3,6 +3,7 @@ export type RhoCommandNode = { readonly kind: "command"; readonly command: strin
 export type RhoSequenceNode = { readonly kind: "sequence"; readonly steps: readonly RhoProcessNode[] };
 export type RhoProcessNode = RhoCommandNode | RhoSequenceNode;
 export type RhoProcess = { readonly kind: "sequence"; readonly steps: readonly RhoCommandNode[] };
+export type RhoFlatProcess = RhoProcess;
 export type RhoCommandExecution = { readonly lines: readonly string[]; readonly id?: string; readonly value?: unknown };
 export type RhoCommandResult =
   | { readonly ok: true; readonly command: string; readonly lines: readonly string[]; readonly id?: string; readonly value?: unknown }
