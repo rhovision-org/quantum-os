@@ -132,7 +132,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function canonicalize(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map(canonicalize);
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = Object.create(null);
   for (const key of Object.keys(value as Record<string, unknown>).sort()) {
     out[key] = canonicalize((value as Record<string, unknown>)[key]);
   }
@@ -280,7 +280,7 @@ export function newParticipantScope(
   };
 }
 
-function parseScope(value: unknown): QosCapabilityScope | null {
+export function parseQosCapabilityScope(value: unknown): QosCapabilityScope | null {
   if (!isRecord(value)) return null;
   if (typeof value.process !== "string" || value.process.length === 0) return null;
   if (!Array.isArray(value.events)) return null;
@@ -417,6 +417,7 @@ export function decodeQosEvent(json: string): QosEvent | null {
 /// `(process, source)` so the hash chain is source-local and independent of
 /// arrival order: a peer that receives the whole set can verify every link.
 export class QosEventSigner {
+  private pending: Promise<unknown> = Promise.resolve();
   private readonly lastByProcess = new Map<string, string>();
 
   constructor(
@@ -432,6 +433,16 @@ export class QosEventSigner {
     capability: string,
     grant: string,
     type: QosEventType,
+    payload: Record<string, unknown>,
+  ): Promise<QosEvent> {
+    const snapshot = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+    const result = this.pending.then(() => this.signOne(process, capability, grant, type, snapshot));
+    this.pending = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private async signOne(
+    process: string, capability: string, grant: string, type: QosEventType,
     payload: Record<string, unknown>,
   ): Promise<QosEvent> {
     if (!validateCapability(capability)) throw new Error("sign: capability is not a valid ZFA token");
@@ -488,11 +499,25 @@ export class QosEventLog {
   private readonly hashBySourceSeq = new Map<string, string>();
   private readonly chains = new Map<string, ChainEntry>();
   private readonly rejected: { hash: string; type: string; reason: string }[] = [];
-  readonly forkedSources = new Set<string>();
+  private readonly quarantined = new Set<string>();
+  private readonly forkEvidence = new Map<string, QosEvent>();
+  private pending: Promise<unknown> = Promise.resolve();
+
+  get forkedSources(): ReadonlySet<string> { return new Set(this.quarantined); }
 
   constructor(readonly roomId: string) {}
 
   async ingest(event: QosEvent): Promise<IngestResult> {
+    // Capture the wire value before yielding; never retain caller-owned data.
+    let snapshot: QosEvent;
+    try { snapshot = JSON.parse(JSON.stringify(event)) as QosEvent; }
+    catch { return this.reject(event, "event is not JSON serializable"); }
+    const result = this.pending.then(() => this.ingestOne(snapshot));
+    this.pending = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private async ingestOne(event: QosEvent): Promise<IngestResult> {
     const shape = validateQosEventShape(event);
     if (!shape.ok) return this.reject(event, shape.reason ?? "invalid shape");
 
@@ -510,9 +535,12 @@ export class QosEventLog {
     const sourceSeq = `${event.source}\u0000${event.seq}`;
     const existing = this.hashBySourceSeq.get(sourceSeq);
     if (existing !== undefined) {
-      if (existing === event.hash) return { ok: true, duplicate: true };
-      this.forkedSources.add(event.source);
-      return { ok: false, fork: true, reason: "source+seq already carries a different event" };
+      const accepted = this.eventsByHash.get(existing)!;
+      if (existing === event.hash && accepted.dyncap.witness === event.dyncap.witness)
+        return { ok: true, duplicate: true };
+      this.quarantined.add(event.source);
+      this.forkEvidence.set(event.hash + ":" + event.dyncap.witness, event);
+      return { ok: false, fork: true, reason: "source+seq already carries a different event or witness" };
     }
 
     // Dyncap is a set of (seq, witness) links, not an ordered stream: an event
@@ -524,11 +552,11 @@ export class QosEventLog {
     const verified = await verifyEnvelope(prior, this.roomId, event as unknown as Record<string, unknown>, event.dyncap);
     if (verified.kind === "invalid") return this.reject(event, verified.reason);
     if (verified.kind === "anchor-mismatch") {
-      this.forkedSources.add(event.source);
+      this.quarantined.add(event.source);
       return { ok: false, fork: true, reason: "anchor mismatch" };
     }
     if (verified.kind === "fork") {
-      this.forkedSources.add(event.source);
+      this.quarantined.add(event.source);
       return { ok: false, fork: true, reason: `fork at seq ${verified.seq}` };
     }
     if (verified.kind === "replay") {
@@ -557,11 +585,11 @@ export class QosEventLog {
   /// out: `forkedSources` is the quarantine list.
   events(): QosEvent[] {
     const accepted = [...this.eventsByHash.values()]
-      .filter((event) => !this.forkedSources.has(event.source));
+      .filter((event) => !this.quarantined.has(event.source));
     // The journal's public view is causal, not merely tuple-sorted. Consumers
     // that need diagnostics must call canonicalEventOrder explicitly; this view
     // remains total and deterministic for partial/offline logs.
-    return canonicalEventOrder(accepted).ordered;
+    return JSON.parse(JSON.stringify(canonicalEventOrder(accepted).ordered)) as QosEvent[];
   }
 
   eventsFor(process: string): QosEvent[] {
@@ -574,7 +602,11 @@ export class QosEventLog {
 
   async mergeFrom(other: QosEventLog): Promise<IngestResult[]> {
     const out: IngestResult[] = [];
-    for (const event of other.events()) out.push(await this.ingest(event));
+    if (other.roomId !== this.roomId) throw new Error("cannot merge a different room");
+    // Relay both verified-envelope branches, not an unauthenticated quarantine flag.
+    // The receiver independently detects the conflict under the same TOFU model.
+    const evidence = [...other.eventsByHash.values(), ...other.forkEvidence.values()];
+    for (const event of evidence.sort(compareEvents)) out.push(await this.ingest(event));
     return out;
   }
 }
@@ -696,7 +728,7 @@ function resolveCapability(
     if (event.capability !== start.payload.rootCapability) {
       return { ok: false, reason: "process-start capability is not the declared root capability" };
     }
-    const scope = parseScope(start.payload.scope);
+    const scope = parseQosCapabilityScope(start.payload.scope);
     if (!scope || scope.process !== start.process) {
       return { ok: false, reason: "process-start scope does not name this process" };
     }
@@ -710,7 +742,7 @@ function resolveCapability(
     if (event.capability !== start.payload.rootCapability) {
       return { ok: false, reason: "root-granted event does not carry the root capability" };
     }
-    const scope = parseScope(start.payload.scope);
+    const scope = parseQosCapabilityScope(start.payload.scope);
     if (!scope || scope.process !== start.process) {
       return { ok: false, reason: "process-start scope does not name this process" };
     }
@@ -737,7 +769,7 @@ function resolveCapability(
 
   const to = grantEvent.payload.to;
   const childCapability = grantEvent.payload.childCapability;
-  const childScope = parseScope(grantEvent.payload.childScope);
+  const childScope = parseQosCapabilityScope(grantEvent.payload.childScope);
   if (typeof to !== "string" || to.length === 0) return { ok: false, reason: "grant target is missing" };
   if (typeof childCapability !== "string" || childCapability !== event.capability) {
     return { ok: false, reason: "grant child capability does not match the event capability" };
@@ -925,7 +957,7 @@ export async function orchestrate(
   const start = starts[0];
   const process = start.process;
   const rootCapability = start.payload.rootCapability;
-  const rootScope = parseScope(start.payload.scope);
+  const rootScope = parseQosCapabilityScope(start.payload.scope);
   const name = typeof start.payload.name === "string" ? start.payload.name : process;
   const question = typeof start.payload.question === "string"
     ? start.payload.question
@@ -1354,8 +1386,8 @@ export class QosProcessRoom {
     if (parentEvent.process !== processId) throw new Error("grant: parent event belongs to a different process");
     const parentCapability = capabilityOfGrant(parentEvent);
     const parentScope = parentEvent.type === "process-start"
-      ? parseScope(parentEvent.payload.scope)
-      : parseScope(parentEvent.payload.childScope);
+      ? parseQosCapabilityScope(parentEvent.payload.scope)
+      : parseQosCapabilityScope(parentEvent.payload.childScope);
     if (!parentScope) throw new Error("grant: parent capability has no valid scope");
     const scope: QosCapabilityScope = { ...childScope, process: processId };
     const narrowed = attenuateScope(parentScope, scope);

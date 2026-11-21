@@ -10,7 +10,7 @@
 // read/write/stat/VFS, scheduler ticks, devices, services, and broader syscall
 // authority. The bounded root-attributed syscall event slice is below.
 
-import { canonicalJson, canonicalEventOrder, brokenChainsIn, sha256Hex, type QosEvent } from "./qos-process.js";
+import { canonicalJson, canonicalEventOrder, brokenChainsIn, processIdFor, parseQosCapabilityScope, scopeAllows, sha256Hex, type QosEvent } from "./qos-process.js";
 
 export const QOS_ABI_VERSION = 0;
 
@@ -111,6 +111,9 @@ export class QosKernel {
   private readonly processes = new Map<string, QosProcess>();
   private nextPid = 1;
   private nextHandle = 1;
+  // Closed handles are removed from the live table but their ancestry remains
+  // part of the replay state; a close must not cut a revocation path.
+  private readonly lineage = new Map<string, string | null>();
 
   /** Bootstrap a process. The caller supplies the owner identity; this is the
    *  equivalent of the room admitting the initial process, not a syscall. */
@@ -160,7 +163,7 @@ export class QosKernel {
 
     const pid = `proc:${this.nextPid++}`;
     // The child's root is a derived image capability, never broader than the image.
-    const rootHandle = this.makeHandle(image.value.object, image.value.rights, null);
+    const rootHandle = this.makeHandle(image.value.object, image.value.rights, image.value.id);
     const child: QosProcess = {
       pid, name: label, owner: caller.owner, parent: caller.pid,
       state: "running", exitCode: null, root: rootHandle.id, handles: new Map(), pending: [],
@@ -225,17 +228,18 @@ export class QosKernel {
       return err("EACCES", "handle lacks REVOKE");
     }
 
+    const children = new Map<string, string[]>();
+    for (const [id, parent] of this.lineage) {
+      if (parent === null) continue;
+      const siblings = children.get(parent) ?? [];
+      siblings.push(id);
+      children.set(parent, siblings);
+    }
     const affected = new Set<string>([handleId]);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const proc of this.processes.values()) {
-        for (const h of proc.handles.values()) {
-          if (h.parent && affected.has(h.parent) && !affected.has(h.id)) {
-            affected.add(h.id);
-            changed = true;
-          }
-        }
+    const queue = [handleId];
+    for (let i = 0; i < queue.length; i++) {
+      for (const child of children.get(queue[i]) ?? []) {
+        if (!affected.has(child)) { affected.add(child); queue.push(child); }
       }
     }
     let count = 0;
@@ -338,6 +342,7 @@ export class QosKernel {
     const copy = new QosKernel();
     copy.nextPid = this.nextPid;
     copy.nextHandle = this.nextHandle;
+    for (const [id, parent] of this.lineage) copy.lineage.set(id, parent);
     for (const [pid, proc] of this.processes) {
       copy.processes.set(pid, {
         ...proc,
@@ -354,6 +359,7 @@ export class QosKernel {
       abi: QOS_ABI_VERSION,
       nextPid: this.nextPid,
       nextHandle: this.nextHandle,
+      lineage: [...this.lineage.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
       processes: [...this.processes.values()]
         .sort((a, b) => a.pid.localeCompare(b.pid))
         .map((p) => ({
@@ -377,7 +383,9 @@ export class QosKernel {
   }
 
   private makeHandle(object: string, rights: number, parent: string | null): QosHandle {
-    return { id: `h:${this.nextHandle++}`, object, rights, parent, revoked: false };
+    const id = `h:${this.nextHandle++}`;
+    this.lineage.set(id, parent);
+    return { id, object, rights, parent, revoked: false };
   }
 
   private handle(proc: QosProcess, id: string): QosResult<QosHandle> {
@@ -519,7 +527,13 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
       continue;
     }
     if (event.type === "process-start") {
-      const name = typeof event.payload.name === "string" ? event.payload.name : event.process;
+      const name = event.payload.name;
+      const scope = parseQosCapabilityScope(event.payload.scope);
+      if (startCounts.get(event.process) !== 1 || event.prev !== "genesis" || event.grant !== "root" ||
+          typeof name !== "string" || event.payload.rootCapability !== event.capability ||
+          processIdFor(name, event.capability) !== event.process || !scope || scope.process !== event.process) {
+        rejectSyscall(event, "conflicting or invalid process-start"); continue;
+      }
       const result = kernel.createProcess({ name, owner: event.source, pid: event.process });
       if (!result.ok) rejected.push({ hash: event.hash, reason: result.detail ?? result.errno });
       else { starts.set(event.process, event); applied.push(event.hash); }
@@ -568,8 +582,10 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
     if (event.type !== "process-suspend" && event.type !== "process-resume" && event.type !== "process-terminate") continue;
     const start = starts.get(event.process);
     if (!start) { rejected.push({ hash: event.hash, reason: "lifecycle event precedes or lacks process-start" }); continue; }
-    if (event.source !== start.source || event.capability !== start.capability) {
-      rejected.push({ hash: event.hash, reason: "lifecycle event is not root-attributed" });
+    const scope = parseQosCapabilityScope(start.payload.scope);
+    if (event.source !== start.source || event.capability !== start.capability ||
+        event.grant !== "root" || !scope || !scopeAllows(scope, event.type)) {
+      rejected.push({ hash: event.hash, reason: "lifecycle event is not root-attributed or lacks scope" });
       continue;
     }
     const transition = event.type === "process-suspend" ? "suspend" : event.type === "process-resume" ? "resume" : "terminate";

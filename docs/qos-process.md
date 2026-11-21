@@ -196,6 +196,16 @@ view). This slice does **not** infer object-version dependencies from arbitrary 
 those require a schema-defined reference vocabulary and are still a #317 integration task.
 The helper's total fallback order is diagnostic only when cycles are present.
 
+The local journal admission queue serializes asynchronous verification and commit,
+so simultaneous arrivals at the same source/sequence cannot both pass an earlier
+empty check. Signing also snapshots the payload and serializes predecessor
+assignment per signer. Accepted event values and returned views are isolated
+JSON snapshots. Canonical JSON preserves own keys named `__proto__`.
+Merge between same-room log instances carries the retained conflicting envelopes,
+so the recipient detects the conflict locally rather than trusting a quarantine
+flag. This does not implement a network fork-evidence gossip protocol or add
+cryptographic authenticity to dyncap.
+
 
 ## Failure and partial participation
 

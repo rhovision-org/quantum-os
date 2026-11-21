@@ -167,6 +167,8 @@ New process roots explicitly include both event types; existing roots without th
 scope stay unauthorized. Older clients reject this event-vocabulary extension:
 coordinate support before deployment. `/qos syscall <name|id> | <op> | <JSON args>`
 exercises the bounded path; `/qos status` exposes the replayed kernel digest.
+Replay refuses multiple starts for the same PID rather than selecting an owner,
+requires the declared process identity/root scope, and checks lifecycle rights.
 Cross-process object/version dependencies, general operations, and distributed
 admission/coordination remain open.
 
@@ -174,6 +176,10 @@ admission/coordination remain open.
 
 1. A handle never outlives its process.
 2. Kernel-handle revocation invalidates descendants; a revoked handle returns `EACCES`.
+   Preserve allocation lineage even when an intermediate handle is closed or a
+   process is reaped; closing a handle is not a revocation boundary. A spawned
+   root inherits the image handle's lineage. The lineage ledger is part of the
+   replay digest and speculative clone. Compaction is not yet implemented.
    Distributed proxy revocation for already-disclosed bearer capabilities is a separate
    mechanism ([#107](https://github.com/rhovision-org/quantum-os/issues/107)).
 3. Closing a handle returns it to `EBADF`; it is not silently reissued with old rights.

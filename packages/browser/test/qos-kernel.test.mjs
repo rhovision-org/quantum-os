@@ -114,6 +114,21 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   ok("revoke without REVOKE is EACCES", errno(refuseRevoke) === "EACCES", errno(refuseRevoke));
 }
 
+// A closed intermediate is not a revocation boundary.
+{
+  const { k, init } = bootstrap();
+  const authority = k.capDerive(init.pid, init.root, R.READ | R.EXEC | R.GRANT | R.REVOKE).value;
+  const intermediate = k.capDerive(init.pid, authority.id, R.READ | R.EXEC | R.GRANT).value;
+  const desc = k.capDerive(init.pid, intermediate.id, R.READ | R.GRANT).value;
+  const child = k.spawn(init.pid, intermediate.id, "descendant").value;
+  assert.ok(k.capClose(init.pid, intermediate.id).ok);
+  const copy = k.cloneForReplay();
+  const revoked = copy.capRevoke(init.pid, authority.id);
+  ok("closed intermediate does not sever revocation chain", revoked.ok && revoked.value === 3);
+  ok("grandchild handle is revoked across closed link", errno(copy.capDerive(init.pid, desc.id, R.READ)) === "EACCES");
+  ok("spawned root inherits revocation ancestry", errno(copy.capDerive(child.pid, child.root, R.READ)) === "EACCES");
+  ok("speculative clone revocation leaves original live", k.capDerive(init.pid, desc.id, R.READ).ok);
+}
 // --- signals / wait / exit ------------------------------------------------
 {
   const { k, init } = bootstrap();
@@ -181,6 +196,18 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   ok("replay reports missing causal dependencies", incomplete.missingDependencies.length > 0);
 }
 
+// Start ambiguity cannot create an arbitrary authoritative process.
+{
+  const roomId = "cap:room:03010563656127610341634101250325";
+  const a = new QosProcessRoom({roomId, identity:await newDynCapState(new Uint8Array(32).fill(85)),transport:{broadcast:()=>{}}});
+  const b = new QosProcessRoom({roomId, identity:await newDynCapState(new Uint8Array(32).fill(86)),transport:{broadcast:()=>{}}});
+  const x = await a.startProcess("ambiguous", {entropyHex:"ab"});
+  const y = await b.startProcess("ambiguous", {rootCapability:x.capability});
+  const events = [x.event,y.event];
+  const f = replayQosKernel(events), r = replayQosKernel([...events].reverse());
+  ok("conflicting starts create no arbitrary process", f.kernel.list().length === 0 && f.rejected.length === 2);
+  ok("conflicting starts reject identically in reverse order", JSON.stringify(f.rejected) === JSON.stringify(r.rejected));
+}
 // --- canonical syscall request/result/refusal round-trip -------------------
 {
   const identity = await newDynCapState(new Uint8Array(32).fill(37));
