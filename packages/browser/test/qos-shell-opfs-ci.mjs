@@ -8,7 +8,7 @@ assert.ok(process.env.QOS_PLAYWRIGHT_MODULE);
 const {chromium}=await import(pathToFileURL(process.env.QOS_PLAYWRIGHT_MODULE).href);
 const origin="https://127.0.0.1:5173",room="cap:room:03010563656127610341634101250325";
 const url=origin+"/quantum-os/?signal="+encodeURIComponent("wss://127.0.0.1:5173/signal")+"#room="+room;
-const expected="ALPHA | BETA\ntail\n",id=createHash("sha256").update(expected).digest("hex");
+const expected="ALPHA  | BETA\ntail\n",id=createHash("sha256").update(expected).digest("hex");
 const scope=createHash("sha256").update(room).digest("hex");
 const browser=await chromium.launch({headless:true,args:["--no-sandbox","--disable-dev-shm-usage"]});
 const context=await browser.newContext({ignoreHTTPSErrors:true});
@@ -52,7 +52,7 @@ try{
  await command(page,"/fs mkdir workspace "+ns+" /docs","syscall fs_mkdir OK");
  await command(page,"/sh use workspace "+ns,"shell selected:");
  stage="pipeline";
- await command(page,"/sh set X='alpha | beta'; cd /docs","cwd");
+ await command(page,"/sh set X='alpha  | beta'; cd /docs","cwd");
  await command(page,'/sh echo "$X" | upper > output.txt',"job exit 0 · redirected");
  await command(page,"/sh echo tail >> output.txt","job exit 0 · redirected");
  const stored=await hashInOpfs(page);

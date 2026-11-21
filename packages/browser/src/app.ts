@@ -3580,7 +3580,8 @@ function handleCommand(raw: string): string[] {
   // collapsed to single spaces. A multi-line one keeps its lines: joining them
   // would put a rholang `//` comment and the rest of the program on one line,
   // commenting out everything after it.
-  const arg = body.includes("\n")
+  // Shell quoting is semantic: do not collapse internal spaces before lexing.
+  const arg = body.includes("\n") || cmd === "sh" || cmd === "spawn"
     ? body.slice(cmd.length).replace(/^[^\S\n]+/, "")
     : parts.slice(1).join(" ");
   const lines: string[] = [];
