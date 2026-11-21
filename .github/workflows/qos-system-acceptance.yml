@@ -19,7 +19,7 @@ permissions:
   contents: read
 jobs:
   cross-runtime:
-    name: Single journal: shell, device, recovery and native boot
+    name: "Single journal: shell, device, recovery and native boot"
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
