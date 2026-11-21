@@ -116,6 +116,7 @@ export function renderMedia(host: HTMLElement, m: MediaAttachment): void {
 
 /** Inbound reassembly: transfer id → what has arrived so far. */
 interface IncomingFile {
+  from: string;
   name: string; mime: string; size: number; mediaKind: MediaKind;
   total: number; chunks: string[]; got: number;
 }
@@ -170,7 +171,8 @@ export function createAttachments(host: AttachmentHost): Attachments {
       const encodedSize = Math.ceil(size / 3) * 4;
       const expectedTotal = Math.ceil(encodedSize / FILE_CHUNK);
       if (!id || size <= 0 || size > FILE_MAX || !Number.isInteger(size)
-          || total !== expectedTotal || total <= 0 || total > expectedTotal) return;
+          || total !== expectedTotal || total <= 0 || total > expectedTotal
+          || (incoming.size >= 3 && !incoming.has(id))) return;
       const name = String(d.name ?? "file").slice(0, 255);
       const mime = String(d.mime ?? "application/octet-stream").slice(0, 128);
       const kind = d.mediaKind;
@@ -192,7 +194,8 @@ export function createAttachments(host: AttachmentHost): Attachments {
       // out-of-range sequence numbers, and duplicate chunks.
       if (!Number.isInteger(seqNo) || seqNo < 0 || seqNo >= f.total
           || f.chunks[seqNo] !== "" || data.length !== expectedChunkLength
-          || data.length > FILE_CHUNK) return;
+          || data.length > FILE_CHUNK || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)
+          || (seqNo < f.total - 1 && data.includes("="))) return;
       f.chunks[seqNo] = data;
       f.got++;
       if (f.got < f.total) return;
