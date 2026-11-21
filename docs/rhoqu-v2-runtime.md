@@ -42,8 +42,7 @@ A command binds only when execution returns a structured ID or the app adapter
 observes exactly one new ID in the authoritative store. Unstructured output is
 never parsed to invent an ID. Binding state is sequential and isolated across parallel branches. A shared-store
 delta cannot identify the originating command in parallel execution: only an explicit
-structured command ID binds inside such a branch. The sequential store-delta fallback
-is observational, not cryptographic or causal attribution of a remote creation.
+structured command ID binds inside such a branch. The legacy library store-delta adapters remain observational and are not used by the browser RhoQu dispatcher. Production RhoQu consumes only command-correlated receipts. `/qos start` returns its exact published process ID after the queued operation completes, including in parallel branches. Explicit bind failures invalidate that name, and unresolved declared bindings (including LAST_ID) fail before dispatch. Other commands without a correlated receipt cannot bind; operations requiring interactive approval remain blocked. Room/identity switches stop subsequent dispatch.
 
 
 ## Process packages

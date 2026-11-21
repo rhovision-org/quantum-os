@@ -29,6 +29,8 @@ export type RhoCommandResult =
 export type RhoProcessExecutionOptions = {
   /** Evaluated at the point a runtime branch is reached, against a fresh state snapshot. */
   evaluateWhen?: (condition: RhoRuntimeExpr, env: Readonly<Record<string, string>>) => boolean;
+  /** Production mode: no unresolved declared bindings or uncorrelated bind results. */
+  strictBindings?: boolean;
 };
 export function processFromCommands(commands: readonly string[]): RhoProcess {
   return { kind: "sequence", steps: commands.map((command): RhoCommandNode => ({ kind: "command", command })) };
@@ -38,6 +40,20 @@ function resolveBindings(command: string, bindings: Map<string, string>, lastId?
     if (name === "LAST_ID") return lastId ?? match;
     return bindings.get(name) ?? match;
   });
+}
+function declaredBindings(process: RhoProcessNode, names = new Set<string>(["LAST_ID"])): Set<string> {
+  if (process.kind === "command") { if (process.bind) names.add(process.bind); }
+  else if (process.kind === "sequence") process.steps.forEach(step => declaredBindings(step, names));
+  else if (process.kind === "parallel") process.branches.forEach(branch => declaredBindings(branch, names));
+  else { declaredBindings(process.then, names); if (process.else) declaredBindings(process.else, names); }
+  return names;
+}
+/** Check original references, not substituted bytes (IDs are opaque data). */
+function unresolvedBinding(command: string, declared: Set<string>, bindings: Map<string, string>, lastId?: string): string | undefined {
+  for (const match of command.matchAll(/\$([A-Za-z_][A-Za-z0-9_-]*)/g)) {
+    const name = match[1];
+    if (declared.has(name) && !(name === "LAST_ID" ? lastId : bindings.get(name))) return name;
+  }
 }
 /** Sequential interpreter; runtime branches are evaluated when reached. */
 export function executeRhoProcess(
@@ -82,6 +98,7 @@ export async function executeRhoProcessAsync(
   options: RhoProcessExecutionOptions = {},
 ): Promise<RhoCommandResult[]> {
   type State = { bindings: Map<string, string>; lastId?: string; inParallel: boolean };
+  const declared = declaredBindings(process);
   const visit = async (node: RhoProcessNode, state: State): Promise<RhoCommandResult[]> => {
     if (node.kind === "sequence") {
       const out: RhoCommandResult[] = [];
@@ -100,14 +117,18 @@ export async function executeRhoProcessAsync(
         return [{ ok: false, command: "when " + JSON.stringify(node.condition), error: error instanceof Error ? error.message : String(error), lines: [] }];
       }
     }
+    const missing = options.strictBindings ? unresolvedBinding(node.command, declared, state.bindings, state.lastId) : undefined;
     const resolved = resolveBindings(node.command, state.bindings, state.lastId);
     try {
+      if (missing) throw new Error("unresolved runtime binding: $" + missing);
       const raw = await executeCommand(resolved, { inParallel: state.inParallel });
       const execution: RhoCommandExecution = Array.isArray(raw) ? { lines: raw } : raw as RhoCommandExecution;
+      if (options.strictBindings && node.bind && !execution.id) throw new Error("command returned no correlated ID for $" + node.bind);
       const result: RhoCommandResult = { ok: true, command: resolved, lines: execution.lines, ...(execution.id ? { id: execution.id } : {}), ...(execution.value !== undefined ? { value: execution.value } : {}) };
       if (execution.id) { state.lastId = execution.id; if (node.bind) state.bindings.set(node.bind, execution.id); }
       return [result];
     } catch (error) {
+      if (options.strictBindings && node.bind) state.bindings.delete(node.bind);
       return [{ ok: false, command: resolved, error: error instanceof Error ? error.message : String(error), lines: [] }];
     }
   };

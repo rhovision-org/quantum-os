@@ -19,7 +19,7 @@ import { findDiscrepancies, losingPeersIn, normalizeValue,
          SAMPLE_SIZE, PROBE_WINDOW_MS,
          type Observation } from "./probe.js";
 import { transpileProcess as rhoquTranspileProcess, evaluateRhoQuRuntimeCondition, RhoQuError, type RhoQuContext, type RhoQuRuntimeSnapshot, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
-import { executeRhoProcessWithStoreBindingsAsync, countRhoProcessCommands, type RhoFlatProcess } from "./rhoqu-process.js";
+import { executeRhoProcessAsync, countRhoProcessCommands, type RhoFlatProcess } from "./rhoqu-process.js";
 import { openRhoQuPackageUI } from "./rhoqu-package-ui.js";
 import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
          type Poll, type PollMethod, type PollOption } from "./polls.js";
@@ -915,13 +915,18 @@ function qosCommandFor(ctx: RoomContext): QosCommand | null {
 
 /// Run one QOS command through the signing queue. `/qos`, `/ps`, and `/kill`
 /// share this path so they cannot race a chat broadcast for a dyncap seq.
-function runQosCommand(text: string, label = "/qos"): void {
-  if (!qpeer) { addMessage("", "not connected — connect first", "system"); return; }
-  const qos = qosCommandFor(activeRoom);
-  if (!qos) { addMessage("", "identity not ready yet — try again in a moment", "system"); return; }
-  const run = signQueue.then(() => qos.handle(text));
+function runQosCommand(text: string, label = "/qos"): Promise<string | void> {
+  const room = activeRoom;
+  if (!qpeer) { addMessage("", "not connected — connect first", "system"); return Promise.resolve(); }
+  const qos = qosCommandFor(room);
+  if (!qos) { addMessage("", "identity not ready yet — try again in a moment", "system"); return Promise.resolve(); }
+  const run = signQueue.then(() => {
+    if (activeRoom !== room || !room.qpeer) throw new Error("QOS room changed before command execution");
+    return qos.handle(text);
+  });
   signQueue = run.then(() => undefined, () => undefined);
   void run.catch((e) => addMessage("", `⚠ ${label}: ${(e as Error)?.message ?? e}`, "system"));
+  return run;
 }
 
 /// Lazily bind the personal goal store to the current dyncap identity. A
@@ -6422,24 +6427,28 @@ function handleCommand(raw: string): string[] {
           currentSeq: dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
         };
       };
-      void executeRhoProcessWithStoreBindingsAsync(process, async (command) => {
+      const executionRoom = activeRoom;
+      const executionAnchor = dyncapState?.anchor;
+      void executeRhoProcessAsync(process, async (command) => {
+        if (activeRoom !== executionRoom || dyncapState?.anchor !== executionAnchor) {
+          throw new Error("RhoQu execution room or identity changed");
+        }
         if (requiresInteractiveApproval(command)) {
-          const message = `blocked '${command}': this operation requires interactive approval; invoke it directly outside RhoQu`;
-          throw new Error(message);
+          throw new Error(`blocked '${command}': this operation requires interactive approval; invoke it directly outside RhoQu`);
+        }
+        // The QOS dispatcher returns the ID of the exact start it published,
+        // after its queued operation completes. No store-delta inference.
+        if (/^\/qos(?:\s|$)/i.test(command)) {
+          const id = await runQosCommand(command.slice(4).trim());
+          return { lines: [], ...(id ? { id } : {}) };
         }
         return runInput(command);
-      }, async (command) => {
-        if (/^\/poll\s+new\b/i.test(command)) return [...pollStore.keys()];
-        if (/^\/lemma\b/i.test(command)) return [...lemmaStore.keys()];
-        if (/^\/note\s+(?:grant|merge)\b/i.test(command)) return [...noteStore.keys()];
-        if (/^\/rdv\s+swap\b/i.test(command)) return [...proposals.keys()];
-        if (/^\/qos\s+start\b/i.test(command)) {
-          await signQueue;
-          return qosCommandFor(activeRoom)?.list().map((process) => process.id) ?? [];
-        }
-        return [];
       }, {
-        evaluateWhen: (condition, env) => evaluateRhoQuRuntimeCondition(condition, env, runtimeSnapshot()),
+        strictBindings: true,
+        evaluateWhen: (condition, env) => {
+          if (activeRoom !== executionRoom || dyncapState?.anchor !== executionAnchor) throw new Error("RhoQu execution room or identity changed");
+          return evaluateRhoQuRuntimeCondition(condition, env, runtimeSnapshot());
+        },
       }).then((results) => {
         const executed = results.filter((result) => result.ok).length;
         for (const result of results) {

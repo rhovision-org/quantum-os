@@ -179,5 +179,15 @@ await executeRhoProcessWithStoreBindingsAsync(parallelBinding, async command => 
 }, () => [...parallelStore]);
 ok("parallel store delta cannot create implicit branch ID", parallelSeen.includes("/use $idA") && !parallelSeen.includes("/use unattributed-A"));
 ok("parallel explicit structured ID still binds", parallelSeen.includes("/use correlated-B"));
+const strictSeen = [];
+const strict = await executeRhoProcessAsync({kind: "sequence", steps: [
+  {kind: "command", command: "/create no-receipt", bind: "item"},
+  {kind: "command", command: "/use $item"},
+  {kind: "command", command: "/use $LAST_ID"},
+  {kind: "command", command: "/unrelated $nativeMacro"},
+]}, command => { strictSeen.push(command); return []; }, {strictBindings: true});
+ok("strict mode refuses bind without correlated receipt", strict[0].ok === false);
+ok("strict unresolved references never dispatch", !strictSeen.includes("/use $item") && !strictSeen.includes("/use $LAST_ID"));
+ok("strict mode does not reinterpret unrelated native macro", strictSeen.includes("/unrelated $nativeMacro"));
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-process.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
