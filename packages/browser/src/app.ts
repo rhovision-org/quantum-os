@@ -5853,11 +5853,13 @@ function handleCommand(raw: string): string[] {
               signedSend(p, { kind: "rdv-commit", id: state.proposal.id, rows: commitRows });
             }
             const ok = applyCommit(state, commitRows);
-            proposals.delete(state.proposal.id);
-            clearProposalTimeout(state.proposal.id);
+            if (ok) {
+              proposals.delete(state.proposal.id);
+              clearProposalTimeout(state.proposal.id);
+            }
             saveNotes();
             renderNotes();
-            sys(ok ? `  · committed rdv ${shortRdvId(state.proposal.id)}` : `  · commit application failed locally`);
+            sys(ok ? `  · committed rdv ${shortRdvId(state.proposal.id)}` : `  · commit application failed locally; proposal retained for recovery/timeout`);
             break;
           }
 
@@ -8248,11 +8250,13 @@ async function connect(): Promise<void> {
             }
           }
           const ok = applyCommit(state, commitRows);
-          proposals.delete(id);
-          clearProposalTimeout(id);
+          if (ok) {
+            proposals.delete(id);
+            clearProposalTimeout(id);
+          }
           saveNotes();
           renderNotes();
-          addMessage("", ok ? `  · committed rdv ${shortRdvId(id)}` : `  · commit application failed locally`, "system");
+          addMessage("", ok ? `  · committed rdv ${shortRdvId(id)}` : `  · commit application failed locally; proposal retained for recovery/timeout`, "system");
           return;
         }
         if (d.kind === "rdv-reject") {
@@ -8286,12 +8290,14 @@ async function connect(): Promise<void> {
           if (!state || state.role !== "participant" || from !== state.proposal.proposer) return;
           if (state.myStatus !== "accepted") return;
           const ok = applyCommit(state, commitRows);
-          proposals.delete(id);
-          clearProposalTimeout(id);
+          if (ok) {
+            proposals.delete(id);
+            clearProposalTimeout(id);
+          }
           saveNotes();
           renderNotes();
           addMessage(from, `commits rdv ${shortRdvId(id)}`, "peer", peerLabel(from));
-          addMessage("", ok ? `  · rdv ${shortRdvId(id)} settled` : `  · commit application failed`, "system");
+          addMessage("", ok ? `  · rdv ${shortRdvId(id)} settled` : `  · commit application failed; proposal retained for recovery/timeout`, "system");
           return;
         }
         if (d.kind === "rdv-abort") {
