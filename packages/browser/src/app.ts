@@ -6071,6 +6071,10 @@ function handleCommand(raw: string): string[] {
       runQosCommand("fs "+arg,"/fs");
       break;
 
+    case "sh": case "spawn": case "exec": case "wait": case "jobs": case "fg": case "bg":
+      runQosCommand(cmd+" "+arg,"/"+cmd);
+      break;
+
     case "qos":
       runQosCommand(arg);
       break;

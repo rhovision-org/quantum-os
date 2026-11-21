@@ -629,7 +629,7 @@ export function compareEvents(a: QosEvent, b: QosEvent): number {
     compareStrings(a.hash, b.hash);
 }
 
-export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier" | "memory-frontier" | "vfs-version";
+export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier" | "memory-frontier" | "vfs-version" | "shell-version";
 export interface QosDependency { hash: string; kind: QosDependencyKind }
 /** Only schema-defined references are causal, never arbitrary payload strings. */
 export function eventDependencies(event: QosEvent): QosDependency[] {
@@ -673,6 +673,15 @@ export function eventDependencies(event: QosEvent): QosDependency[] {
     for(const key of ["handleVersion","targetHandleVersion","targetVersion","rootVersion","sourceVersion"]){
       const hash=args[key];
       if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:key==="targetVersion"?"process-version":key.endsWith("Version")&&(key==="rootVersion"||key==="sourceVersion")?"vfs-version":"handle-version"});
+    }
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&
+     typeof event.payload.op==="string"&&["sh_config","sh_spawn","sh_control","sh_step","sh_finish","sh_wait"].includes(event.payload.op)&&isRecord(event.payload.args)){
+    const args=event.payload.args;
+    if(event.payload.op==="sh_finish"&&Array.isArray(args.memoryFrontier)&&args.memoryFrontier.length<=4096)
+      for(const hash of args.memoryFrontier)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"memory-frontier"});
+    for(const key of ["handleVersion","namespaceVersion","inputVersion","appendVersion","rootVersion","shellVersion","jobVersion","targetVersion"]){
+      const hash=args[key];if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:key==="rootVersion"?"vfs-version":key==="targetVersion"?"process-version":key==="shellVersion"||key==="jobVersion"?"shell-version":"handle-version"});
     }
   }
   return refs;

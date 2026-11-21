@@ -9,6 +9,7 @@
 // change `/poll` or `/gov`, and does not call a chain. Every lifecycle
 // transition is the dyncap-attributed event `QosProcessRoom` already knows how to make.
 
+import { SHELL_OPS,CONFIG_COMMANDS,splitShell,parsePipeline,boundedText,type ShellOp } from "./qos-shell.js";
 import { VFS_OPS, type VfsOp } from "./qos-vfs.js";
 import type { QosMemoryBytes } from "./qos-memory-bytes.js";
 import { MEMORY_OPS, type MemoryOp } from "./qos-memory.js";
@@ -68,6 +69,7 @@ export class QosCommand {
   private readonly byId = new Map<string, TrackedProcess>();
   private readonly byName = new Map<string, string>();
   private commandQueue: Promise<void> = Promise.resolve();
+  private shellSelection:{pid:string;namespace:string}|null=null;
   private readonly restored:Promise<void>;
   private saveJournal():void {
     try{this.host.saveJournal?.(this.room.log.checkpointEvents());}
@@ -159,11 +161,17 @@ export class QosCommand {
         await this.syscall(rest);return;
       case "fs":
         return this.fs(rest);
+      case "sh": return this.shell(rest);
+      case "spawn": return this.shell(rest,true);
+      case "exec": case "wait": case "jobs": case "fg": case "bg":
+        return this.jobCommand(sub,rest);
+
       case "suspend":
       case "resume":
       case "terminate":
+        return this.lifecycle(sub,rest);
       case "kill":
-        return this.lifecycle(sub === "kill" ? "terminate" : sub, rest);
+        return rest.startsWith("h:job:")?this.jobCommand("kill",rest):this.lifecycle("terminate",rest);
       default:
         this.host.say(`unknown /qos subcommand: ${sub}`);
         for (const line of USAGE) this.host.say(line);
@@ -222,6 +230,7 @@ export class QosCommand {
       const memory=kernel.kernel.memoryView();
       this.host.say(`  memory objects: ${memory.objects.length} · reachable: ${memory.reachable.length} · logically unreferenced: ${memory.unreachable.length}`);
       this.host.say(`  scheduler: ${JSON.stringify(kernel.kernel.scheduleView())}`);
+      this.host.say(`  shell jobs: ${kernel.kernel.shellList(entry.id).length}`);
       this.host.say(`  canonical syscalls: ${kernel.syscalls.filter(item => item.caller === entry.id).length}`);
       if (view.finalDigest) this.host.say(`  final digest: ${view.finalDigest}`);
       return;
@@ -296,6 +305,33 @@ export class QosCommand {
             if(!Object.hasOwn(args,"sourceVersion"))Object.assign(args,{sourceVersion:source.version});
           }
         }
+      }
+    }
+    if(args&&typeof args==="object"&&!Array.isArray(args)&&SHELL_OPS.includes(operation.trim() as ShellOp)){
+      const a=args as Record<string,unknown>,op=operation.trim();
+      if(op==="sh_config"||op==="sh_spawn"){
+        if(!Object.hasOwn(a,"shellVersion"))a.shellVersion=before.kernel.shellContext(entry.id).version;
+        if(typeof a.namespaceHandle==="string"){
+          const version=before.kernel.handleVersion(entry.id,a.namespaceHandle);
+          if(!Object.hasOwn(a,"namespaceVersion")&&version)a.namespaceVersion=version;
+          const ns=before.kernel.fsVersion(entry.id,a.namespaceHandle);
+          if(ns){
+            if(!Object.hasOwn(a,"baseRoot"))a.baseRoot=ns.root;
+            if(!Object.hasOwn(a,"rootVersion"))a.rootVersion=ns.version;
+          }
+        }
+        for(const name of ["input","append"]){
+          const handle=a[name+"Handle"];
+          if(typeof handle==="string"&&!Object.hasOwn(a,name+"Version"))a[name+"Version"]=before.kernel.handleVersion(entry.id,handle);
+        }
+      }else if(typeof a.handle==="string"){
+        const job=before.kernel.shellJob(entry.id,a.handle);
+        if(job){
+          if(!Object.hasOwn(a,"jobVersion"))a.jobVersion=job.version;
+          if(!Object.hasOwn(a,"target"))a.target=job.pid;
+          if(!Object.hasOwn(a,"targetVersion"))a.targetVersion=before.kernel.processVersion(job.pid);
+        }
+        if(op==="sh_finish"&&!Object.hasOwn(a,"memoryFrontier"))a.memoryFrontier=before.kernel.memoryFrontier();
       }
     }
     if (!canonicalSyscallReady(before.kernel, payload, entry.id)) {
@@ -385,6 +421,133 @@ export class QosCommand {
     }
   }
 
+
+  private shellKernel(){return replayQosKernel(this.room.log.events(),this.room.log.forkedSources).kernel;}
+  private shellCall(pid:string,op:string,args:Record<string,unknown>){
+    return this.syscall(pid+" | "+op+" | "+JSON.stringify(args));
+  }
+  private selectedShell(){
+    const s=this.shellSelection;
+    if(!s)return null;
+    const entry=this.byId.get(s.pid),k=this.shellKernel(),p=k.getProcess(s.pid);
+    return entry?.ownerAnchor===this.host.identity.anchor&&p?.state==="running"&&k.fsVersion(s.pid,s.namespace)?{...s,root:p.root}:null;
+  }
+  private async shell(rest:string,spawnOnly=false):Promise<void>{
+    const say=(text:string)=>this.host.say(text);
+    if(!spawnOnly&&rest.startsWith("use ")){
+      const [ref,namespace,...extra]=rest.slice(4).trim().split(/\s+/);
+      const entry=this.resolve(ref),k=this.shellKernel();
+      if(!entry||!namespace||extra.length||entry.ownerAnchor!==this.host.identity.anchor||!k.fsVersion(entry.id,namespace)){
+        say("usage: /sh use <owned-process> <namespace-handle>");return;
+      }
+      this.shellSelection={pid:entry.id,namespace};say("shell selected: "+entry.name+" · "+namespace);return;
+    }
+    const selection=this.selectedShell();
+    if(!selection){say("select an owned shell first: /sh use <process> <namespace-handle>");return;}
+    const {pid,root,namespace}=selection;
+    try{
+      const segments=splitShell(rest);
+      if(spawnOnly&&segments.length!==1)throw Error("/spawn accepts one pipeline");
+      for(const source of segments){
+        const k=this.shellKernel();
+        if(k.getProcess(pid)?.state!=="running")break;
+        const ctx=k.shellContext(pid),version=k.fsVersion(pid,namespace);
+        if(!version)throw Error("namespace capability unavailable");
+        const plan=parsePipeline(source,ctx),base={handle:root,namespaceHandle:namespace,baseRoot:version.root,rootVersion:version.version,shellVersion:ctx.version,source};
+        if(CONFIG_COMMANDS.includes(plan.stages[0][0] as typeof CONFIG_COMMANDS[number])){
+          if(spawnOnly)throw Error("configuration command cannot be spawned");
+          const result=await this.shellCall(pid,"sh_config",base);
+          if(!result?.outcome.ok)throw Error("shell configuration refused");
+          continue;
+        }
+        const handles:string[]=[];
+        const read=async(path:string|null,optional:boolean)=>{
+          if(path===null)return {text:"",handle:null,version:null};
+          // Verify the namespace snapshot and obtain an immutable read handle.
+          const info=await this.shellCall(pid,"fs_stat",{handle:namespace,path,baseRoot:version.root,rootVersion:version.version});
+          if(optional&&info?.outcome.ok===false&&info.outcome.errno==="ENOENT")return {text:"",handle:null,version:null};
+          if(!info?.outcome.ok||(info.outcome.value as {kind:string}).kind!=="file")throw Error("input path absent or not a file");
+          const opened=await this.shellCall(pid,"fs_open",{handle:namespace,path,baseRoot:version.root,rootVersion:version.version});
+          if(!opened?.outcome.ok)throw Error("input open refused");
+          const handle=(opened.outcome.value as {id:string}).id;handles.push(handle);
+          if(!this.host.memory)throw Error("byte adapter unavailable");
+          const {service}=await this.host.memory();
+          const bytes=await service.get(()=>this.shellKernel(),pid,handle);
+          if(!bytes)throw Error("input bytes unavailable");
+          const text=new TextDecoder("utf-8",{fatal:true,ignoreBOM:true}).decode(bytes);
+          if(!boundedText(text))throw Error("shell input exceeds byte limit");
+          return {text,handle,version:this.shellKernel().handleVersion(pid,handle)??null};
+        };
+        let jobHandle:string|undefined;
+        try{
+          const input=await read(plan.input,false),append=await read(plan.output?.append?plan.output.path:null,true);
+          const result=await this.shellCall(pid,"sh_spawn",{...base,input:input.text,inputHandle:input.handle,inputVersion:input.version,
+            append:append.text,appendHandle:append.handle,appendVersion:append.version});
+          if(!result?.outcome.ok)throw Error("spawn refused");
+          jobHandle=(result.outcome.value as {handle:{id:string}}).handle.id;
+        }finally{
+          for(const handle of handles)await this.shellCall(pid,"mem_drop",{handle});
+        }
+        if(!jobHandle)throw Error("job allocation failed");
+        say("job "+jobHandle+" queued");
+        if(!spawnOnly)await this.jobCommand("fg",jobHandle);
+      }
+    }catch(e){say("shell: "+(e as Error).message);}
+  }
+
+  private async jobCommand(op:string,rest:string):Promise<void>{
+    const say=(text:string)=>this.host.say(text),s=this.selectedShell();
+    if(!s){say("select an owned shell first: /sh use <process> <namespace-handle>");return;}
+    const pid=s.pid;
+    if(op==="jobs"){
+      if(rest){say("usage: /jobs");return;}
+      for(const j of this.shellKernel().shellList(pid))say(j.handle+" · "+j.state+" · "+j.mode+" · stage "+j.stage+"/"+j.plan.stages.length+" · exit "+(j.exitCode??"-"));
+      return;
+    }
+    const [handle,...extra]=rest.trim().split(/\s+/);
+    if(!handle||extra.length){say("usage: /"+op+" <job-handle>");return;}
+    let job=this.shellKernel().shellJob(pid,handle);
+    if(!job){say("job missing or no live job capability");return;}
+    if(op==="kill"){
+      await this.shellCall(pid,"signal",{handle,target:job.pid,signal:"SIGTERM"});return;
+    }
+    if(op==="wait"){
+      const receipt=await this.shellCall(pid,"sh_wait",{handle});
+      if(receipt?.outcome.ok)say("job exit "+(receipt.outcome.value as {exitCode:number}).exitCode);
+      return;
+    }
+    if(op==="bg"||op==="fg"){
+      const result=await this.shellCall(pid,"sh_control",{handle,mode:op==="bg"?"background":"foreground"});
+      if(!result?.outcome.ok)return;
+      if(op==="bg"){say("background job ready; /exec "+handle+" advances one cooperative stage");return;}
+    }
+    if(op!=="fg"&&op!=="exec")return;
+    const limit=op==="fg"?9:1;
+    for(let i=0;i<limit;i++){
+      job=this.shellKernel().shellJob(pid,handle);
+      if(!job||this.shellKernel().getProcess(job.pid)?.state!=="running"){say("job is not running");return;}
+      if(job.stage<job.plan.stages.length){
+        const result=await this.shellCall(pid,"sh_step",{handle});
+        if(!result?.outcome.ok)return;
+        if(op==="exec")return;
+        continue;
+      }
+      let descriptor=null,service:QosMemoryBytes|undefined;
+      if(job.plan.output&&this.host.memory&&boundedText(job.append+job.output)){
+        try{service=(await this.host.memory()).service;descriptor=await service.prepare(new TextEncoder().encode(job.append+job.output));}
+        catch{say("redirection bytes unavailable; recording failure");}
+      }
+      try{
+        const receipt=await this.shellCall(pid,"sh_finish",{handle,descriptor});
+        if(receipt?.outcome.ok){
+          const value=receipt.outcome.value as {output:string|null;exitCode:number;detail:string};
+          if(value.output!==null&&value.output!=="")say(value.output);
+          say("job exit "+value.exitCode+" · "+value.detail);
+        }
+      }finally{if(descriptor&&service)service.releaseStaged(descriptor.id);}
+      return;
+    }
+  }
 
   /** OS-style process table is reconstructed from the canonical kernel replay. */
   private async ps(): Promise<void> {
