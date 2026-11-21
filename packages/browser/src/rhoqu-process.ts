@@ -78,10 +78,10 @@ export function executeRhoProcess(
 /** Async interpreter: sequences are awaited; parallel branches start together and retain isolated bindings. */
 export async function executeRhoProcessAsync(
   process: RhoProcessNode,
-  executeCommand: (command: string) => Promise<readonly string[] | RhoCommandExecution> | readonly string[] | RhoCommandExecution,
+  executeCommand: (command: string, context: { readonly inParallel: boolean }) => Promise<readonly string[] | RhoCommandExecution> | readonly string[] | RhoCommandExecution,
   options: RhoProcessExecutionOptions = {},
 ): Promise<RhoCommandResult[]> {
-  type State = { bindings: Map<string, string>; lastId?: string };
+  type State = { bindings: Map<string, string>; lastId?: string; inParallel: boolean };
   const visit = async (node: RhoProcessNode, state: State): Promise<RhoCommandResult[]> => {
     if (node.kind === "sequence") {
       const out: RhoCommandResult[] = [];
@@ -89,7 +89,7 @@ export async function executeRhoProcessAsync(
       return out;
     }
     if (node.kind === "parallel") {
-      const branches = await Promise.all(node.branches.map(branch => visit(branch, { bindings: new Map(state.bindings), lastId: state.lastId })));
+      const branches = await Promise.all(node.branches.map(branch => visit(branch, { bindings: new Map(state.bindings), lastId: state.lastId, inParallel: true })));
       return branches.flat();
     }
     if (node.kind === "when") {
@@ -102,7 +102,7 @@ export async function executeRhoProcessAsync(
     }
     const resolved = resolveBindings(node.command, state.bindings, state.lastId);
     try {
-      const raw = await executeCommand(resolved);
+      const raw = await executeCommand(resolved, { inParallel: state.inParallel });
       const execution: RhoCommandExecution = Array.isArray(raw) ? { lines: raw } : raw as RhoCommandExecution;
       const result: RhoCommandResult = { ok: true, command: resolved, lines: execution.lines, ...(execution.id ? { id: execution.id } : {}), ...(execution.value !== undefined ? { value: execution.value } : {}) };
       if (execution.id) { state.lastId = execution.id; if (node.bind) state.bindings.set(node.bind, execution.id); }
@@ -111,7 +111,7 @@ export async function executeRhoProcessAsync(
       return [{ ok: false, command: resolved, error: error instanceof Error ? error.message : String(error), lines: [] }];
     }
   };
-  return visit(process, { bindings: new Map(), lastId: undefined });
+  return visit(process, { bindings: new Map(), lastId: undefined, inParallel: false });
 }
 export async function executeRhoProcessWithStoreBindingsAsync(
   process: RhoProcessNode,
@@ -119,10 +119,14 @@ export async function executeRhoProcessWithStoreBindingsAsync(
   getIdsForCommand: (command: string) => readonly string[] | Promise<readonly string[]>,
   options: RhoProcessExecutionOptions = {},
 ): Promise<RhoCommandResult[]> {
-  return executeRhoProcessAsync(process, async command => {
+  return executeRhoProcessAsync(process, async (command, context) => {
+    // A shared-store delta cannot attribute a creation to one parallel branch.
+    if (context.inParallel) return executeCommand(command);
     const before = new Set(await getIdsForCommand(command));
     const raw = await executeCommand(command);
     const execution: RhoCommandExecution = Array.isArray(raw) ? { lines: raw } : raw as RhoCommandExecution;
+    // A command-correlated ID is stronger than a store observation.
+    if (execution.id) return execution;
     const created = (await getIdsForCommand(command)).filter(id => !before.has(id));
     return created.length === 1 ? { ...execution, id: created[0] } : raw;
   }, options);

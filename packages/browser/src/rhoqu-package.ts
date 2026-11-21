@@ -74,12 +74,27 @@ function validPackageBase(value: unknown): boolean {
     && (value.provenance.source === undefined || (typeof value.provenance.source === "string" && value.provenance.source.length <= 8192))
     && validSequence(value.process);
 }
-export async function createRhoProcessPackage(process: RhoSequenceNode, provenance: RhoProcessProvenance): Promise<RhoProcessPackage> {
-  const base = { format: "rho-process-package" as const, version: 1 as const, provenance, process };
+/** Return only an owned immutable JSON snapshot of the bytes that were hashed. */
+function freezeJson<T>(value: T): T {
+  if (value && typeof value === "object") {
+    for (const child of Object.values(value)) freezeJson(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+function checkedBaseSnapshot(base: unknown): { canonical: string; snapshot: Omit<RhoProcessPackage, "contentHash"> } {
   if (!validPackageBase(base)) throw new Error("invalid process package: schema validation failed");
   const canonical = canonicalJson(base);
-  if (new TextEncoder().encode(canonical).length > MAX_PACKAGE_BYTES) throw new Error("invalid process package: size limit exceeded");
-  return { ...base, contentHash: await sha256(canonical) };
+  // The wire size includes the hash field, not just the hashed content.
+  const snapshot = JSON.parse(canonical);
+  if (!validPackageBase(snapshot)) throw new Error("invalid process package: schema validation failed");
+  const fullSize = new TextEncoder().encode(canonicalJson({ ...snapshot, contentHash: "0".repeat(64) })).length;
+  if (fullSize > MAX_PACKAGE_BYTES) throw new Error("invalid process package: size limit exceeded");
+  return { canonical, snapshot };
+}
+export async function createRhoProcessPackage(process: RhoSequenceNode, provenance: RhoProcessProvenance): Promise<RhoProcessPackage> {
+  const { canonical, snapshot } = checkedBaseSnapshot({ format: "rho-process-package", version: 1, provenance, process });
+  return freezeJson({ ...snapshot, contentHash: await sha256(canonical) });
 }
 export async function serializeRhoProcessPackage(process: RhoSequenceNode, provenance: RhoProcessProvenance): Promise<string> {
   return canonicalJson(await createRhoProcessPackage(process, provenance));
@@ -91,11 +106,9 @@ export async function importRhoProcessPackage(raw: string | unknown): Promise<Im
     try { value = JSON.parse(raw); } catch { throw new Error("invalid process package JSON"); }
   }
   if (!isRecord(value) || typeof value.contentHash !== "string" || !validPackageBase(value)) throw new Error("invalid process package: schema validation failed");
-  const pkg = value as unknown as RhoProcessPackage;
-  const { contentHash, ...base } = pkg;
-  const canonical = canonicalJson(base);
-  if (new TextEncoder().encode(canonical).length > MAX_PACKAGE_BYTES) throw new Error("invalid process package: size limit exceeded");
+  const { contentHash, ...base } = value;
+  const { canonical, snapshot } = checkedBaseSnapshot(base);
   const expected = await sha256(canonical);
   if (expected !== contentHash) throw new Error("process package hash mismatch");
-  return { process: pkg.process, provenance: pkg.provenance, contentHash: pkg.contentHash };
+  return freezeJson({ process: snapshot.process, provenance: snapshot.provenance, contentHash });
 }

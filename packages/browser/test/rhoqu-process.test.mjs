@@ -165,5 +165,19 @@ const queuedBindingResults = await executeRhoProcessWithStoreBindingsAsync(queue
   return [...queuedIds];
 });
 ok("async ID lookup captures queued creation after completion", queuedBindingResults.length === 2 && queuedBindingResults.every(r => r.ok) && queuedCommands[1] === "/qos status qos-process-real-81");
+const parallelStore = new Set();
+const parallelBinding = { kind: "parallel", branches: [
+  { kind: "sequence", steps: [{ kind: "command", command: "/create A", bind: "idA" }, { kind: "command", command: "/use $idA" }] },
+  { kind: "sequence", steps: [{ kind: "command", command: "/create B", bind: "idB" }, { kind: "command", command: "/use $idB" }] },
+]};
+const parallelSeen = [];
+await executeRhoProcessWithStoreBindingsAsync(parallelBinding, async command => {
+  parallelSeen.push(command);
+  if (command === "/create A") parallelStore.add("unattributed-A");
+  if (command === "/create B") return { lines: [], id: "correlated-B" };
+  return [];
+}, () => [...parallelStore]);
+ok("parallel store delta cannot create implicit branch ID", parallelSeen.includes("/use $idA") && !parallelSeen.includes("/use unattributed-A"));
+ok("parallel explicit structured ID still binds", parallelSeen.includes("/use correlated-B"));
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-process.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);

@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
@@ -27,7 +28,7 @@ const packageOne = await createRhoProcessPackage(process, provenance);
 const serialized = await serializeRhoProcessPackage(process, provenance);
 const imported = await importRhoProcessPackage(serialized);
 ok("package export contains canonical format and SHA-256", packageOne.format === "rho-process-package" && packageOne.contentHash.length === 64 && serialized === JSON.stringify(JSON.parse(serialized)));
-ok("import preserves typed process and provenance", JSON.stringify(imported.process) === JSON.stringify(process) && imported.provenance.authorAnchor === provenance.authorAnchor && imported.provenance.source === provenance.source);
+ok("import preserves typed process and provenance", isDeepStrictEqual(imported.process, process) && imported.provenance.authorAnchor === provenance.authorAnchor && imported.provenance.source === provenance.source);
 const goldenSource = "bind pollId /poll new Decision; /poll add $pollId Option A; /poll status $LAST_ID;";
 const goldenIR = transpileProcess(goldenSource);
 const goldenPackage = await serializeRhoProcessPackage(goldenIR, provenance);
@@ -69,7 +70,8 @@ for (let i = 0; i < 70; i++) deepTree = { kind: "sequence", steps: [deepTree] };
 let depthRejected = false;
 try { await importRhoProcessPackage({ format: "rho-process-package", version: 1, provenance, process: deepTree, contentHash: "0".repeat(64) }); } catch (error) { depthRejected = String(error).includes("schema validation"); }
 ok("import rejects deeply nested process trees", depthRejected);
-let oversizedRejected = false;	ry { await importRhoProcessPackage(" ".repeat(1_048_577)); } catch (error) { oversizedRejected = String(error).includes("size limit"); }
+let oversizedRejected = false;
+try { await importRhoProcessPackage(" ".repeat(1_048_577)); } catch (error) { oversizedRejected = String(error).includes("size limit"); }
 ok("import rejects oversized package input", oversizedRejected);
 const oversizedObjectProcess = { kind: "sequence", steps: Array.from({ length: 180 }, () => ({ kind: "command", command: "/" + "x".repeat(6000) })) };
 let oversizedObjectRejected = false;
@@ -78,5 +80,17 @@ ok("object import rejects oversized canonical package before hash verification",
 let oversizedCreationRejected = false;
 try { await createRhoProcessPackage(oversizedObjectProcess, provenance); } catch (error) { oversizedCreationRejected = String(error).includes("size limit"); }
 ok("package creation rejects oversized canonical payload", oversizedCreationRejected);
+const mutable = JSON.parse(serialized);
+const inFlightImport = importRhoProcessPackage(mutable);
+mutable.process.steps[0].command = "/mutated while digest pending";
+mutable.provenance.authorAnchor = "b".repeat(64);
+const snapshotImport = await inFlightImport;
+ok("import returns original hashed bytes despite caller mutation", snapshotImport.process.steps[0].command === process.steps[0].command && snapshotImport.provenance.authorAnchor === provenance.authorAnchor && Object.isFrozen(snapshotImport.process.steps[0]));
+const mutableProcess = JSON.parse(JSON.stringify(process));
+const inFlightCreate = createRhoProcessPackage(mutableProcess, provenance);
+mutableProcess.steps[0].command = "/mutated while export digest pending";
+const snapshotExport = await inFlightCreate;
+ok("export returns original hashed bytes and immutable process", snapshotExport.process.steps[0].command === process.steps[0].command && Object.isFrozen(snapshotExport.process.steps[0]));
+ok("snapshot export can be independently imported", (await importRhoProcessPackage(snapshotExport)).contentHash === snapshotExport.contentHash);
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-package.test.mjs — " + pass + " passed, " + fail + " failed");
-process.exit(fail === 0 ? 0 : 1);
+globalThis.process.exit(fail === 0 ? 0 : 1);

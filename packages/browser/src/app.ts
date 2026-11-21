@@ -6425,8 +6425,7 @@ function handleCommand(raw: string): string[] {
       void executeRhoProcessWithStoreBindingsAsync(process, async (command) => {
         if (requiresInteractiveApproval(command)) {
           const message = `blocked '${command}': this operation requires interactive approval; invoke it directly outside RhoQu`;
-          sys(`· ${message}`);
-          return { lines: [message] };
+          throw new Error(message);
         }
         return runInput(command);
       }, async (command) => {

@@ -40,8 +40,10 @@ immutable room event log. Cross-branch mutation ordering is not guaranteed.
 
 A command binds only when execution returns a structured ID or the app adapter
 observes exactly one new ID in the authoritative store. Unstructured output is
-never parsed to invent an ID. Binding state is sequential and isolated across
-parallel branches.
+never parsed to invent an ID. Binding state is sequential and isolated across parallel branches. A shared-store
+delta cannot identify the originating command in parallel execution: only an explicit
+structured command ID binds inside such a branch. The sequential store-delta fallback
+is observational, not cryptographic or causal attribution of a remote creation.
 
 
 ## Process packages
@@ -49,6 +51,7 @@ parallel branches.
 `/rhoqu package` opens the process-package UI. Source can be previewed and
 exported as a canonical JSON package; an existing package can be imported after
 schema and content-hash validation. Imported package content and provenance are
-shown for review. This UI is preview/import/export only: importing a package
+shown for review. A content hash checks payload consistency, not the claimed author
+identity. Validated packages are detached immutable JSON snapshots. This UI is preview/import/export only: importing a package
 never executes commands or grants capabilities. Execution remains a separate,
 explicit action in the normal RhoQu command path.
