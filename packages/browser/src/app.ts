@@ -3131,6 +3131,17 @@ let macroDepth = 0;
  * Run `+name args`. Returns the lines it printed, so /script and a body can
  * carry it the way they carry a slash command.
  */
+/** Commands whose dispatcher opens an asynchronous approval UI. They cannot be
+ * safely composed inside synchronous command macros, /script, or RhoQu processes:
+ * those runners would advance before the user's decision. Direct invocation stays
+ * available and retains its approval dialog.
+ */
+function requiresInteractiveApproval(command: string): boolean {
+  const normalized = command.trim().replace(/^\/+/, "");
+  return /^(?:socket\s+(?:listen|connect)|rholang\s+deploy|rholang\s+macro|gov\s+claim|reset(?:\s|$)|rholang\s+key\s+(?:generate|replace))\b/i.test(normalized);
+}
+
+
 function runMacroLine(line: string): string[] {
   const out: string[] = [];
   const say = (t: string) => { addMessage("", t, "system"); out.push(t); };
@@ -3159,6 +3170,11 @@ function runMacroLine(line: string): string[] {
   catch (e) { say(`· ${e instanceof MacroError ? e.message : String(e)}`); return out; }
   for (const err of expansion.errors) say(`· ${err.message}`);
   if (expansion.commands.length === 0) { say(`· +${def.name} expanded to nothing`); return out; }
+  const blocked = expansion.commands.find(requiresInteractiveApproval);
+  if (blocked) {
+    say(`· +${def.name}: '${blocked}' requires interactive approval and cannot run inside a synchronous macro`);
+    return out;
+  }
 
   macroDepth++;
   let ran = 0;
@@ -6310,7 +6326,14 @@ function handleCommand(raw: string): string[] {
           currentSeq: dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
         };
       };
-      void executeRhoProcessWithStoreBindingsAsync(process, (command) => runInput(command), async (command) => {
+      void executeRhoProcessWithStoreBindingsAsync(process, async (command) => {
+        if (requiresInteractiveApproval(command)) {
+          const message = `blocked '${command}': this operation requires interactive approval; invoke it directly outside RhoQu`;
+          sys(`· ${message}`);
+          return { lines: [message] };
+        }
+        return runInput(command);
+      }, async (command) => {
         if (/^\/poll\s+new\b/i.test(command)) return [...pollStore.keys()];
         if (/^\/lemma\b/i.test(command)) return [...lemmaStore.keys()];
         if (/^\/note\s+(?:grant|merge)\b/i.test(command)) return [...noteStore.keys()];
@@ -6352,6 +6375,10 @@ function handleCommand(raw: string): string[] {
       for (const seg of segments) {
         if (seg.startsWith("//")) { skipped++; continue; }
         const cmdStr = seg.startsWith("/") || seg.startsWith("+") ? seg : "/" + seg;
+        if (requiresInteractiveApproval(cmdStr)) {
+          sys(`· script blocked '${cmdStr}': requires interactive approval; run it directly`);
+          continue;
+        }
         try {
           runInput(cmdStr);
           executed++;
