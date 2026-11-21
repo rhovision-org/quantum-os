@@ -368,6 +368,19 @@ console.log("\nsource fork");
   const view = await Q.orchestrate(log.events(), { forkedSources: log.forkedSources });
   ok("a quarantined source cannot make the reducer guess", view.finalDigest === null && view.conflictedSources.includes(stA.anchor));
 }
+// The reducer must fail closed on explicit causal cycles even when supplied raw
+// events (the room log normally rejects/diagnoses them before this boundary).
+{
+  const id = await identity(61);
+  const { room } = makeRoom(id);
+  const started = await room.startProcess("cycle-guard", { question: "cycle guard", minNominations: 1, entropyHex: "ab" });
+  const cycleA = { hash: "cycle-a", source: "cycle-source", seq: 2, process: started.processId, prev: "cycle-b", grant: "root", type: "process-suspend" };
+  const cycleB = { hash: "cycle-b", source: "cycle-source", seq: 3, process: started.processId, prev: "cycle-a", grant: "root", type: "process-resume" };
+  const view = await Q.orchestrate([started.event, cycleA, cycleB]);
+  ok("causal cycle makes the reducer conflicted", view.status === "conflicted" && view.phase === "conflicted");
+  eq("cycle conflict is named", view.blocked, "causal-dependency-cycle");
+  ok("cyclic hashes are surfaced in rejected diagnostics", view.rejected.length === 2 && view.rejected.every(e => /causal dependency cycle/.test(e.reason)));
+}
 
 // ---------------------------------------------------------------------------
 // 6. Security invariant checks
