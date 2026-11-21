@@ -102,6 +102,8 @@ await drain(alice, bob);
 av = await alice.cmd.room.view(id);
 bv = await bob.cmd.room.view(id);
 ok("status is suspended", av.status === "suspended", av.status);
+await alice.cmd.handle("ps");
+ok("kernel-replayed ps reflects suspended state", alice.said.some((l) => l.includes("Alpha") && l.includes("suspended")));
 ok("both peers agree after suspend", av.stateDigest === bv.stateDigest, `${av.stateDigest} != ${bv.stateDigest}`);
 
 // --- only the owner can drive it ------------------------------------------
@@ -116,6 +118,8 @@ await drain(alice, bob);
 av = await alice.cmd.room.view(id);
 bv = await bob.cmd.room.view(id);
 ok("status is running again", av.status === "running", av.status);
+await alice.cmd.handle("ps");
+ok("kernel-replayed ps reflects resumed state", alice.said.some((l) => l.includes("Alpha") && l.includes("running")));
 ok("both peers agree after resume", av.stateDigest === bv.stateDigest, `${av.stateDigest} != ${bv.stateDigest}`);
 
 // --- kill alias ------------------------------------------------------------

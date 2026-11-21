@@ -10,6 +10,7 @@
 // transition is the dyncap-attributed event `QosProcessRoom` already knows how to make.
 
 import type { DynCapState } from "./dyncap.js";
+import { replayQosKernel } from "./qos-kernel.js";
 import {
   QosProcessRoom,
   parseQosEvent,
@@ -185,18 +186,24 @@ export class QosCommand {
     }
   }
 
-  /** OS-style process table: pid, name, state, events, owner. */
+  /** OS-style process table is reconstructed from the canonical kernel replay. */
   private async ps(): Promise<void> {
-    if (this.byId.size === 0) {
-      this.host.say("no QOS processes in this room — start one with `/qos start <name>`");
+    const replay = replayQosKernel(this.room.log.events(), this.room.log.forkedSources);
+    const processes = replay.kernel.list();
+    if (processes.length === 0) {
+      this.host.say("no replayable QOS processes in this room — start one with `/qos start <name>`");
+      if (replay.rejected.length) this.host.say(`  replay rejected ${replay.rejected.length} event(s)`);
       return;
     }
-    this.host.say(`QOS process table (${this.byId.size}):`);
+    this.host.say(`QOS process table (${processes.length}) — kernel replay:`);
     this.host.say("  PID | NAME | STATE | EVENTS | OWNER");
-    for (const entry of this.list()) {
-      const view = await this.room.view(entry.id);
-      this.host.say(`  ${short(entry.id)} | ${entry.name} | ${view.status} | ${view.eventCount} | ${this.ownerLabel(entry)}`);
+    for (const process of processes) {
+      const entry = this.byId.get(process.pid);
+      const events = this.room.log.eventsFor(process.pid).length;
+      const owner = entry ? this.ownerLabel(entry) : process.owner;
+      this.host.say(`  ${short(process.pid)} | ${process.name} | ${process.state} | ${events} | ${owner}`);
     }
+    if (replay.rejected.length) this.host.say(`  replay rejected ${replay.rejected.length} event(s)`);
     this.host.say("  `/qos kill <name|id>` terminates (owner only).");
   }
 
@@ -212,12 +219,14 @@ export class QosCommand {
       this.host.say(`no process named or identified by **${ref}** — \`/qos status\``);
       return;
     }
-    const before = await this.room.view(entry.id);
-    const allowed = verb === "suspend" ? before.status === "running"
-      : verb === "resume" ? before.status === "suspended"
-      : before.status === "running" || before.status === "suspended";
+    const before = replayQosKernel(this.room.log.events(), this.room.log.forkedSources).kernel.getProcess(entry.id);
+    const state = before?.state ?? "unknown";
+    const displayState = state === "exited" || state === "reaped" ? "terminated" : state;
+    const allowed = verb === "suspend" ? state === "running"
+      : verb === "resume" ? state === "suspended"
+      : state === "running" || state === "suspended";
     if (!allowed) {
-      this.host.say(`cannot ${verb} **${entry.name}** from ${before.status}`);
+      this.host.say(`cannot ${verb} **${entry.name}** from ${displayState}`);
       return;
     }
     const grant = this.room.findGrant(entry.id, this.host.identity.anchor);
