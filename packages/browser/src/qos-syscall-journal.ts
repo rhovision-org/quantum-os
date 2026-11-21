@@ -22,6 +22,7 @@ export interface QosSyscallReplay { kernel: QosKernel; accepted: QosSyscallEntry
 const GENESIS = "genesis";
 const entryBody = (e: Omit<QosSyscallEntry, "hash"> | QosSyscallEntry) => ({ schema: e.schema, seq: e.seq, prev: e.prev, request: e.request, outcome: e.outcome, stateDigest: e.stateDigest });
 const same = (a: unknown, b: unknown) => canonicalJson(a) === canonicalJson(b);
+const snapshot = <T>(value: T): T => JSON.parse(canonicalJson(value)) as T;
 function execute(k: QosKernel, r: QosSyscallRequest): QosResult<any> {
   switch (r.op) {
     case "bootstrap": return k.createProcess({ name: r.name, owner: r.owner, parent: r.parent, pid: r.pid });
@@ -44,21 +45,23 @@ export class QosSyscallJournal {
   private entries: QosSyscallEntry[] = [];
   private tail = GENESIS;
   constructor(readonly kernel = new QosKernel()) {}
-  list(): QosSyscallEntry[] { return this.entries.map(e => ({ ...e, request: { ...e.request }, outcome: { ...e.outcome } })); }
+  list(): QosSyscallEntry[] { return snapshot(this.entries); }
   async invoke(request: QosSyscallRequest): Promise<QosSyscallOutcome> {
-    const outcome = normalize(execute(this.kernel, request));
+    const stableRequest = snapshot(request);
+    const outcome = snapshot(normalize(execute(this.kernel, stableRequest)));
     const stateDigest = await this.kernel.stateDigest();
-    const body: Omit<QosSyscallEntry, "hash"> = { schema: "qos.syscall/1", seq: this.entries.length + 1, prev: this.tail, request, outcome, stateDigest };
+    const body: Omit<QosSyscallEntry, "hash"> = { schema: "qos.syscall/1", seq: this.entries.length + 1, prev: this.tail, request: stableRequest, outcome, stateDigest };
     const hash = await sha256Hex(canonicalJson(entryBody(body)));
     const entry: QosSyscallEntry = { ...body, hash };
-    this.entries.push(entry); this.tail = hash;
-    return outcome;
+    this.entries.push(snapshot(entry)); this.tail = hash;
+    return snapshot(outcome);
   }
   async digest(): Promise<string> { return this.kernel.stateDigest(); }
   static async replay(entries: QosSyscallEntry[]): Promise<QosSyscallReplay> {
+    const stableEntries = snapshot(entries);
     const kernel = new QosKernel(); const accepted: QosSyscallEntry[] = []; const rejected: { seq: number; reason: string }[] = [];
     let tail = GENESIS;
-    for (const entry of entries) {
+    for (const entry of stableEntries) {
       const reject = (reason: string) => { rejected.push({ seq: entry?.seq ?? -1, reason }); };
       if (!entry || entry.schema !== "qos.syscall/1") { reject("unsupported schema"); continue; }
       if (entry.seq !== accepted.length + 1) { reject("non-contiguous sequence"); continue; }
