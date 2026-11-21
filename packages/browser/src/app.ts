@@ -3141,10 +3141,10 @@ function requiresInteractiveApproval(command: string): boolean {
   // Dollar macros/programs can expand to eval/deploy and bypass the slash-command
   // gate. Block them in synchronous/automatic runners; direct user input remains.
   if (normalized.startsWith("$")) return true;
-  // Governance and note commands have state-changing subcommands whose surface
-  // keeps growing. Non-interactive runners cannot safely infer which variants
-  // mutate state; require direct dispatch for the whole command families.
-  return /^(?:socket\s+(?:listen|connect)|rholang\s+(?:deploy|macro|(?:locker\s+install|register|bind|record|grant))|gov(?:\s|$)|note(?:\s|$)|reset(?:\s|$)|rholang\s+key\s+(?:generate|forget|[0-9a-f]{64}))/i.test(normalized);
+  // These command families include state mutation, transfer, consent, or
+  // signed on-chain writes. Their subcommand surfaces evolve; runners without
+  // a direct approval UI must not infer safety from a verb allowlist.
+  return /^(?:socket\s+(?:listen|connect)|rholang\s+(?:deploy|macro|(?:locker\s+install|register|bind|record|grant))|gov(?:\s|$)|note(?:\s|$)|reset(?:\s|$)|forget(?:\s|$)|remove(?:\s|$)|retract(?:\s|$)|rm(?:\s|$)|pass(?:\s|$)|persist(?:\s+accept\b|\s+reject\b)|channel\s+chain(?:\s|$)|rholang\s+key\s+(?:generate|forget|[0-9a-f]{64}))/i.test(normalized);
 }
 
 
