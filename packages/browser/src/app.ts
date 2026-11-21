@@ -2303,7 +2303,7 @@ function confirmDialog(title: string, body: string, okLabel = "OK"): Promise<boo
     h.style.cssText = "font-weight:600;font-size:15px;margin-bottom:8px";
     const p = document.createElement("div");
     p.textContent = body;
-    p.style.cssText = "font-size:13px;opacity:.85;white-space:pre-wrap;margin-bottom:14px";
+    p.style.cssText = "font-size:13px;opacity:.85;white-space:pre-wrap;margin-bottom:14px;max-height:55vh;overflow:auto";
     const row = document.createElement("div");
     row.style.cssText = "display:flex;gap:8px;justify-content:flex-end";
     const cancel = document.createElement("button");
@@ -2932,9 +2932,9 @@ function runRholangProgram(mode: "eval" | "deploy", source: string): void {
     }
 
     if (!cfg.key) { say("✗ no deploy key — /rholang key generate, or /rholang key <hex>"); return; }
-    const okToDeploy = await confirmDialog("Sign and deploy?",
-      `to ${cfg.url}\nphlo limit ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}`,
-      "Sign and deploy");
+    const okToDeploy = await confirmDialog("Review source — sign and deploy?",
+      \`Target: \${cfg.url}\\nPhlo limit: \${cfg.phloLimit} × price \${cfg.phloPrice}, shard \${cfg.shard}\\n\\nExpanded source (this exact source will be signed):\\n\\n\${source}\`,
+      "Approve · sign & deploy");
     if (!okToDeploy) { say("cancelled — nothing deployed"); return; }
     say("signing and deploying to " + cfg.url + "…");
     try {
