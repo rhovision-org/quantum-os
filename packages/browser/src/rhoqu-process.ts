@@ -1,58 +1,37 @@
-/**
- * RhoQu runtime process IR (v2 migration slice).
- *
- * The legacy transpiler still lowers source to flat command strings. This IR
- * makes the execution boundary explicit without pretending that the current
- * "parallel" syntax is concurrent. It intentionally contains only sequence and
- * command nodes until concurrency semantics are implemented.
- */
-export type RhoCommandNode = {
-  readonly kind: "command";
-  readonly command: string;
-};
-
-export type RhoSequenceNode = {
-  readonly kind: "sequence";
-  readonly steps: readonly RhoProcessNode[];
-};
-
+/** RhoQu runtime process IR (v2 migration slice). */
+export type RhoCommandNode = { readonly kind: "command"; readonly command: string; readonly bind?: string };
+export type RhoSequenceNode = { readonly kind: "sequence"; readonly steps: readonly RhoProcessNode[] };
 export type RhoProcessNode = RhoCommandNode | RhoSequenceNode;
 export type RhoProcess = RhoSequenceNode;
-
+export type RhoCommandExecution = { readonly lines: readonly string[]; readonly id?: string; readonly value?: unknown };
 export type RhoCommandResult =
-  | { readonly ok: true; readonly command: string; readonly lines: readonly string[] }
+  | { readonly ok: true; readonly command: string; readonly lines: readonly string[]; readonly id?: string; readonly value?: unknown }
   | { readonly ok: false; readonly command: string; readonly error: string; readonly lines: readonly string[] };
-
 export function processFromCommands(commands: readonly string[]): RhoProcess {
-  return {
-    kind: "sequence",
-    steps: commands.map((command): RhoCommandNode => ({ kind: "command", command })),
-  };
+  return { kind: "sequence", steps: commands.map((command): RhoCommandNode => ({ kind: "command", command })) };
 }
-
-/**
- * Execute the current IR in deterministic source order. Errors are isolated per
- * command to preserve the legacy dispatcher behavior (later commands continue).
- */
-export function executeRhoProcess(
-  process: RhoProcessNode,
-  executeCommand: (command: string) => readonly string[],
-): RhoCommandResult[] {
+function resolveBindings(command: string, bindings: Map<string, string>, lastId?: string): string {
+  return command.replace(/\$([A-Za-z_][A-Za-z0-9_-]*)/g, (match, name: string) => {
+    if (name === "LAST_ID") return lastId ?? match;
+    return bindings.get(name) ?? match;
+  });
+}
+/** Executes deterministically; structured IDs are only bound from the executor's returned result. */
+export function executeRhoProcess(process: RhoProcessNode, executeCommand: (command: string) => readonly string[] | RhoCommandExecution): RhoCommandResult[] {
   const results: RhoCommandResult[] = [];
+  const bindings = new Map<string, string>();
+  let lastId: string | undefined;
   const visit = (node: RhoProcessNode): void => {
-    if (node.kind === "sequence") {
-      for (const step of node.steps) visit(step);
-      return;
-    }
+    if (node.kind === "sequence") { for (const step of node.steps) visit(step); return; }
+    const resolved = resolveBindings(node.command, bindings, lastId);
     try {
-      results.push({ ok: true, command: node.command, lines: executeCommand(node.command) });
+      const raw = executeCommand(resolved);
+      const execution: RhoCommandExecution = Array.isArray(raw) ? { lines: raw } : raw as RhoCommandExecution;
+      const result: RhoCommandResult = { ok: true, command: resolved, lines: execution.lines, ...(execution.id ? { id: execution.id } : {}), ...(execution.value !== undefined ? { value: execution.value } : {}) };
+      results.push(result);
+      if (execution.id) { lastId = execution.id; if (node.bind) bindings.set(node.bind, execution.id); }
     } catch (error) {
-      results.push({
-        ok: false,
-        command: node.command,
-        error: error instanceof Error ? error.message : String(error),
-        lines: [],
-      });
+      results.push({ ok: false, command: resolved, error: error instanceof Error ? error.message : String(error), lines: [] });
     }
   };
   visit(process);

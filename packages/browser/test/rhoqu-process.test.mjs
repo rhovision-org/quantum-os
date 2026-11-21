@@ -34,5 +34,22 @@ const isolated = executeRhoProcess(p, c => { if (c === "/poll add B") throw new 
 ok("command failure becomes a structured error", isolated[1]?.ok === false && isolated[1]?.error === "synthetic failure");
 ok("later commands still execute after failure", isolated[2]?.ok === true);
 ok("failed command has no fabricated output", isolated[1]?.lines.length === 0);
+const bindingProcess = { kind: "sequence", steps: [
+  { kind: "command", command: "/poll new bound", bind: "pollId" },
+  { kind: "command", command: "/poll add $pollId" },
+  { kind: "command", command: "/poll status $LAST_ID" },
+] };
+const boundCommands = [];
+const boundResults = executeRhoProcess(bindingProcess, command => {
+  boundCommands.push(command);
+  if (command === "/poll new bound") return { lines: ["created"], id: "poll-real-7f3a" };
+  return ["ran:" + command];
+});
+ok("binding captures actual structured ID", boundResults[0]?.ok && boundResults[0].id === "poll-real-7f3a");
+ok("named binding resolves in following command", boundCommands[1] === "/poll add poll-real-7f3a");
+ok("LAST_ID resolves to actual ID, not guessed text", boundCommands[2] === "/poll status poll-real-7f3a");
+const missingIdCommands = [];
+executeRhoProcess(bindingProcess, command => { missingIdCommands.push(command); return ["created but no structured ID"]; });
+ok("missing ID never fabricates a binding", missingIdCommands[1] === "/poll add $pollId" && missingIdCommands[2] === "/poll status $LAST_ID");
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-process.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
