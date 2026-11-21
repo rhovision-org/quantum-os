@@ -2933,7 +2933,7 @@ function runRholangProgram(mode: "eval" | "deploy", source: string): void {
 
     if (!cfg.key) { say("✗ no deploy key — /rholang key generate, or /rholang key <hex>"); return; }
     const okToDeploy = await confirmDialog("Review source — sign and deploy?",
-      \`Target: \${cfg.url}\\nPhlo limit: \${cfg.phloLimit} × price \${cfg.phloPrice}, shard \${cfg.shard}\\n\\nExpanded source (this exact source will be signed):\\n\\n\${source}\`,
+      `Target: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\nExpanded source (this exact source will be signed):\n\n${source}`,
       "Approve · sign & deploy");
     if (!okToDeploy) { say("cancelled — nothing deployed"); return; }
     say("signing and deploying to " + cfg.url + "…");
