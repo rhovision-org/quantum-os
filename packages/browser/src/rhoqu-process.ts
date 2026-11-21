@@ -116,14 +116,14 @@ export async function executeRhoProcessAsync(
 export async function executeRhoProcessWithStoreBindingsAsync(
   process: RhoProcessNode,
   executeCommand: (command: string) => Promise<readonly string[] | RhoCommandExecution> | readonly string[] | RhoCommandExecution,
-  getIdsForCommand: (command: string) => readonly string[],
+  getIdsForCommand: (command: string) => readonly string[] | Promise<readonly string[]>,
   options: RhoProcessExecutionOptions = {},
 ): Promise<RhoCommandResult[]> {
   return executeRhoProcessAsync(process, async command => {
-    const before = new Set(getIdsForCommand(command));
+    const before = new Set(await getIdsForCommand(command));
     const raw = await executeCommand(command);
     const execution: RhoCommandExecution = Array.isArray(raw) ? { lines: raw } : raw as RhoCommandExecution;
-    const created = getIdsForCommand(command).filter(id => !before.has(id));
+    const created = (await getIdsForCommand(command)).filter(id => !before.has(id));
     return created.length === 1 ? { ...execution, id: created[0] } : raw;
   }, options);
 }

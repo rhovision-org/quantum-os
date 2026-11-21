@@ -6315,7 +6315,10 @@ function handleCommand(raw: string): string[] {
         if (/^\/lemma\b/i.test(command)) return [...lemmaStore.keys()];
         if (/^\/note\s+(?:grant|merge)\b/i.test(command)) return [...noteStore.keys()];
         if (/^\/rdv\s+swap\b/i.test(command)) return [...proposals.keys()];
-        if (/^\/qos\s+start\b/i.test(command)) return qosCommandFor(activeRoom)?.list().map((process) => process.id) ?? [];
+        if (/^\/qos\s+start\b/i.test(command)) {
+          await signQueue;
+          return qosCommandFor(activeRoom)?.list().map((process) => process.id) ?? [];
+        }
         return [];
       }, {
         evaluateWhen: (condition, env) => evaluateRhoQuRuntimeCondition(condition, env, runtimeSnapshot()),

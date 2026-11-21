@@ -150,5 +150,20 @@ const asyncBoundResults = await executeRhoProcessWithStoreBindingsAsync(asyncBin
   asyncBoundCommands.push(command); if (command === "/poll new async") asyncPollIds.add("async-poll-real-55"); return ["created"];
 }, command => command === "/poll new async" ? [...asyncPollIds] : []);
 ok("async store adapter captures actual ID", asyncBoundResults.length === 2 && asyncBoundResults.every(r => r.ok) && asyncBoundCommands[1] === "/poll status async-poll-real-55");
+let releaseQueuedCreation;
+const queuedCreation = new Promise(resolve => { releaseQueuedCreation = resolve; });
+const queuedIds = new Set(), queuedCommands = [];
+const queuedBindingProcess = transpileProcess("bind processId /qos start async; /qos status $processId;");
+let queuedIdLookupCount = 0;
+const queuedBindingResults = await executeRhoProcessWithStoreBindingsAsync(queuedBindingProcess, command => {
+  queuedCommands.push(command);
+  if (command === "/qos start async") { queuedIds.add("qos-process-real-81"); releaseQueuedCreation(); }
+  return [command];
+}, async command => {
+  queuedIdLookupCount++;
+  if (command === "/qos start async" && queuedIdLookupCount === 2) await queuedCreation;
+  return [...queuedIds];
+});
+ok("async ID lookup captures queued creation after completion", queuedBindingResults.length === 2 && queuedBindingResults.every(r => r.ok) && queuedCommands[1] === "/qos status qos-process-real-81");
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-process.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
