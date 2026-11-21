@@ -23,6 +23,8 @@ import {sha256} from "@noble/hashes/sha2.js";
 import {SHELL_OPS,SHELL_MAX_JOBS,CONFIG_COMMANDS,boundedText,newShellContext,parsePipeline,stageResult,shellVariable,shellPath,type ShellOp,type ShellContext,type ShellJob} from "./qos-shell.js";
 const shellHash=(text:string)=>Array.from(sha256(new TextEncoder().encode(text)),b=>b.toString(16).padStart(2,"0")).join("");
 
+import {IDENTITY_OPS,PROXY_ACTIONS,MAX_PROXIES,isUid,isProxyToken,type IdentityOp,type AuthorityProxy} from "./qos-identity.js";
+
 export const QOS_ABI_VERSION = 0;
 
 export const QOS_RIGHTS = {
@@ -42,7 +44,7 @@ export const QOS_ALL_RIGHTS =
 
 export const QOS_SYSCALLS = [
   "getpid", "getppid", "spawn", "exit", "wait", "signal",
-  "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open", ...MEMORY_OPS, ...VFS_OPS, ...SHELL_OPS,
+  "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open", ...MEMORY_OPS, ...VFS_OPS, ...SHELL_OPS, ...IDENTITY_OPS,
   "read", "write", "stat", "mkdir", "unlink", "rename", "mount", "unmount",
   "send", "recv", "listen", "connect", "accept",
   "svc_register", "svc_lookup", "yield", "sleep", "sched_step", "sched_priority", "sched_wake", "log",
@@ -123,6 +125,137 @@ export class QosKernel {
   private scheduler = new QosScheduler();
   private memory = new QosMemoryGraph();
   private vfs = new QosVfs();
+  private proxies=new Map<string,AuthorityProxy>();
+  proxyVersion(token:string){return this.proxies.get(token)?.version;}
+  proxyState(){return [...this.proxies.values()].sort((a,b)=>a.token<b.token?-1:a.token>b.token?1:0).map(p=>({...p}));}
+  private proxyTarget(pid:string,handle:string,rights:number):QosResult<QosHandle>{
+    const p=this.processes.get(pid);
+    if(!p||p.state!=="running")return err("ENOENT","resource caretaker unavailable");
+    const h=this.handle(p,handle);if(!h.ok)return h;
+    const object=h.value.object;
+    const ownSignalRevoker=object==="proc:"+pid&&rights===QOS_RIGHTS.SIGNAL&&
+      (h.value.rights&(QOS_RIGHTS.SIGNAL|QOS_RIGHTS.REVOKE))===(QOS_RIGHTS.SIGNAL|QOS_RIGHTS.REVOKE);
+    if((!(h.value.rights&QOS_RIGHTS.GRANT)&&!ownSignalRevoker)||(rights&~h.value.rights)!==0)return err("EACCES","target lacks grant or requested rights");
+    const allowed=h.value.object.startsWith("fs:")?QOS_RIGHTS.READ|QOS_RIGHTS.WRITE:
+      h.value.object.startsWith("mem:")?QOS_RIGHTS.READ:h.value.object.startsWith("proc:")?QOS_RIGHTS.SIGNAL:0;
+    if(!rights||(rights&~allowed)!==0)return err("EACCES","unsupported proxy target or rights");
+    return h;
+  }
+  proxyObservation(pid:string,token:string){
+    const p=this.processes.get(pid),proxy=this.proxies.get(token);
+    if(!p||!proxy||p.owner!==proxy.holder)return null;
+    const owner=this.processes.get(proxy.ownerPid),h=owner?.handles.get(proxy.targetHandle);
+    const n=h?.object.startsWith("fs:")?this.vfs.get(h.object.slice(3)):null;
+    const target=h?.object.startsWith("proc:")?h.object.slice(5):null;
+    return {proxyVersion:proxy.version,caretakerVersion:this.processVersion(proxy.ownerPid)??null,
+      resourceVersion:this.handleVersion(proxy.ownerPid,proxy.targetHandle)??null,
+      baseRoot:n?.root??null,rootVersion:n?.version??null,targetProcessVersion:target?this.processVersion(target)??null:null};
+  }
+  proxyReadDescriptor(pid:string,token:string,path:string,version:string):QosResult<MemoryObject>{
+    const p=this.processes.get(pid),proxy=this.proxies.get(token);
+    if(!p||p.state!=="running"||!proxy||proxy.holder!==p.owner||!proxy.enabled||proxy.version!==version||!(proxy.rights&QOS_RIGHTS.READ))
+      return err("EACCES","proxy read not authorized");
+    const target=this.proxyTarget(proxy.ownerPid,proxy.targetHandle,proxy.rights);if(!target.ok)return target;
+    if(target.value.object.startsWith("mem:"))return this.memoryStat(proxy.ownerPid,target.value.id);
+    if(!target.value.object.startsWith("fs:"))return err("EACCES","not a byte resource");
+    const file=this.vfs.file(target.value.object.slice(3),path);if(!file.ok)return file;
+    const meta=this.memory.stat(file.value);
+    return meta?ok(meta):err("ENOENT","file metadata absent");
+  }
+  recordIdentity(op:QosCanonicalSyscallRequest["op"],outcome:QosResult<unknown>,eventHash:string){
+    if(!outcome.ok)return;
+    if(op==="proxy_create"||op==="proxy_set"){
+      const p=this.proxies.get((outcome.value as {token:string}).token);if(p)p.version=eventHash;
+    }
+  }
+  executeIdentity(pid:string,op:IdentityOp,args:Record<string,unknown>,allocation?:string):QosResult<unknown>{
+    const p=this.processes.get(pid);
+    if(!p||p.state!=="running")return err("ENOENT","caller is not running");
+    if(op==="id_info")return ok({uid:p.owner,pid,trust:"dyncap-tofu-continuity",superuser:false});
+    if(op==="id_groups")return ok({verifiedGroups:[],status:"group quorum contract unavailable (#103)"});
+    if(op==="group_action")return err("ENOTSUP","group actions require verified #103 membership snapshot and quorum");
+    if(op==="id_cap")return ok([...p.handles.values()].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0).map(h=>this.handleInfo(h)));
+    if(op==="id_chmod"||op==="id_chown"){
+      const h=this.handle(p,args.handle as string);if(!h.ok)return h;
+      if(h.value.id===p.root||h.value.object==="room")return err("EACCES","process root is not transferable or chmod-able");
+      if(!(h.value.rights&QOS_RIGHTS.REVOKE))return err("EACCES","handle requires REVOKE");
+      if(op==="id_chmod"){
+        const rights=args.rights as number;
+        if(!validRights(rights)||(rights&~h.value.rights)!==0)return err("EACCES","cannot widen rights");
+        const affected=new Set([h.value.id]);
+        let changed=true;while(changed){changed=false;for(const [id,parent] of this.lineage)if(parent&&affected.has(parent)&&!affected.has(id)){affected.add(id);changed=true;}}
+        for(const proc of this.processes.values())for(const [id,child] of proc.handles)if(affected.has(id)){
+          const narrowed=child.rights&rights;
+          proc.handles.set(id,{...child,rights:narrowed,revoked:child.revoked||narrowed===0});
+        }
+        return ok(this.handleInfo(p.handles.get(h.value.id)!));
+      }
+      const target=this.processes.get(args.target as string);
+      if(!target||target.state!=="running")return err("ENOENT","recipient unavailable");
+      if(target.pid===pid||!(h.value.rights&QOS_RIGHTS.GRANT)||!["fs:","mem:"].some(prefix=>h.value.object.startsWith(prefix)))return err("EACCES","transfer requires a grantable non-root resource handle");
+      // Move exactly this handle (not object ownership or existing grants).
+      // The ancestry remains intact; the former holder loses the handle.
+      p.handles.delete(h.value.id);target.handles.set(h.value.id,h.value);
+      return ok({handle:this.handleInfo(h.value),uid:target.owner,pid:target.pid});
+    }
+    if(op==="proxy_create"){
+      if(!allocation||this.proxies.size>=MAX_PROXIES)return err("EINVAL","proxy quota or allocation");
+      const rights=args.rights as number,holder=args.holder;
+      if(!isUid(holder)||!validRights(rights))return err("EINVAL","invalid proxy holder or mask");
+      const target=this.proxyTarget(pid,args.handle as string,rights);if(!target.ok)return target;
+      const token="proxy:"+allocation;
+      if(this.proxies.has(token))return err("EINVAL","proxy already allocated");
+      this.proxies.set(token,{token,owner:p.owner,ownerPid:pid,targetHandle:target.value.id,holder,rights,ceiling:rights,enabled:true,version:""});
+      // The holder receives only this indirection, never a raw target handle.
+      return ok({token,holder,rights});
+    }
+    const token=args.token as string,proxy=this.proxies.get(token);
+    if(!proxy)return err("ENOENT","proxy gone");
+    if(proxy.version!==args.proxyVersion)return err("EAGAIN","proxy version changed");
+    if(op==="proxy_set"){
+      if(proxy.owner!==p.owner||proxy.ownerPid!==pid)return err("EACCES","only proxy caretaker can change proxy");
+      const rights=args.rights as number;
+      if(!validRights(rights)||(rights&~proxy.rights)!==0)return err("EACCES","proxy rights can only narrow");
+      if(args.enabled===true){
+        const target=this.proxyTarget(pid,args.handle as string,rights);if(!target.ok)return target;
+      }
+      if(args.enabled===true)proxy.targetHandle=args.handle as string;
+      proxy.rights=rights;proxy.enabled=args.enabled as boolean;
+      return ok({token,enabled:proxy.enabled,rights});
+    }
+    if(op!=="proxy_use")return err("EINVAL","unsupported identity operation");
+    if(p.owner!==proxy.holder)return err("EACCES","proxy holder UID mismatch");
+    if(!proxy.enabled)return err("EACCES","proxy revoked");
+    const observation=this.proxyObservation(pid,token);
+    if(!observation||Object.entries(observation).some(([key,value])=>args[key]!==value))return err("EAGAIN","resource observation changed");
+    const target=this.proxyTarget(proxy.ownerPid,proxy.targetHandle,proxy.rights);if(!target.ok)return target;
+    const action=args.action;
+    if(action==="read")return this.proxyReadDescriptor(pid,token,args.path as string,proxy.version);
+    if(action==="signal"){
+      if(!(proxy.rights&QOS_RIGHTS.SIGNAL)||!target.value.object.startsWith("proc:"))return err("EACCES","proxy lacks SIGNAL");
+      // Resource-side forwarding, not a copied handle. Never delegate KILL.
+      if(args.signal==="SIGKILL")return err("EACCES","SIGKILL not forwarded by proxy");
+      return this.signal(proxy.ownerPid,target.value.object.slice(5),args.signal as QosSignal,target.value.id);
+    }
+    if(target.value.object.startsWith("mem:")){
+      if(action!=="stat"||!(proxy.rights&QOS_RIGHTS.READ))return err("EACCES","memory proxy supports metadata read only");
+      return this.memoryStat(proxy.ownerPid,target.value.id);
+    }
+    if(!target.value.object.startsWith("fs:")||!(proxy.rights&QOS_RIGHTS.READ))return err("EACCES","namespace READ required");
+    const namespace=target.value.object.slice(3),n=this.vfs.get(namespace);
+    if(!n)return err("ENOENT","namespace absent");
+    if(action==="stat"||action==="ls")return this.vfs.inspect(namespace,args.path as string,action==="ls");
+    if(!(proxy.rights&QOS_RIGHTS.WRITE))return err("EACCES","proxy lacks WRITE");
+    const vop=action==="mkdir"?"fs_mkdir":action==="unlink"?"fs_unlink":action==="put"?"fs_put":null;
+    if(!vop)return err("EINVAL","unsupported proxy action");
+    let id:string|undefined;
+    if(action==="put"){
+      const data=this.memoryStat(pid,args.dataHandle as string);
+      if(!data.ok)return data;id=data.value.id;
+    }
+    const changed=this.vfs.mutate(namespace,n.root,n.version,vop,args.path as string,id);
+    return changed.ok?ok({namespace,root:changed.value.root}):changed;
+  }
   private shellContexts=new Map<string,ShellContext>();
   private shellJobs=new Map<string,ShellJob>();
   shellContext(pid:string):ShellContext {
@@ -301,8 +434,8 @@ export class QosKernel {
   }
   recordVfs(op:QosCanonicalSyscallRequest["op"],outcome:QosResult<unknown>,eventHash:string){
     if(!outcome.ok)return;
-    if(op==="sh_finish"){
-      const namespace=(outcome.value as {namespace:string|null}).namespace;
+    if(op==="sh_finish"||op==="proxy_use"){
+      const namespace=(outcome.value as {namespace?:string|null})?.namespace;
       if(namespace)this.vfs.stamp(namespace,eventHash);
       return;
     }
@@ -463,19 +596,19 @@ export class QosKernel {
     return version?.pid === pid ? version.hash : undefined;
   }
 
-  snapshotLiveHandles(): Map<string, { pid: string; revoked: boolean }> {
-    const out = new Map<string, { pid: string; revoked: boolean }>();
+  snapshotLiveHandles(): Map<string, { pid: string; revoked: boolean; rights:number }> {
+    const out = new Map<string, { pid: string; revoked: boolean; rights:number }>();
     for (const p of this.processes.values()) for (const h of p.handles.values())
-      out.set(h.id, { pid: p.pid, revoked: h.revoked });
+      out.set(h.id, { pid: p.pid, revoked: h.revoked, rights:h.rights });
     return out;
   }
 
   /** Stamp creations, closures and revocations only after verified replay. */
-  recordHandleVersions(before: Map<string, { pid: string; revoked: boolean }>, eventHash: string): void {
+  recordHandleVersions(before: Map<string, { pid: string; revoked: boolean; rights:number }>, eventHash: string): void {
     const after = this.snapshotLiveHandles();
     for (const [id, current] of after) {
       const prior = before.get(id);
-      if (!prior || prior.pid !== current.pid || prior.revoked !== current.revoked)
+      if (!prior || prior.pid !== current.pid || prior.revoked !== current.revoked || prior.rights!==current.rights)
         this.versions.set(id, { pid: current.pid, hash: eventHash });
     }
     for (const [id, prior] of before) if (!after.has(id))
@@ -593,7 +726,7 @@ export class QosKernel {
     const target = caller.handles.get(handleId);
     if (!target) return err("EBADF", "unknown handle");
     if (target.revoked) return err("EACCES", "handle is revoked");
-    if (!(target.rights & QOS_RIGHTS.REVOKE) && !(target.rights & QOS_RIGHTS.ADMIN)) {
+    if (!(target.rights & QOS_RIGHTS.REVOKE)) {
       return err("EACCES", "handle lacks REVOKE");
     }
 
@@ -745,6 +878,7 @@ export class QosKernel {
     copy.scheduler = this.scheduler.clone();
     copy.memory = this.memory.clone();
     copy.vfs = this.vfs.clone();
+    copy.proxies=new Map([...this.proxies].map(([id,p])=>[id,{...p}]));
     copy.shellContexts=new Map([...this.shellContexts].map(([pid,c])=>[pid,{...c,env:{...c.env}}]));
     copy.shellJobs=new Map([...this.shellJobs].map(([pid,j])=>[pid,JSON.parse(JSON.stringify(j)) as ShellJob]));
     copy.nextPid = this.nextPid;
@@ -769,6 +903,7 @@ export class QosKernel {
       scheduler: this.scheduler.state(),
       memory: this.memoryView(),
       vfs: this.fsState(),
+      proxies:this.proxyState(),
       shellContexts:[...this.shellContexts.entries()].sort(([a],[b])=>a<b?-1:a>b?1:0),
       shellJobs:[...this.shellJobs.values()].sort((a,b)=>a.pid<b.pid?-1:a.pid>b.pid?1:0),
       nextPid: this.nextPid,
@@ -842,7 +977,7 @@ export class QosKernel {
 export type QosCanonicalSyscallRequest = {
   schema: "qos.syscall/1";
   caller: string;
-  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp | MemoryOp | VfsOp | ShellOp;
+  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp | MemoryOp | VfsOp | ShellOp | IdentityOp;
   args: Record<string, unknown>;
 };
 export type QosCanonicalSyscallTrace = {
@@ -959,6 +1094,37 @@ function parseSyscallRequest(payload: Record<string, unknown>, pid: string): Qos
         !args.memoryFrontier.every((v,i,a)=>isObjectId(v)&&(i===0||a[i-1]<v))))return null;
       break;
     }
+    case "id_info":case "id_groups":case "id_cap":case "group_action":
+      if(!exactKeys(args,[]))return null;break;
+    case "id_chmod":case "id_chown":case "proxy_create":case "proxy_set":{
+      const disabled=payload.op==="proxy_set"&&!!args&&typeof args==="object"&&(args as Record<string,unknown>).enabled===false;
+      const keys=disabled?[]:["handle","handleVersion"];
+      if(payload.op==="id_chmod")keys.push("rights");
+      if(payload.op==="id_chown")keys.push("target","targetVersion");
+      if(payload.op==="proxy_create")keys.push("rights","holder");
+      if(payload.op==="proxy_set")keys.push("rights","token","proxyVersion","enabled");
+      if(!exactKeys(args,keys)||(!disabled&&(typeof args.handle!=="string"||args.handle.length>256||!isObjectId(args.handleVersion))))return null;
+      if(keys.includes("rights")&&(typeof args.rights!=="number"||!validRights(args.rights)))return null;
+      if(payload.op==="id_chown"&&(typeof args.target!=="string"||args.target.length>256||!isObjectId(args.targetVersion)))return null;
+      if(payload.op==="proxy_create"&&!isUid(args.holder))return null;
+      if(payload.op==="proxy_set"&&(!isProxyToken(args.token)||!isObjectId(args.proxyVersion)||typeof args.enabled!=="boolean"))return null;
+      break;
+    }
+    case "proxy_use":{
+      const keys=["token","action","proxyVersion","caretakerVersion","resourceVersion","baseRoot","rootVersion","targetProcessVersion"];
+      if(!args||typeof args!=="object"||Array.isArray(args))return null;
+      const a=args as Record<string,unknown>;
+      if(a.action==="signal")keys.push("signal");
+      else keys.push("path");
+      if(a.action==="put")keys.push("dataHandle","dataVersion");
+      if(!exactKeys(args,keys)||!isProxyToken(args.token)||!PROXY_ACTIONS.includes(args.action as typeof PROXY_ACTIONS[number])||!isObjectId(args.proxyVersion))return null;
+      for(const key of ["caretakerVersion","resourceVersion","baseRoot","rootVersion","targetProcessVersion"])
+        if(args[key]!==null&&!isObjectId(args[key]))return null;
+      if(keys.includes("path")&&(typeof args.path!=="string"||args.path.length>1024))return null;
+      if(keys.includes("signal")&&!QOS_SIGNALS.includes(args.signal as QosSignal))return null;
+      if(keys.includes("dataHandle")&&(typeof args.dataHandle!=="string"||args.dataHandle.length>256||!isObjectId(args.dataVersion)))return null;
+      break;
+    }
     default: return null;
   }
   return payload as QosCanonicalSyscallRequest;
@@ -979,6 +1145,8 @@ function executeCanonicalSyscall(kernel: QosKernel, request: QosCanonicalSyscall
       return kernel.executeVfs(pid,request.op,request.args,requestHash);
     case "sh_config": case "sh_spawn": case "sh_control": case "sh_step": case "sh_finish": case "sh_wait":
       return kernel.executeShell(pid,request.op,request.args,requestHash);
+    case "id_info":case "id_groups":case "id_cap":case "id_chmod":case "id_chown":case "proxy_create":case "proxy_set":case "proxy_use":case "group_action":
+      return kernel.executeIdentity(pid,request.op,request.args,requestHash);
     case "getpid": return kernel.getpid(pid);
     case "getppid": return kernel.getppid(pid);
     case "cap_derive": return kernel.capDerive(pid, request.args.handle as string, request.args.rights as number, requestHash === undefined ? undefined : `h:request:${requestHash}`);
@@ -1017,6 +1185,14 @@ function syscallVersionsMatch(kernel: QosKernel, request: QosCanonicalSyscallReq
       if(!job||job.pid!==args.target||job.version!==args.jobVersion||args.targetVersion!==kernel.processVersion(job.pid))return false;
       if(request.op==="sh_finish"&&canonicalJson(args.memoryFrontier)!==canonicalJson(kernel.memoryFrontier()))return false;
     }
+  }
+  if(request.op==="id_chown")return args.targetVersion===kernel.processVersion(args.target as string);
+  if(request.op==="proxy_set")return args.proxyVersion===kernel.proxyVersion(args.token as string);
+  if(request.op==="proxy_use"){
+    if(args.proxyVersion!==kernel.proxyVersion(args.token as string))return false;
+    const observed=kernel.proxyObservation(pid,args.token as string);
+    if(observed&&Object.entries(observed).some(([k,v])=>args[k]!==v))return false;
+    if(typeof args.dataHandle==="string"&&args.dataVersion!==kernel.handleVersion(pid,args.dataHandle))return false;
   }
   if (request.op === "signal" || request.op === "signal_grant")
     return args.targetVersion === kernel.processVersion(args.target as string);
@@ -1149,7 +1325,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         rejectSyscall(event, VFS_OPS.includes(pending.request.op as VfsOp)&&!outcome.ok&&outcome.errno==="EAGAIN"?"VFS conflict: "+outcome.detail:"syscall outcome differs from deterministic execution"); continue;
       }
       // Refusals are traceable but cannot publish speculative mutation.
-      if (outcome.ok) { trial.recordVfs(pending.request.op,outcome,event.hash); trial.recordShell(event.process,pending.request.op,outcome,event.hash); trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); trial.recordMemory(beforeMemory,event.hash,MEMORY_OPS.includes(pending.request.op as MemoryOp)?pending.request.op as MemoryOp:pending.request.op==="sh_finish"&&(outcome.value as {namespace?:string}).namespace?"mem_put":undefined); kernel = trial; }
+      if (outcome.ok) { trial.recordVfs(pending.request.op,outcome,event.hash); trial.recordShell(event.process,pending.request.op,outcome,event.hash); trial.recordIdentity(pending.request.op,outcome,event.hash); trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); trial.recordMemory(beforeMemory,event.hash,MEMORY_OPS.includes(pending.request.op as MemoryOp)?pending.request.op as MemoryOp:pending.request.op==="sh_finish"&&(outcome.value as {namespace?:string}).namespace?"mem_put":undefined); kernel = trial; }
       consumed.add(requestHash);
       syscalls.push({ requestHash, resultHash: event.hash, caller: event.process, op: pending.request.op,
                       args: { ...pending.request.args }, outcome, position });

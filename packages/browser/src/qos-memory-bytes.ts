@@ -107,6 +107,31 @@ export class QosMemoryBytes {
       return final.ok&&final.value.id===d.id&&final.value.size===d.size?Uint8Array.from(data):null;
     });
   }
+  /** A mediated proxy read: no raw resource handle or target bytes are
+   * handed over as a reusable capability. Recheck the same observation
+   * at the resource boundary after every asynchronous availability read. */
+  getProxy(current:()=>QosKernel,pid:string,token:string,path:string,version:string,expectedId:string):Promise<Uint8Array|null>{
+    return this.run(async()=>{
+      const before=current(),observation=before.proxyObservation(pid,token);
+      const auth=before.proxyReadDescriptor(pid,token,path,version);
+      if(!observation||!auth.ok||auth.value.id!==expectedId)return null;
+      const d=auth.value;
+      const stillAuthorized=()=>{
+        const k=current(),after=k.proxyReadDescriptor(pid,token,path,version);
+        return after.ok&&after.value.id===d.id&&after.value.size===d.size&&
+          JSON.stringify(k.proxyObservation(pid,token))===JSON.stringify(observation);
+      };
+      let data=await verified(await this.cache.get(d.id).catch(()=>null),d);
+      if(!data)for(const locator of d.locators){
+        if(!stillAuthorized())return null;
+        const backend=this.backends.find(b=>b.network===locator.network);if(!backend)continue;
+        try{data=await verified(await backend.read(locator),d);if(data)break;}catch{/* unavailable */}
+      }
+      if(!data||!stillAuthorized())return null;
+      await this.cache.put(d.id,data).catch(()=>{});
+      return stillAuthorized()?Uint8Array.from(data):null;
+    });
+  }
   /** Deterministic candidates from local reachability + explicit pins only.
    * Never send deletion to a durable backend. Unknown cache files are retained
    * unless explicitly abandoned by the application; no global GC claim. */
