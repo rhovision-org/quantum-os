@@ -30,10 +30,12 @@ let a=make("a",ia),b=make("b",ib);
 const replay=c=>replayQosKernel(c.room.log.events(),c.room.log.forkedSources);
 const k=c=>replay(c).kernel;
 const sync=async(src,dst)=>{for(const e of src.room.log.checkpointEvents())await dst.ingest("peer",e);};
+const allowedStale=new Set();
 const run=async(c,line)=>{
  const before=new Set(replay(c).syscalls.map(t=>t.resultHash));
  await c.handle(line);
- assert.equal(replay(c).rejected.length,0,"unexpected rejected events: "+JSON.stringify(replay(c).rejected)+" "+lines.a.slice(-4).join("\n"));
+ const unexpected=replay(c).rejected.filter(r=>!allowedStale.has(r.hash));
+ assert.equal(unexpected.length,0,"unexpected rejected events: "+JSON.stringify(unexpected)+" "+lines.a.slice(-4).join("\n"));
  return replay(c).syscalls.filter(t=>!before.has(t.resultHash));
 };
 const result=(ts,op)=>{const t=ts.find(t=>t.op===op);assert.ok(t,op+" receipt missing: "+lines.a.slice(-5).join("\n"));return t.outcome;};
@@ -82,11 +84,22 @@ const cf=success(await run(a,"fg "+conflicted.handle.id),"sh_finish");
 check("stale output root produces nonzero status and no namespace mutation",cf.exitCode===11&&cf.detail==="redirection root conflict"&&JSON.stringify(k(a).fsVersion(pid,ns))===JSON.stringify(rootBefore));
 const victim=success(await run(a,"spawn echo killed"),"sh_spawn");
 await sync(a,b);
-const foreign=result(await run(b,"syscall bob | signal | "+JSON.stringify({handle:k(b).getProcess(bid).root,target:victim.pid,signal:"SIGTERM"})),"signal");
+const foreignTrace=(await run(b,"syscall bob | signal | "+JSON.stringify({handle:k(b).getProcess(bid).root,target:victim.pid,signal:"SIGTERM"}))).find(t=>t.op==="signal");
+assert.ok(foreignTrace);
+const foreign=foreignTrace.outcome;
 check("foreign process cannot signal a job without its SIGNAL handle",!foreign.ok&&foreign.errno==="EACCES"&&k(b).getProcess(victim.pid).state==="suspended");
 await sync(b,a);
+// A refusal mutates no version; a later owner kill need not causally depend
+// on it. If canonical order places the kill first, only the foreign request
+// and its result become stale. Preserve these exact diagnostics, never
+// forgive unrelated rejection or permit unauthorized mutation.
+allowedStale.add(foreignTrace.requestHash);allowedStale.add(foreignTrace.resultHash);
 await run(a,"kill "+victim.handle.id);
 check("owner kills via explicit job SIGNAL capability",k(a).getProcess(victim.pid).exitCode===-15);
+const stale=replay(a).rejected;
+check("concurrent foreign refusal cannot block authorized kill",
+ stale.length===0?replay(a).syscalls.some(t=>t.resultHash===foreignTrace.resultHash&&!t.outcome.ok&&t.outcome.errno==="EACCES"):
+ stale.length===2&&stale.every(r=>allowedStale.has(r.hash))&&stale.some(r=>r.hash===foreignTrace.requestHash&&/stale|version/.test(r.reason)));
 const waitKilled=success(await run(a,"wait "+victim.handle.id),"sh_wait");
 check("wait returns signal exit status",waitKilled.exitCode===-15);
 const orphan=success(await run(a,"spawn echo orphan"),"sh_spawn");
@@ -96,5 +109,5 @@ const events=a.room.log.checkpointEvents(),forward=new QosEventLog(roomId),rever
 for(const e of events)assert.ok((await forward.ingest(e)).ok);
 for(const e of [...events].reverse())assert.ok((await reverse.ingest(e)).ok);
 const f=replayQosKernel(forward.events(),forward.forkedSources),r=replayQosKernel(reverse.events(),reverse.forkedSources);
-check("reverse-delivery replay converges on child process table, shell and VFS digest",!f.rejected.length&&!r.rejected.length&&await f.kernel.stateDigest()===await r.kernel.stateDigest());
+check("reverse-delivery replay converges on child process table, shell and VFS digest",f.rejected.every(x=>allowedStale.has(x.hash))&&JSON.stringify(f.rejected)===JSON.stringify(r.rejected)&&await f.kernel.stateDigest()===await r.kernel.stateDigest());
 console.log("PASS: qos-shell.test.mjs — "+count+" checks");

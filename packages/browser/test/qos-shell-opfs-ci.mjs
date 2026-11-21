@@ -12,7 +12,8 @@ const expected="ALPHA  | BETA\ntail\n",id=createHash("sha256").update(expected).
 const scope=createHash("sha256").update(room).digest("hex");
 const browser=await chromium.launch({headless:true,args:["--no-sandbox","--disable-dev-shm-usage"]});
 const context=await browser.newContext({ignoreHTTPSErrors:true});
-let rpc=0,countRpc=false,stage="initialize";
+let rpc=0,countRpc=false,stage="initialize",activePage=null;
+const pageErrors=[];
 const checks=[];
 const check=(label,c)=>{assert.ok(c,label);checks.push(label);console.log("PASS: "+label);};
 await context.route("**/*",async route=>{
@@ -22,7 +23,7 @@ await context.route("**/*",async route=>{
  await route.continue();
 });
 async function open(){
- const page=await context.newPage();await page.goto(url,{waitUntil:"domcontentloaded",timeout:45000});
+ const page=await context.newPage();activePage=page;page.on("pageerror",e=>pageErrors.push(e.name+":"+e.message));await page.goto(url,{waitUntil:"domcontentloaded",timeout:45000});
  await page.waitForFunction(()=>document.querySelector("#my-id")?.textContent?.startsWith("cap:peer:")??false,null,{timeout:60000});
  if(!await page.locator("#status-dot").evaluate(n=>n.classList.contains("connected")))await page.locator("#connect-btn").click();
  await page.waitForFunction(()=>document.querySelector("#status-dot")?.classList.contains("connected")??false,null,{timeout:30000});
@@ -52,7 +53,8 @@ try{
  await command(page,"/fs mkdir workspace "+ns+" /docs","syscall fs_mkdir OK");
  await command(page,"/sh use workspace "+ns,"shell selected:");
  stage="pipeline";
- await command(page,"/sh set X='alpha  | beta'; cd /docs","cwd");
+ await command(page,"/sh set X='alpha  | beta'","syscall sh_config OK");
+ await command(page,"/sh cd /docs",'"cwd":"/docs"');
  await command(page,'/sh echo "$X" | upper > output.txt',"job exit 0 · redirected");
  await command(page,"/sh echo tail >> output.txt","job exit 0 · redirected");
  const stored=await hashInOpfs(page);
@@ -83,5 +85,12 @@ try{
  check("whole local shell witness issues zero chain RPC",rpc===0);
  await writeFile("qos281-opfs-evidence.json",JSON.stringify({schema:"qos.shell.browser-witness/1",commit:process.env.GITHUB_SHA,run_id:process.env.GITHUB_RUN_ID,
  content_id:id,chain_rpc_attempts:rpc,checks,verdict:"PASS",scope:"Actual browser UI, isolated signaling, cooperative shell, OPFS and fresh page replay"},null,2)+"\n");
-}catch(e){console.error("browser shell failed at "+stage+": "+e.name);throw e;}
+}catch(e){
+ console.error("browser shell failed at "+stage+": "+e.name);
+ // Transcript is from a throwaway CI-only room. Remove all capabilities
+ // and URLs, and keep diagnostics bounded. Never attach storage or keys.
+ const redact=s=>s.replace(/cap:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+/g,"[capability]").replace(/https?:[^\s]+/g,"[url]").slice(0,800);
+ if(activePage&&!activePage.isClosed())console.error("bounded transcript:",JSON.stringify((await activePage.locator("#messages .msg").allTextContents()).slice(-18).map(redact)));
+ console.error("page errors:",JSON.stringify(pageErrors.slice(-8).map(redact)));throw e;
+}
 finally{await context.close();await browser.close();}
