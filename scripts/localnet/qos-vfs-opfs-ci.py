@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import socket
+import sys
 import ssl
 import subprocess
 import time
@@ -12,6 +13,10 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[2]
 
 def main():
+    kind=sys.argv[1] if len(sys.argv)==2 else "vfs" if len(sys.argv)==1 else ""
+    if kind not in ("vfs","shell"):
+        raise SystemExit("expected vfs or shell")
+    issue=280 if kind=="vfs" else 281
     if os.environ.get("GITHUB_ACTIONS") != "true":
         raise SystemExit("CI-only")
     for port in (4444, 5173):
@@ -39,9 +44,9 @@ def main():
                 if time.monotonic()>until:
                     raise RuntimeError("disposable app readiness timed out")
                 time.sleep(1)
-            subprocess.run(["node","packages/browser/test/qos-vfs-opfs-ci.mjs"],cwd=ROOT,check=True,timeout=240)
-            evidence=ROOT/"qos280-opfs-evidence.json"
-            (ROOT/"qos280-opfs-evidence.SHA256SUMS").write_text(
+            subprocess.run(["node",f"packages/browser/test/qos-{kind}-opfs-ci.mjs"],cwd=ROOT,check=True,timeout=240)
+            evidence=ROOT/f"qos{issue}-opfs-evidence.json"
+            (ROOT/f"qos{issue}-opfs-evidence.SHA256SUMS").write_text(
                 hashlib.sha256(evidence.read_bytes()).hexdigest()+"  "+evidence.name+"\n")
     finally:
         for p in reversed(services):
