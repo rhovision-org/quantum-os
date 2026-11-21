@@ -21,14 +21,15 @@
 /// `transpile` remains source → string[] for legacy callers; `transpileProcess`
 /// retains bindings in structured command IR for live execution.
 
-import type { RhoFlatProcess, RhoCommandNode } from "./rhoqu-process.js";
+import type { RhoFlatProcess, RhoProcessNode, RhoCommandNode, RhoRuntimeExpr, RhoRuntimeWhenNode, RhoBinOp, RhoUnOp } from "./rhoqu-process.js";
+import { canonLemma } from "./lemma-parse.js";
 
 // ---------------------------------------------------------------------------
 // Tokens
 // ---------------------------------------------------------------------------
 
 type TokenKind =
-  | "process" | "new" | "in" | "parallel" | "if" | "else" | "and" | "or" | "not" | "on" | "bind"
+  | "process" | "new" | "in" | "parallel" | "if" | "when" | "else" | "and" | "or" | "not" | "on" | "bind"
   | "ident" | "number" | "string" | "command"
   | "lbrace" | "rbrace" | "lparen" | "rparen"
   | "semi" | "comma" | "eof" | "pipe"
@@ -42,7 +43,7 @@ class RhoQuError extends Error {
   }
 }
 
-const KEYWORDS = new Set(["process", "new", "in", "parallel", "if", "else", "and", "or", "not", "on", "bind"]);
+const KEYWORDS = new Set(["process", "new", "in", "parallel", "if", "when", "else", "and", "or", "not", "on", "bind"]);
 
 function tokenize(src: string): Token[] {
   const tokens: Token[] = [];
@@ -154,22 +155,14 @@ type Stmt =
   | { kind: "call"; name: string; args: string[] }
   | { kind: "cmd"; text: string; bind?: string }
   | { kind: "if"; cond: Expr; then: Stmt[]; else: Stmt[] }
+  | { kind: "when"; cond: Expr; then: Stmt[]; else: Stmt[] }
   | { kind: "on"; channel: string; binding: string; body: Stmt[] };
 
 // Expression AST. Evaluated against a RhoQuContext at transpile time;
 // the chosen branch's commands are emitted.
-type Expr =
-  | { kind: "num"; value: number }
-  | { kind: "str"; value: string }
-  | { kind: "var"; name: string }              // a bare identifier (looked up in env)
-  | { kind: "lemma"; name: string }            // @name — refers to lemma name string
-  | { kind: "call"; name: string; args: Expr[] }
-  | { kind: "binop"; op: BinOp; left: Expr; right: Expr }
-  | { kind: "unop"; op: UnOp; expr: Expr };
-
-type BinOp = "and" | "or" | "eq" | "ne" | "lt" | "le" | "gt" | "ge";
-type UnOp = "not";
-
+type Expr = RhoRuntimeExpr;
+type BinOp = RhoBinOp;
+type UnOp = RhoUnOp;
 interface ProcessDef { name: string; params: string[]; body: Stmt[] }
 
 interface Program { defs: Map<string, ProcessDef>; top: Stmt[] }
@@ -282,6 +275,7 @@ class Parser {
     if (t.kind === "new") return this.parseNew();
     if (t.kind === "parallel") return this.parseParallel();
     if (t.kind === "if") return this.parseIf();
+    if (t.kind === "when") return this.parseWhen();
     if (t.kind === "on") return this.parseOn();
     if (t.kind === "command") return this.parseCmd();
     if (t.kind === "bind") return this.parseBindCommand();
@@ -319,6 +313,25 @@ class Parser {
       }
     }
     return { kind: "if", cond, then: thenBody, else: elseBody };
+  }
+  /** Runtime conditional: predicate and both branches are retained in IR. */
+  private parseWhen(): Stmt {
+    this.expect("when");
+    const cond = this.parseExpr();
+    this.expect("lbrace");
+    const thenBody = this.parseStmtsUntil("rbrace");
+    this.expect("rbrace");
+    let elseBody: Stmt[] = [];
+    if (this.maybe("else")) {
+      if (this.peek().kind === "if") elseBody = [this.parseIf()];
+      else if (this.peek().kind === "when") elseBody = [this.parseWhen()];
+      else {
+        this.expect("lbrace");
+        elseBody = this.parseStmtsUntil("rbrace");
+        this.expect("rbrace");
+      }
+    }
+    return { kind: "when", cond, then: thenBody, else: elseBody };
   }
 
   // ---- expression grammar: disjunction → conjunction → unary → comparison →
@@ -481,18 +494,17 @@ function substitute(text: string, env: Map<string, string>): string {
 /// `ctx`, so the chosen branch's commands are what gets emitted.
 /// Throws RhoQuError on parse or expansion failure.
 export function transpileProcess(source: string, ctx?: RhoQuContext): RhoFlatProcess {
-  const tokens = tokenize(source);
-  const program = new Parser(tokens).parseProgram();
-  const out: string[] = [];
-  const bindings = new Map<number, string>();
-  const env = new Map<string, string>();
-  emitStmts(program.top, program, env, out, ctx, bindings);
-  return { kind: "sequence", steps: out.map((command, index): RhoCommandNode => ({
-    kind: "command", command, ...(bindings.has(index) ? { bind: bindings.get(index) } : {}),
-  })) };
+  const program = new Parser(tokenize(source)).parseProgram();
+  return { kind: "sequence", steps: lowerStmts(program.top, program, new Map(), ctx) };
 }
 export function transpile(source: string, ctx?: RhoQuContext): string[] {
-  return transpileProcess(source, ctx).steps.map(step => step.command);
+  const process = transpileProcess(source, ctx);
+  const flatten = (nodes: readonly RhoProcessNode[]): string[] => nodes.flatMap((node) => {
+    if (node.kind === "command") return [node.command];
+    if (node.kind === "sequence") return flatten(node.steps);
+    throw new RhoQuError("runtime when cannot be flattened by legacy transpile; use transpileProcess", 0, 0);
+  });
+  return flatten(process.steps);
 }
 function emitStmts(stmts: Stmt[], program: Program, env: Map<string, string>, out: string[], ctx?: RhoQuContext, bindings?: Map<number, string>): void {
   for (const s of stmts) emitStmt(s, program, env, out, ctx, bindings);
@@ -517,6 +529,9 @@ function emitStmt(s: Stmt, program: Program, env: Map<string, string>, out: stri
     const branch = truthy(v) ? s.then : s.else;
     emitStmts(branch, program, env, out, ctx, bindings);
     return;
+  }
+  if (s.kind === "when") {
+    throw new RhoQuError("runtime when requires transpileProcess and a runtime snapshot", 0, 0);
   }
   if (s.kind === "on") {
     // Register an inbound channel-msg handler. The handler captures the
@@ -563,6 +578,54 @@ function emitStmt(s: Stmt, program: Program, env: Map<string, string>, out: stri
     emitStmts(def.body, program, childEnv, out, ctx, bindings);
     return;
   }
+}
+
+/** Lower AST to typed IR. Compile-time if stays folded; when keeps both branches. */
+function lowerStmts(stmts: Stmt[], program: Program, env: Map<string, string>, ctx?: RhoQuContext): RhoProcessNode[] {
+  const out: RhoProcessNode[] = [];
+  for (const s of stmts) {
+    if (s.kind === "new") { for (const name of s.names) out.push({ kind: "command", command: "/grant " + name }); continue; }
+    if (s.kind === "parallel") { out.push(...lowerStmts(s.body, program, env, ctx)); continue; }
+    if (s.kind === "cmd") { out.push({ kind: "command", command: substitute(s.text, env), ...(s.bind ? { bind: s.bind } : {}) }); continue; }
+    if (s.kind === "if") { out.push(...lowerStmts(truthy(evalExpr(s.cond, env, ctx)) ? s.then : s.else, program, env, ctx)); continue; }
+    if (s.kind === "when") {
+      const node: RhoRuntimeWhenNode = {
+        kind: "when", condition: s.cond, env: Object.fromEntries(env),
+        then: { kind: "sequence", steps: lowerStmts(s.then, program, env, ctx) },
+        ...(s.else.length ? { else: { kind: "sequence", steps: lowerStmts(s.else, program, env, ctx) } } : {}),
+      };
+      out.push(node); continue;
+    }
+    if (s.kind === "on") {
+      if (containsRuntimeWhen(s.body)) throw new RhoQuError("runtime when inside on-handler is unsupported; move it to the enclosing process", 0, 0);
+      if (!ctx?.registerOnHandler) continue;
+      const capturedEnv = new Map(env);
+      const handler: OnHandler = {
+        channel: s.channel, binding: s.binding,
+        trigger(payload: string): string[] {
+          const childEnv = new Map(capturedEnv); childEnv.set(s.binding, payload);
+          const cmds: string[] = []; emitStmts(s.body, program, childEnv, cmds, ctx); return cmds;
+        },
+      };
+      ctx.registerOnHandler(handler); continue;
+    }
+    if (s.kind === "call") {
+      const def = program.defs.get(s.name);
+      if (!def) throw new RhoQuError("unknown process '" + s.name + "'", 0, 0);
+      if (def.params.length !== s.args.length) throw new RhoQuError("process '" + s.name + "' takes " + def.params.length + " args, got " + s.args.length, 0, 0);
+      const childEnv = new Map(env);
+      for (let k = 0; k < def.params.length; k++) {
+        const argVal = substitute(s.args[k], env);
+        const stripped = ((argVal.startsWith('"') && argVal.endsWith('"')) || (argVal.startsWith("'") && argVal.endsWith("'"))) ? argVal.slice(1, -1) : argVal;
+        childEnv.set(def.params[k], stripped);
+      }
+      out.push(...lowerStmts(def.body, program, childEnv, ctx));
+    }
+  }
+  return out;
+}
+function containsRuntimeWhen(stmts: Stmt[]): boolean {
+  return stmts.some((s) => s.kind === "when" || (s.kind === "parallel" && containsRuntimeWhen(s.body)) || (s.kind === "if" && (containsRuntimeWhen(s.then) || containsRuntimeWhen(s.else))) || (s.kind === "on" && containsRuntimeWhen(s.body)));
 }
 
 // ---------------------------------------------------------------------------
@@ -649,4 +712,24 @@ function callBuiltin(name: string, args: Value[], ctx?: RhoQuContext): Value {
   }
 }
 
+export type RhoQuRuntimeSnapshot = {
+  readonly lemmaNames: readonly string[];
+  readonly balances: Readonly<Record<string, number>>;
+  readonly declaredCurrencies: readonly string[];
+  readonly peerCount: number;
+  readonly connected: boolean;
+  readonly currentSeq: number;
+};
+/** Evaluate a predicate against one immutable snapshot taken when the branch is reached. */
+export function evaluateRhoQuRuntimeCondition(expression: RhoRuntimeExpr, env: Readonly<Record<string, string>>, snapshot: RhoQuRuntimeSnapshot): boolean {
+  const ctx: RhoQuContext = {
+    hasLemma: (name) => snapshot.lemmaNames.includes(canonLemma(name)),
+    balance: (currency) => snapshot.balances[currency] ?? 0,
+    isCurrencyDeclared: (currency) => snapshot.declaredCurrencies.includes(currency),
+    peerCount: () => snapshot.peerCount,
+    isConnected: () => snapshot.connected,
+    myCurrentSeq: () => snapshot.currentSeq,
+  };
+  return truthy(evalExpr(expression, new Map(Object.entries(env)), ctx));
+}
 export { RhoQuError };

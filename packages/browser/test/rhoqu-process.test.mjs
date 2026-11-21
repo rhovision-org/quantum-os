@@ -5,14 +5,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const bundle = await build({
   stdin: {
-    contents: 'export { processFromCommands, executeRhoProcess, executeRhoProcessWithPollBindings } from "./src/rhoqu-process.ts"; export { transpileProcess } from "./src/rhoqu.ts";',
+    contents: 'export { processFromCommands, executeRhoProcess, executeRhoProcessWithPollBindings, countRhoProcessCommands } from "./src/rhoqu-process.ts"; export { transpileProcess, evaluateRhoQuRuntimeCondition } from "./src/rhoqu.ts";',
     resolveDir: root,
     loader: "ts",
     sourcefile: "rhoqu-process-test-entry.ts",
   },
   bundle: true, format: "esm", platform: "node", write: false,
 });
-const { processFromCommands, executeRhoProcess, executeRhoProcessWithPollBindings, transpileProcess } = await import(
+const { processFromCommands, executeRhoProcess, executeRhoProcessWithPollBindings, countRhoProcessCommands, transpileProcess, evaluateRhoQuRuntimeCondition } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
 let pass = 0, fail = 0;
@@ -91,9 +91,55 @@ const noCreationIds = new Set();
 const noCreationCommands = [];
 executeRhoProcessWithPollBindings(liveProcess, command => { noCreationCommands.push(command); return ["no poll created"]; }, () => [...noCreationIds]);
 ok("failed poll creation leaves named binding unresolved", noCreationCommands[1] === "/poll add $pollId Option A" && noCreationCommands[2] === "/poll status $LAST_ID");
+const runtimeIR = transpileProcess("when peers() >= 2 { /branch-many; } else { /branch-few; }");
+ok("runtime when retains both branches in IR", runtimeIR.steps[0]?.kind === "when" && runtimeIR.steps[0]?.then.steps[0]?.command === "/branch-many" && runtimeIR.steps[0]?.else?.steps[0]?.command === "/branch-few");
+let peerSnapshot = 1;
+const runtimeCommands = [];
+const runtimeProcess = { kind: "sequence", steps: [{ kind: "command", command: "/mutate-state" }, ...runtimeIR.steps] };
+executeRhoProcess(runtimeProcess, command => { runtimeCommands.push(command); if (command === "/mutate-state") peerSnapshot = 2; return []; }, {
+  evaluateWhen: (condition, env) => evaluateRhoQuRuntimeCondition(condition, env, { lemmaNames: [], balances: {}, declaredCurrencies: [], peerCount: peerSnapshot, connected: false, currentSeq: 0 }),
+});
+ok("runtime condition observes state changed before branch", runtimeCommands.join("|") === "/mutate-state|/branch-many");
+const falseBranchCommands = [];
+executeRhoProcess(runtimeIR, command => { falseBranchCommands.push(command); return []; }, {
+  evaluateWhen: (condition, env) => evaluateRhoQuRuntimeCondition(condition, env, { lemmaNames: [], balances: {}, declaredCurrencies: [], peerCount: 0, connected: false, currentSeq: 0 }),
+});
+ok("runtime condition selects else branch from snapshot", falseBranchCommands[0] === "/branch-few");
+const snapshotLemma = evaluateRhoQuRuntimeCondition({ kind: "call", name: "has", args: [{ kind: "lemma", name: "sample" }] }, {}, { lemmaNames: ["sample"], balances: {}, declaredCurrencies: [], peerCount: 0, connected: false, currentSeq: 0 });
+ok("runtime evaluator reads immutable lemma snapshot", snapshotLemma === true);
 let reservedBindingRejected = false;
 try { transpileProcess("bind LAST_ID /poll new reserved;"); }
 catch (error) { reservedBindingRejected = String(error).includes("LAST_ID is reserved"); }
 ok("LAST_ID cannot be shadowed by a named binding", reservedBindingRejected);
+// Runtime when retains both branches and samples room state only when reached.
+const runtimeProcess = transpileProcess("when peers() >= 2 { /grant peer-two; } else { /grant peer-one; }");
+ok("runtime when lowers to a typed conditional node", runtimeProcess.steps.length === 1 && runtimeProcess.steps[0].kind === "when");
+ok("runtime conditional count includes both branches", countRhoProcessCommands(runtimeProcess) === 2);
+const runtimeSnapshot = (peerCount) => ({ lemmaNames: [], balances: {}, declaredCurrencies: [], peerCount, connected: true, currentSeq: 4 });
+const runRuntimeBranch = (peerCount) => {
+  const executed = [];
+  const snap = runtimeSnapshot(peerCount);
+  const results = executeRhoProcess(runtimeProcess, command => { executed.push(command); return [command]; }, {
+    evaluateWhen: (condition, env) => evaluateRhoQuRuntimeCondition(condition, env, snap),
+  });
+  return { executed, results };
+};
+const lowPeers = runRuntimeBranch(1), highPeers = runRuntimeBranch(3);
+ok("runtime when selects else from execution snapshot", lowPeers.executed.join() === "/grant peer-one");
+ok("runtime when selects then from execution snapshot", highPeers.executed.join() === "/grant peer-two");
+ok("same snapshot deterministically selects same branch", runRuntimeBranch(3).executed.join() === highPeers.executed.join());
+ok("selected command uses normal interpreter result", highPeers.results.length === 1 && highPeers.results[0].ok && highPeers.results[0].command === "/grant peer-two");
+const noEvaluator = executeRhoProcess(runtimeProcess, command => [command]);
+ok("runtime when errors explicitly without evaluator", noEvaluator.length === 1 && noEvaluator[0].ok === false && noEvaluator[0].error.includes("snapshot evaluator"));
+let legacyWhenRejected = false;
+try { transpileProcess("when connected() { /grant online; }"); } catch (error) { legacyWhenRejected = String(error).includes("runtime when cannot be flattened"); }
+ok("legacy flat transpile rejects runtime branches", legacyWhenRejected);
+const compileContext = { hasLemma: () => false, balance: () => 0, isCurrencyDeclared: () => false, peerCount: () => 1, isConnected: () => true, myCurrentSeq: () => 0 };
+const compileIf = transpileProcess("if peers() >= 2 { /grant compile-two; } else { /grant compile-one; }", compileContext);
+ok("existing if remains compile-time compatible", compileIf.steps.length === 1 && compileIf.steps[0].kind === "command" && compileIf.steps[0].command === "/grant compile-one");
+const parameterBranch = transpileProcess("process Threshold(n) { when peers() >= n { /grant threshold-met; } else { /grant below; } } Threshold(2);");
+const parameterCommands = [];
+executeRhoProcess(parameterBranch, command => { parameterCommands.push(command); return []; }, { evaluateWhen: (condition, env) => evaluateRhoQuRuntimeCondition(condition, env, runtimeSnapshot(3)) });
+ok("runtime branch preserves process parameter environment", parameterCommands.join() === "/grant threshold-met");
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-process.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
