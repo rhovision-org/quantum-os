@@ -38,6 +38,17 @@ check("publish explicitly declares deployId system channel before emitting recei
 check("exploratory lookup never binds deploy-only system channel",
   !memoryReadProgram(aDesc.locator.uri).includes("rho:rchain:deployId"));
 
+const wire="qos.memory/1:"+aId+":616263";
+check("Rholo wire literal is escape-free ASCII",memoryPublishProgram(aId,aBytes).includes('"'+wire+'"') && !memoryPublishProgram(aId,aBytes).includes(String.fromCharCode(92)));
+check("ASCII readback validates content",Buffer.from(await decodeMemoryRecord([JSON.stringify(wire)],aId)).equals(Buffer.from(aBytes)));
+check("ASCII readback refuses wrong content and malformed encoding",
+  await decodeMemoryRecord([JSON.stringify("qos.memory/1:"+aId+":646566")])===null &&
+  await decodeMemoryRecord([JSON.stringify("qos.memory/1:"+aId+":f")])===null &&
+  await decodeMemoryRecord([JSON.stringify(wire)],bId)===null);
+const empty=new Uint8Array(),emptyId=await objectIdentity(empty);
+check("ASCII wire supports zero length and binary payloads",
+  (await decodeMemoryRecord([JSON.stringify("qos.memory/1:"+emptyId+":")],emptyId))?.length===0 &&
+  Buffer.from(await decodeMemoryRecord([JSON.stringify("qos.memory/1:"+await objectIdentity(Uint8Array.of(0,255,34,92))+":00ff225c")])).equals(Buffer.from([0,255,34,92])));
 check("ambiguous registry replies refused",await decodeMemoryRecord([rec,rec])===null);
 
 const roomId="cap:room:03010563656127610341634101250325";

@@ -7,8 +7,9 @@ const uriOk=(uri:string)=>/^rho:id:[a-z0-9]{1,128}$/.test(uri);
 const hex=(b:Uint8Array)=>Array.from(b,x=>x.toString(16).padStart(2,"0")).join("");
 export function memoryPublishProgram(id:string,bytes:Uint8Array):string{
   if(!isObjectId(id)||bytes.byteLength>MAX_OBJECT_BYTES)throw new Error("invalid object");
-  // Store ASCII JSON as a Rholang string, avoiding node-specific map rendering.
-  const record=JSON.stringify(JSON.stringify({schema:"qos.memory/1",id,hex:hex(bytes)}));
+  // Only validated ASCII schema, SHA-256 and hex enter this literal.
+  // Rholo's bundled parser rejects backslash-escaped quotes in nested JSON.
+  const record='"qos.memory/1:'+id+':'+hex(bytes)+'"';
   return `new insertArbitrary(\`rho:registry:insertArbitrary\`), deployId(\`rho:rchain:deployId\`), ret in {
   insertArbitrary!(${record}, *ret) |
   for (@uri <- ret) { return!(uri) | deployId!(uri) }
@@ -26,7 +27,15 @@ export function memoryReadProgram(uri:string):string{
 export async function decodeMemoryRecord(values:readonly string[],expectedId?:string):Promise<Uint8Array|null>{
   // Reject ambiguous answers rather than selecting an arbitrary record.
   if(values.length!==1||values[0].length>MAX_OBJECT_BYTES*2+512)return null;
-  let v:unknown;try{v=JSON.parse(values[0]);if(typeof v==="string")v=JSON.parse(v);}catch{return null;}
+  let v:unknown;
+  try{
+    v=JSON.parse(values[0]);
+    if(typeof v==="string"){
+      const match=/^qos\.memory\/1:([0-9a-f]{64}):((?:[0-9a-f]{2})*)$/.exec(v);
+      if(match)v={schema:"qos.memory/1",id:match[1],hex:match[2]};
+      else v=JSON.parse(v); // legacy JSON records, if present
+    }
+  }catch{return null;}
   if(!v||typeof v!=="object"||Array.isArray(v))return null;
   const r=v as Record<string,unknown>;
   if(Object.keys(r).length!==3||r.schema!=="qos.memory/1"||!isObjectId(r.id)||
@@ -48,7 +57,8 @@ export class RholoRegistryMemory implements MemoryDurableBackend {
       throw new Error("registry deploy not accepted: "+reason);
     }
     const verdict=await deployVerdict(this.config,sent.sig);
-    if(!verdict?.ok)throw new Error("registry deploy outcome unavailable or failed");
+    if(!verdict)throw new Error("registry deploy outcome unavailable");
+    if(!verdict.ok)throw new Error("registry deploy execution failed: "+verdict.error.replace(/[0-9a-f]{32,}/gi,"[redacted hex]").replace(/[\r\n]+/g," ").slice(0,300));
     const uris=[...new Set(verdict.values.map(v=>v.replace(/^"|"$/g,"")).filter(uriOk))];
     if(uris.length!==1)throw new Error("registry receipt missing or ambiguous");
     return {network:this.network,uri:uris[0]};

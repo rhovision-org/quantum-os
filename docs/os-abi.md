@@ -283,7 +283,10 @@ need external coordination and fresh local snapshots. Cache loss and GC do
 not change the canonical digest.
 
 The registry adapter uses immutable insertArbitrary, signed deploy verdict
-and hash-verified lookup; no automatic deployment. Browser SDK and disk
+and hash-verified lookup; no automatic deployment. The stored wire value
+is a quoted ASCII literal `qos.memory/1:<sha256>:<lowercase hex>`, avoiding
+escaped quotes unsupported by the bundled Rholo parser. Readback rehashes
+decoded bytes; legacy JSON records are accepted only after the same checks. Browser SDK and disk
 adapter are exposed, not automatically wired into the daemon or application
 UI. Registry readback against a real disposable Rholo node and multi-peer
 offline availability remain integration gates; the dedicated CI fixture
