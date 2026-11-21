@@ -1,0 +1,54 @@
+name: QOS browser recovery acceptance (#285)
+on:
+  push:
+    branches: [feat/qos-kernel-recovery-285]
+  pull_request:
+    branches: [main, work, feat/qos-kernel-init-284]
+    paths:
+      - "packages/browser/src/qos-*.ts"
+      - "packages/browser/src/app.ts"
+      - "packages/browser/src/palette.ts"
+      - "packages/browser/test/qos-observe-opfs-ci.mjs"
+      - "scripts/localnet/qos-vfs-opfs-ci.py"
+      - ".github/workflows/qos-observe-browser.yml"
+permissions:
+  contents: read
+jobs:
+  browser-recovery:
+    name: Chromium snapshot isolation and read-only inspection
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm build:wasm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:signaling
+      - name: Install disposable Chromium
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qos285-playwright" --no-save --no-package-lock playwright@1.65.1
+          "$RUNNER_TEMP/qos285-playwright/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Actual browser recovery and trace operations
+        env:
+          QOS_PLAYWRIGHT_MODULE: ${{ runner.temp }}/qos285-playwright/node_modules/playwright/index.mjs
+        run: python3 scripts/localnet/qos-vfs-opfs-ci.py observe
+      - name: Upload verified browser evidence
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qos285-browser-recovery
+          path: |
+            qos285-opfs-evidence.json
+            qos285-opfs-evidence.SHA256SUMS
+          if-no-files-found: error
