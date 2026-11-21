@@ -7290,10 +7290,15 @@ function handleCommand(raw: string): string[] {
           // sent and nothing has to be read back to learn it.
           if (rest === "install") {
             if (!cfg.key) { sys("no key — /rholang key generate first"); break; }
-            sys("installing the locker…");
-            sys("  its uri is minted by the registry, so it comes back as the deploy's answer");
             void (async () => {
-              const r = await deployTerm(cfg, installProgram());
+              const program = installProgram();
+              const approved = await confirmDialog("Review locker installation",
+                `Target: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\nExact source to sign:\n\n${program}`,
+                "Approve · install locker");
+              if (!approved) { sys("cancelled — locker not installed"); return; }
+              sys("installing the locker…");
+              sys("  its uri is minted by the registry, so it comes back as the deploy's answer");
+              const r = await deployTerm(cfg, program);
               addMessage("", (r.ok ? "✓ " : "✗ ") + r.message, "system");
               if (!r.ok || r.resultNonce === undefined) return;
               const fresh = await readResultsFresh(cfg, r.resultNonce, 40);
