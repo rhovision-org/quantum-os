@@ -40,8 +40,9 @@ export async function lintRholang(source: string): Promise<LintResult> {
       : [];
     return { ok, errors };
   } catch {
-    // WASM unavailable (e.g. first load / dev fallback) — do not hard-block.
-    return { ok: true, errors: [] };
+    // Missing or broken validation must fail closed: never sign code when the
+    // linter is unavailable, because the caller cannot establish a safe preview.
+    return { ok: false, errors: ["WASM linter unavailable; deploy blocked"] };
   }
 }
 
@@ -227,7 +228,7 @@ export async function deployToNode(
 
 export interface PipelineResult {
   ok: boolean;
-  stage: "lint" | "sign" | "deploy" | "done";
+  stage: "approval" | "lint" | "sign" | "deploy" | "done";
   message: string;
   deployId?: string;
 }
@@ -238,8 +239,13 @@ export interface PipelineResult {
  */
 export async function runDeployPipeline(
   source: string,
-  opts: { nodeUrl: string; passphrase: string; id?: string }
+  opts: { nodeUrl: string; passphrase: string; id?: string; approve: (expandedSource: string) => Promise<boolean> }
 ): Promise<PipelineResult> {
+  // 0. Require explicit approval of the exact source before signing or deploying.
+  if (typeof opts.approve !== "function" || !(await opts.approve(source))) {
+    return { ok: false, stage: "approval", message: "deploy cancelled: explicit source approval required" };
+  }
+
   // 1. Lint — never sign unvalidated code.
   const lint = await lintRholang(source);
   if (!lint.ok) {
