@@ -55,13 +55,14 @@ interface ZfaWasm {
 
 let _wasm: ZfaWasm | null = null;
 
-export async function loadZfa(): Promise<void> {
+export async function loadZfa(bytes?:Uint8Array,required=false): Promise<void> {
   try {
     // wasm-pack output lands in @quantum-os/zfa-core
     const mod = await import("@quantum-os/zfa-core");
-    await (mod as any).default?.();   // init() for wasm-pack modules
+    await (mod as any).default?.(bytes?{module_or_path:bytes}:undefined);   // explicit bytes in Node, URL in browser
     _wasm = mod as unknown as ZfaWasm;
   } catch {
+    if(required)throw Error("required ZFA WASM initialization failed");
     console.warn("[zfa] WASM unavailable, using pure-TS fallback");
   }
 }
