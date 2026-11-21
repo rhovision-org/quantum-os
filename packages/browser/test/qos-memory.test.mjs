@@ -23,7 +23,7 @@ const aId=await objectIdentity(aBytes),bId=await objectIdentity(bBytes);
 check("SHA-256 known vector",aId==="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 check("content identity distinguishes bytes",aId!==bId && aId===await objectIdentity(Uint8Array.from(aBytes)));
 const registry=new Map();
-const backend={network:"fixture/root",async publish(bytes,id){const uri="rho:id:"+id;registry.set(uri,Uint8Array.from(bytes));return {network:this.network,uri};},async read(l){return registry.get(l.uri)??null;}};
+const backend={network:"fixture/root",async publish(bytes,id){const uri="rho:id:"+id;registry.set(uri,Uint8Array.from(bytes));return {network:this.network,uri,blockHash:"a".repeat(64)};},async read(l){return registry.get(l.uri)??null;}};
 const cache=new RoomByteCache(), service=new QosMemoryBytes(cache,[backend]);
 const aDesc=await service.prepare(aBytes,backend.network), bDesc=await service.prepare(bBytes);
 check("descriptor contains only identity, size and locator",Object.keys(aDesc).sort().join(",")==="id,locator,size" && aDesc.id===aId);
@@ -37,6 +37,9 @@ check("publish explicitly declares deployId system channel before emitting recei
   memoryPublishProgram(aId,aBytes).includes("deployId!(uri)"));
 check("exploratory lookup never binds deploy-only system channel",
   !memoryReadProgram(aDesc.locator.uri).includes("rho:rchain:deployId"));
+check("pinned registry lookup uses documented out reply channel",
+  memoryReadProgram(aDesc.locator.uri).includes('@"out"!(value)') &&
+  !memoryReadProgram(aDesc.locator.uri).includes("return!(value)"));
 
 const wire="qos.memory/1:"+aId+":616263";
 check("Rholo wire literal is escape-free ASCII",memoryPublishProgram(aId,aBytes).includes('"'+wire+'"') && !memoryPublishProgram(aId,aBytes).includes(String.fromCharCode(92)));
@@ -81,6 +84,7 @@ const putA=await call(a,x,b,"mem_put",{handle:rootA,descriptor:aDesc});assert.ok
 const putB=await call(a,x,b,"mem_put",{handle:rootA,descriptor:bDesc});assert.ok(putB.outcome.ok);
 const ha=putA.outcome.value.id,hb=putB.outcome.value.id;
 service.releaseStaged(aId);service.releaseStaged(bId);
+check("publication anchor survives canonical journal",replay(a).kernel.memoryStat(x.processId,ha).value.locators[0].blockHash==="a".repeat(64));
 check("graph metadata has no byte payload",replay(a).kernel.memoryView().objects.every(o=>Object.keys(o).sort().join(",")==="id,locators,size"));
 const foreign=await call(b,y,a,"mem_get",{handle:ha});
 check("foreign handle denied in caller namespace",foreign.outcome.errno==="EBADF");

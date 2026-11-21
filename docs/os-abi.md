@@ -286,7 +286,13 @@ The registry adapter uses immutable insertArbitrary, signed deploy verdict
 and hash-verified lookup; no automatic deployment. The stored wire value
 is a quoted ASCII literal `qos.memory/1:<sha256>:<lowercase hex>`, avoiding
 escaped quotes unsupported by the bundled Rholo parser. Readback rehashes
-decoded bytes; legacy JSON records are accepted only after the same checks. Browser SDK and disk
+decoded bytes; legacy JSON records are accepted only after the same checks. The production locator
+also includes the signed deployment's actual carrying block hash, obtained
+by inclusion lookup after execution. Registry reads use the pinned POST
+state endpoint and the documented `@"out"` reply channel (Rholo #447/#449).
+A confirmed immutable record at that block is not a finality proof.
+Legacy URI-only locators use an explicitly named current block; a pinned
+locator is never silently redirected to a different block. Browser SDK and disk
 adapter are exposed, not automatically wired into the daemon or application
 UI. Registry readback against a real disposable Rholo node and multi-peer
 offline availability remain integration gates; the dedicated CI fixture

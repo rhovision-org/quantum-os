@@ -1,7 +1,7 @@
 // Explicit registry availability adapter. No deploy is performed during replay.
 import { MAX_OBJECT_BYTES, isObjectId } from "./qos-memory.js";
 import { objectIdentity, type MemoryDurableBackend } from "./qos-memory-bytes.js";
-import { deployTerm, deployVerdict, evalTerm, type NodeConfig } from "./rholang.js";
+import { deployTerm, deployVerdict, deployFate, renderExpr, type NodeConfig } from "./rholang.js";
 import type { ObjectLocator } from "./qos-memory.js";
 const uriOk=(uri:string)=>/^rho:id:[a-z0-9]{1,128}$/.test(uri);
 const hex=(b:Uint8Array)=>Array.from(b,x=>x.toString(16).padStart(2,"0")).join("");
@@ -20,7 +20,7 @@ export function memoryReadProgram(uri:string):string{
   return `new lookup(\`rho:registry:lookup\`), stored in {
   lookup!(\`${uri}\`, *stored) |
   for (@record <- stored) {
-    match record { (_, value) => { return!(value) } value => { return!(value) } }
+    match record { (_, value) => { @"out"!(value) } value => { @"out"!(value) } }
   }
 }`;
 }
@@ -44,6 +44,31 @@ export async function decodeMemoryRecord(values:readonly string[],expectedId?:st
   const data=Uint8Array.from(r.hex.match(/../g)??[],x=>parseInt(x,16));
   return await objectIdentity(data)===r.id?data:null;
 }
+/** Rholo #447/#449: the pinned endpoint captures @"out", not an
+ * unforgeable return channel. Read the exact carrying block's POST state. */
+export async function memoryReadAtBlock(cfg:NodeConfig,uri:string,blockHash:string):Promise<Uint8Array|null>{
+  if(!isObjectId(blockHash))throw new Error("invalid registry block hash");
+  const term=memoryReadProgram(uri);
+  const base=cfg.url.replace(/\/+$/,"");
+  let response:Response|undefined;
+  for(const endpoint of ["/api/v1/explore-deploy-by-block-hash","/api/explore-deploy-by-block-hash"]){
+    response=await fetch(base+endpoint,{
+      method:"POST",headers:{"content-type":"application/json"},signal:AbortSignal.timeout(15000),
+      body:JSON.stringify({term,blockHash,usePreStateHash:false}),
+    });
+    if(response.status!==404&&response.status!==405)break;
+  }
+  if(!response?.ok)throw new Error("pinned registry read HTTP "+(response?.status??"unavailable"));
+  const reply:unknown=await response.json();
+  if(!reply||typeof reply!=="object"||Array.isArray(reply))throw new Error("invalid pinned registry response");
+  const r=reply as {expr?:unknown[];replySource?:string;block?:{blockHash?:string}};
+  if(!Array.isArray(r.expr))throw new Error("pinned registry response has no expression list");
+  if(r.block?.blockHash && r.block.blockHash!==blockHash)throw new Error("pinned registry response block mismatch");
+  if(r.replySource!==undefined && r.replySource!=="out")throw new Error("pinned registry reply not captured on out: "+String(r.replySource).slice(0,32));
+  const data=await decodeMemoryRecord(r.expr.map(renderExpr));
+  if(!data)throw new Error("pinned registry content unavailable or invalid (expressions="+r.expr.length+", replySource="+(r.replySource??"unspecified")+")");
+  return data;
+}
 export class RholoRegistryMemory implements MemoryDurableBackend {
   constructor(readonly network:string,private readonly config:NodeConfig){}
   async publish(bytes:Uint8Array,id:string):Promise<ObjectLocator>{
@@ -61,11 +86,21 @@ export class RholoRegistryMemory implements MemoryDurableBackend {
     if(!verdict.ok)throw new Error("registry deploy execution failed: "+verdict.error.replace(/[0-9a-f]{32,}/gi,"[redacted hex]").replace(/[\r\n]+/g," ").slice(0,300));
     const uris=[...new Set(verdict.values.map(v=>v.replace(/^"|"$/g,"")).filter(uriOk))];
     if(uris.length!==1)throw new Error("registry receipt missing or ambiguous");
-    return {network:this.network,uri:uris[0]};
+    // Executed status alone is not inclusion (#447). Locate the actual
+    // signature-bearing block; do not substitute the highest tip.
+    const carrying=await deployFate(this.config,sent.sig,25);
+    if(!carrying||carrying.errored||!isObjectId(carrying.blockHash))throw new Error("registry publication has no verified carrying block");
+    return {network:this.network,uri:uris[0],blockHash:carrying.blockHash};
   }
   async read(locator:ObjectLocator):Promise<Uint8Array|null>{
     if(locator.network!==this.network||!uriOk(locator.uri))return null;
-    const result=await evalTerm(this.config,memoryReadProgram(locator.uri));
-    return decodeMemoryRecord(result.values);
+    if(locator.blockHash)return memoryReadAtBlock(this.config,locator.uri,locator.blockHash);
+    // Legacy locators lack an inclusion anchor. Query a named current block,
+    // never silently use a different block for an anchored locator.
+    const response=await fetch(this.config.url.replace(/\/+$/,"")+"/api/blocks/1",{signal:AbortSignal.timeout(10000)});
+    if(!response.ok)throw new Error("legacy registry block lookup HTTP "+response.status);
+    const body=await response.json() as {blockHash?:string}[]|{blocks?:{blockHash?:string}[]};
+    const hash=(Array.isArray(body)?body:body.blocks)?.[0]?.blockHash;
+    return isObjectId(hash)?memoryReadAtBlock(this.config,locator.uri,hash):null;
   }
 }

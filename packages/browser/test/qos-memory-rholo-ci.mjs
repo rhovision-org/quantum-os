@@ -50,6 +50,7 @@ if(mode==="publish"){
   const descriptor=await service.prepare(bytes,network);
   assert.equal(descriptor.id,identity);
   assert.ok(descriptor.locator && descriptor.locator.uri.startsWith("rho:id:"));
+  assert.match(descriptor.locator.blockHash??"",/^[0-9a-f]{64}$/,"publication must name its actual carrying block");
   const room=new QosProcessRoom({roomId,identity:await newDynCapState(new Uint8Array(32).fill(123)),transport:{broadcast:()=>{}}});
   const start=await room.startProcess("durable-memory",{entropyHex:"aa"}), pid=start.processId;
   const current=()=>replay(room.log).kernel;
@@ -86,7 +87,7 @@ if(mode==="publish"){
   let reads=0;
   const service=new QosMemoryBytes(cache,[{
     network,async publish(){throw new Error("reader must never deploy");},
-    async read(l){reads++;return backend.read(l);}
+    async read(l){reads++;try{return await backend.read(l);}catch(e){console.error("independent registry read failed:",e instanceof Error?e.message:"unknown error");throw e;}}
   }]);
   assert.equal(await service.get(current,"foreign-pid",saved.handle),null);
   assert.equal(reads,0,"unauthorized read touched durable storage");
@@ -99,7 +100,7 @@ if(mode==="publish"){
   assert.equal(await current().stateDigest(),saved.digest);
   const evidence={schema:"qos.memory.real-rholo-witness/1",git_commit:process.env.GITHUB_SHA,run_id:process.env.GITHUB_RUN_ID,
     network_id:status.networkId,shard_id:status.shardId,object_id:saved.descriptor.id,byte_length:recovered.length,
-    registry_uri:saved.descriptor.locator.uri,kernel_digest:saved.digest,canonical_event_count:saved.events.length,
+    registry_uri:saved.descriptor.locator.uri,carrying_block_hash:saved.descriptor.locator.blockHash,read_state:"carrying-post-state",kernel_digest:saved.digest,canonical_event_count:saved.events.length,
     fresh_reader:true,local_cache_empty_before:true,unauthorized_lookup_count:0,real_registry_lookup_count:reads,
     recovered_sha256_match:true,recached:true,digest_unchanged:true,verdict:"PASS",
     scope:"Disposable bundled loopback Rholo; no claim of public-network finality or global GC"};

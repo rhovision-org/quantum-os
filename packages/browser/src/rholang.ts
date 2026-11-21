@@ -677,6 +677,7 @@ export interface DeployOutcome {
 /** What a block says happened to a deploy, once one carries it. */
 export interface DeployFate {
   blockNumber: number;
+  blockHash?: string;
   errored: boolean;
   cost?: number;
   systemDeployError?: string;
@@ -726,8 +727,9 @@ export async function readName(cfg: NodeConfig, name: string): Promise<string[]>
  * that fix reports nothing there.
  */
 export async function deployFate(cfg: NodeConfig, sig: string, depth = 12): Promise<DeployFate | null> {
-  const blocks = (await getJson(cfg, `/api/blocks/${depth}`)) as { blockHash?: string }[];
-  for (const b of blocks ?? []) {
+  const response = await getJson(cfg, `/api/blocks/${depth}`) as { blockHash?: string }[] | { blocks?: { blockHash?: string }[] };
+  const blocks = Array.isArray(response) ? response : response?.blocks ?? [];
+  for (const b of blocks) {
     if (!b.blockHash) continue;
     const full = (await getJson(cfg, `/api/block/${b.blockHash}`)) as {
       blockInfo?: { blockNumber?: number };
@@ -737,6 +739,7 @@ export async function deployFate(cfg: NodeConfig, sig: string, depth = 12): Prom
     if (hit) {
       return {
         blockNumber: full?.blockInfo?.blockNumber ?? -1,
+        blockHash: b.blockHash,
         errored: hit.errored === true,
         cost: hit.cost,
         systemDeployError: hit.systemDeployError || undefined,
