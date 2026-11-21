@@ -3402,9 +3402,13 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
   // a refusal or any other answer is reported as a failure, never as done.
   const signed = (label: string, program: string, expect: ChannelVerb | "install", done?: (v: unknown, raw: string[]) => void) => {
     if (!cfg.key) { sys("no key — /rholang key generate first"); return; }
-    sys(`${label}…`);
     void (async () => {
       try {
+        const approved = await confirmDialog("Review Channel deploy — sign and submit?",
+          `Action: ${label}\nTarget: ${cfg.url}\nPhlo limit: ${cfg.phloLimit} × price ${cfg.phloPrice}, shard ${cfg.shard}\n\nExact source to sign:\n\n${program}`,
+          "Approve · sign & deploy");
+        if (!approved) { sys(`cancelled — ${label}; nothing deployed`); return; }
+        sys(`${label}…`);
         const r = await deployTerm(cfg, program);
         if (!r.ok || !r.sig) { say(`✗ ${label}: ${r.message}`); return; }
         const out = await deployVerdict(cfg, r.sig);
