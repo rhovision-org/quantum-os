@@ -55,7 +55,7 @@ export interface QosHandle {
   revoked: boolean;
 }
 
-export type QosProcessState = "running" | "exited" | "reaped";
+export type QosProcessState = "running" | "suspended" | "exited" | "reaped";
 
 export interface QosProcess {
   readonly pid: string;
