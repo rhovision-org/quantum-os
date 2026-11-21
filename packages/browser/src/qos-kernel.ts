@@ -55,7 +55,7 @@ export interface QosHandle {
   revoked: boolean;
 }
 
-export type QosProcessState = "running" | "exited" | "reaped";
+export type QosProcessState = "running" | "suspended" | "exited" | "reaped";
 
 export interface QosProcess {
   readonly pid: string;
@@ -248,6 +248,38 @@ export class QosKernel {
     return ok(count);
   }
 
+  /** Suspend a target process. Requires a live SIGNAL handle for the target. */
+  suspend(callerPid: string, targetPid: string): QosResult<true> {
+    const caller = this.processes.get(callerPid);
+    if (!caller || caller.state !== "running") return err("ENOENT", "caller is not running");
+    const target = this.processes.get(targetPid);
+    if (!target) return err("ENOENT", "target does not exist");
+    if (callerPid === targetPid) return err("EINVAL", "cannot suspend self");
+    if (target.state !== "running") return err("EINVAL", "target is not running");
+    const hasSignal = [...caller.handles.values()].some(
+      (h) => !h.revoked && (h.rights & QOS_RIGHTS.SIGNAL) && h.object === `proc:${targetPid}`,
+    );
+    if (!hasSignal) return err("EACCES", "no SIGNAL handle for target");
+    target.state = "suspended";
+    return ok(true);
+  }
+
+  /** Resume a suspended target. Requires a live SIGNAL handle for the target. */
+  resume(callerPid: string, targetPid: string): QosResult<true> {
+    const caller = this.processes.get(callerPid);
+    if (!caller || caller.state !== "running") return err("ENOENT", "caller is not running");
+    const target = this.processes.get(targetPid);
+    if (!target) return err("ENOENT", "target does not exist");
+    if (callerPid === targetPid) return err("EINVAL", "cannot resume self");
+    if (target.state !== "suspended") return err("EINVAL", "target is not suspended");
+    const hasSignal = [...caller.handles.values()].some(
+      (h) => !h.revoked && (h.rights & QOS_RIGHTS.SIGNAL) && h.object === `proc:${targetPid}`,
+    );
+    if (!hasSignal) return err("EACCES", "no SIGNAL handle for target");
+    target.state = "running";
+    return ok(true);
+  }
+
   /** Send a signal. Self-signalling is allowed; another process requires a
    *  live handle to `proc:<target>` carrying SIGNAL. */
   signal(callerPid: string, targetPid: string, sig: QosSignal): QosResult<true> {
@@ -255,7 +287,7 @@ export class QosKernel {
     if (!caller || caller.state !== "running") return err("ENOENT", "caller is not running");
     const target = this.processes.get(targetPid);
     if (!target) return err("ENOENT", "target does not exist");
-    if (target.state !== "running") return err("EINVAL", "target is not running");
+    if (target.state !== "running" && target.state !== "suspended") return err("EINVAL", "target is not active");
     if (!QOS_SIGNALS.includes(sig)) return err("EINVAL", "unknown signal");
 
     if (callerPid !== targetPid) {
@@ -281,7 +313,7 @@ export class QosKernel {
     if (!child) return err("ENOENT", "child does not exist");
     if (child.parent !== callerPid) return err("EACCES", "not the parent");
     if (child.state === "reaped") return err("ENOENT", "child already reaped");
-    if (child.state === "running") return err("EAGAIN", "child still running");
+    if (child.state === "running" || child.state === "suspended") return err("EAGAIN", "child still active");
     const code = child.exitCode ?? 0;
     child.state = "reaped";
     child.handles.clear();
