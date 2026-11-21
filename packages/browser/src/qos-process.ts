@@ -621,17 +621,36 @@ export function compareEvents(a: QosEvent, b: QosEvent): number {
     compareStrings(a.hash, b.hash);
 }
 
+export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version";
+export interface QosDependency { hash: string; kind: QosDependencyKind }
+/** Only schema-defined references are causal, never arbitrary payload strings. */
+export function eventDependencies(event: QosEvent): QosDependency[] {
+  const refs: QosDependency[] = [];
+  if (event.prev !== "genesis") refs.push({ hash: event.prev, kind: "prev" });
+  if (event.grant !== "root") refs.push({ hash: event.grant, kind: "grant" });
+  if (event.type === "syscall-result" && event.payload?.schema === "qos.syscall/1" &&
+      typeof event.payload.requestHash === "string" && HEX64.test(event.payload.requestHash)) {
+    refs.push({ hash: event.payload.requestHash, kind: "request" });
+  }
+  if (event.type === "syscall-request" && event.payload?.schema === "qos.syscall/1" &&
+      ["cap_derive", "cap_close", "cap_revoke"].includes(String(event.payload.op)) &&
+      isRecord(event.payload.args) && typeof event.payload.args.handleVersion === "string" &&
+      HEX64.test(event.payload.args.handleVersion)) {
+    refs.push({ hash: event.payload.args.handleVersion, kind: "handle-version" });
+  }
+  return refs;
+}
+
 /**
- * Causal canonicalization. `prev` and non-root `grant` are explicit hash
+ * Causal canonicalization. `prev`, non-root `grant`, request and handle-version are explicit hash
  * dependencies. They are topologically ordered before stable tie-breaking; the
  * `(source, seq, hash)` tuple is used only among currently-ready events.
  * Missing references and cycles are returned as deterministic diagnostics rather
- * than silently being treated as causal edges. Object/version dependencies must
- * be encoded as explicit references before they can participate here.
+ * than silently being treated as causal edges. Other object kinds need their own schema-defined references.
  */
 export function canonicalEventOrder(events: QosEvent[]): {
   ordered: QosEvent[];
-  missingDependencies: { eventHash: string; dependencyHash: string; kind: "prev" | "grant" }[];
+  missingDependencies: { eventHash: string; dependencyHash: string; kind: QosDependencyKind }[];
   cyclicHashes: string[];
 } {
   const unique = new Map<string, QosEvent>();
@@ -640,12 +659,10 @@ export function canonicalEventOrder(events: QosEvent[]): {
   const byHash = unique;
   const deps = new Map<string, Set<string>>();
   const children = new Map<string, Set<string>>();
-  const missingDependencies: { eventHash: string; dependencyHash: string; kind: "prev" | "grant" }[] = [];
+  const missingDependencies: { eventHash: string; dependencyHash: string; kind: QosDependencyKind }[] = [];
   for (const event of nodes) {
     const required = new Set<string>();
-    const refs: { hash: string; kind: "prev" | "grant" }[] = [];
-    if (event.prev !== "genesis") refs.push({ hash: event.prev, kind: "prev" });
-    if (event.grant !== "root") refs.push({ hash: event.grant, kind: "grant" });
+    const refs = eventDependencies(event);
     for (const ref of refs) {
       if (!byHash.has(ref.hash)) {
         missingDependencies.push({ eventHash: event.hash, dependencyHash: ref.hash, kind: ref.kind });

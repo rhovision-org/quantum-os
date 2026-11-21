@@ -216,7 +216,8 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   const started = await room.startProcess("syscall-worker", { entropyHex: "ab" });
   const pid = started.processId;
   const invoke = async (op, args) => {
-    const payload = { schema: "qos.syscall/1", caller: pid, op, args };
+    const version = typeof args.handle === "string" ? replayQosKernel(room.log.events()).kernel.handleVersion(pid,args.handle) : undefined;
+    const payload = { schema: "qos.syscall/1", caller: pid, op, args: {...args,...(version ? {handleVersion:version} : {})} };
     const request = await room.emit(pid, started.event, "syscall-request", payload);
     const replay = replayQosKernel(room.log.events());
     const outcome = previewCanonicalSyscall(replay.kernel, payload, pid, request.hash);
@@ -239,7 +240,7 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   ok("independent peer delivery yields identical state digest", await a.kernel.stateDigest() === await b.kernel.stateDigest());
   ok("result contains request hash, caller, handle, outcome and position", a.syscalls[2].caller === pid && a.syscalls[2].args.handle === "h:unknown" && a.syscalls[2].position === 6);
   ok("all admitted canonical events accounted for", a.rejected.length === 0 && a.pendingSyscalls.length === 0 && a.applied.length === events.length);
-  const pendingPayload = { schema: "qos.syscall/1", caller: pid, op: "cap_derive", args: { handle: root, rights: R.READ } };
+  const pendingPayload = { schema: "qos.syscall/1", caller: pid, op: "cap_derive", args: { handle: root, rights: R.READ, handleVersion: started.event.hash } };
   const before = await a.kernel.stateDigest();
   const request = await room.emit(pid, started.event, "syscall-request", pendingPayload);
   const pendingReplay = replayQosKernel(room.log.events());
@@ -262,7 +263,7 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   const start = await original.startProcess("original", {entropyHex:"ab"});
   const pid = start.processId;
   const root = replayQosKernel(original.log.events()).kernel.getProcess(pid).root;
-  const payload = {schema:"qos.syscall/1",caller:pid,op:"cap_derive",args:{handle:root,rights:R.READ}};
+  const payload = {schema:"qos.syscall/1",caller:pid,op:"cap_derive",args:{handle:root,rights:R.READ,handleVersion:start.event.hash}};
   const req = await original.emit(pid,start.event,"syscall-request",payload);
   const outcome = previewCanonicalSyscall(replayQosKernel(original.log.events()).kernel,payload,pid,req.hash);
   assert.ok(outcome.ok);
@@ -280,6 +281,38 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   assert.ok(k.createProcess({name:"reserved",owner:"a",pid:"proc:1"}).ok);
   const auto = k.createProcess({name:"auto",owner:"a"});
   ok("automatic PIDs skip existing explicit allocations", auto.ok && auto.value.pid === "proc:2");
+}
+// Version receipts bind to a specific handle state, not just any existing hash.
+{
+  const roomId = "cap:room:03010563656127610341634101250325";
+  const room = new QosProcessRoom({roomId,identity:await newDynCapState(new Uint8Array(32).fill(94)),transport:{broadcast:()=>{}}});
+  const start = await room.startProcess("versioned",{entropyHex:"ae"});
+  const pid = start.processId;
+  const replay = () => replayQosKernel(room.log.events());
+  const root = replay().kernel.getProcess(pid).root;
+  const call = async (op,args) => {
+    const payload = {schema:"qos.syscall/1",caller:pid,op,args};
+    const req = await room.emit(pid,start.event,"syscall-request",payload);
+    const outcome = previewCanonicalSyscall(replay().kernel,payload,pid,req.hash);
+    const result = await room.emit(pid,start.event,"syscall-result",{schema:"qos.syscall/1",requestHash:req.hash,outcome});
+    return {req,result,outcome};
+  };
+  const derived = await call("cap_derive",{handle:root,rights:R.READ,handleVersion:start.event.hash});
+  const handle = derived.outcome.value.id;
+  ok("new handle version is its verified result hash",replay().kernel.handleVersion(pid,handle) === derived.result.hash);
+  const closed = await call("cap_close",{handle,handleVersion:derived.result.hash});
+  ok("closed handle retains last mutation receipt",replay().kernel.handleVersion(pid,handle) === closed.result.hash);
+  const refusal = await call("cap_close",{handle,handleVersion:closed.result.hash});
+  ok("current tombstone version produces deterministic EBADF",!refusal.outcome.ok && refusal.outcome.errno === "EBADF" && replay().rejected.length === 0);
+  const before = await replay().kernel.stateDigest();
+  const stale = await room.emit(pid,start.event,"syscall-request",{schema:"qos.syscall/1",caller:pid,op:"cap_close",args:{handle,handleVersion:derived.result.hash}});
+  ok("stale version cannot act on tombstone",replay().rejected.some(e => e.hash === stale.hash && e.reason.includes("stale")));
+  const missing = await room.emit(pid,start.event,"syscall-request",{schema:"qos.syscall/1",caller:pid,op:"cap_close",args:{handle,handleVersion:"f".repeat(64)}});
+  const after = replay();
+  ok("unknown version edge is explicit missing dependency",after.missingDependencies.some(e => e.eventHash === missing.hash && e.kind === "handle-version"));
+  ok("invalid version histories do not mutate verified state",await after.kernel.stateDigest() === before);
+  const reverse = replayQosKernel([...room.log.events()].reverse());
+  ok("version conflicts and state converge across delivery permutations",JSON.stringify(after.rejected) === JSON.stringify(reverse.rejected) && await after.kernel.stateDigest() === await reverse.kernel.stateDigest());
 }
 // --- deterministic replay -------------------------------------------------
 {

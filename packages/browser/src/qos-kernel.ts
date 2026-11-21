@@ -10,7 +10,7 @@
 // read/write/stat/VFS, scheduler ticks, devices, services, and broader syscall
 // authority. The bounded root-attributed syscall event slice is below.
 
-import { canonicalJson, canonicalEventOrder, brokenChainsIn, processIdFor, parseQosCapabilityScope, scopeAllows, sha256Hex, type QosEvent } from "./qos-process.js";
+import { canonicalJson, canonicalEventOrder, eventDependencies, type QosDependencyKind, brokenChainsIn, processIdFor, parseQosCapabilityScope, scopeAllows, sha256Hex, type QosEvent } from "./qos-process.js";
 
 export const QOS_ABI_VERSION = 0;
 
@@ -114,6 +114,33 @@ export class QosKernel {
   // Closed handles are removed from the live table but their ancestry remains
   // part of the replay state; a close must not cut a revocation path.
   private readonly lineage = new Map<string, string | null>();
+  // Version stamps are canonical event hashes, including tombstone versions.
+  private readonly versions = new Map<string, { pid: string; hash: string }>();
+
+  /** Do not expose another process's handle version through this lookup. */
+  handleVersion(pid: string, handle: string): string | undefined {
+    const version = this.versions.get(handle);
+    return version?.pid === pid ? version.hash : undefined;
+  }
+
+  snapshotLiveHandles(): Map<string, { pid: string; revoked: boolean }> {
+    const out = new Map<string, { pid: string; revoked: boolean }>();
+    for (const p of this.processes.values()) for (const h of p.handles.values())
+      out.set(h.id, { pid: p.pid, revoked: h.revoked });
+    return out;
+  }
+
+  /** Stamp creations, closures and revocations only after verified replay. */
+  recordHandleVersions(before: Map<string, { pid: string; revoked: boolean }>, eventHash: string): void {
+    const after = this.snapshotLiveHandles();
+    for (const [id, current] of after) {
+      const prior = before.get(id);
+      if (!prior || prior.pid !== current.pid || prior.revoked !== current.revoked)
+        this.versions.set(id, { pid: current.pid, hash: eventHash });
+    }
+    for (const [id, prior] of before) if (!after.has(id))
+      this.versions.set(id, { pid: prior.pid, hash: eventHash });
+  }
 
   /** Bootstrap a process. The caller supplies the owner identity; this is the
    *  equivalent of the room admitting the initial process, not a syscall. */
@@ -345,6 +372,7 @@ export class QosKernel {
     copy.nextPid = this.nextPid;
     copy.nextHandle = this.nextHandle;
     for (const [id, parent] of this.lineage) copy.lineage.set(id, parent);
+    for (const [id, version] of this.versions) copy.versions.set(id, { ...version });
     for (const [pid, proc] of this.processes) {
       copy.processes.set(pid, {
         ...proc,
@@ -361,6 +389,7 @@ export class QosKernel {
       abi: QOS_ABI_VERSION,
       nextPid: this.nextPid,
       nextHandle: this.nextHandle,
+      versions: [...this.versions.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
       lineage: [...this.lineage.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
       processes: [...this.processes.values()]
         .sort((a, b) => a.pid < b.pid ? -1 : a.pid > b.pid ? 1 : 0)
@@ -453,12 +482,14 @@ function parseSyscallRequest(payload: Record<string, unknown>, pid: string): Qos
       if (!exactKeys(args, [])) return null;
       break;
     case "cap_close": case "cap_revoke":
-      if (!exactKeys(args, ["handle"]) || typeof args.handle !== "string") return null;
+    case "cap_derive": {
+      const keys = payload.op === "cap_derive" ? ["handle", "rights"] : ["handle"];
+      if (args && typeof args === "object" && Object.hasOwn(args, "handleVersion")) keys.push("handleVersion");
+      if (!exactKeys(args, keys) || typeof args.handle !== "string") return null;
+      if (keys.includes("handleVersion") && (typeof args.handleVersion !== "string" || !/^[0-9a-f]{64}$/.test(args.handleVersion))) return null;
+      if (payload.op === "cap_derive" && (typeof args.rights !== "number" || !Number.isSafeInteger(args.rights))) return null;
       break;
-    case "cap_derive":
-      if (!exactKeys(args, ["handle", "rights"]) || typeof args.handle !== "string" ||
-          typeof args.rights !== "number" || !Number.isSafeInteger(args.rights)) return null;
-      break;
+    }
     default: return null;
   }
   return payload as QosCanonicalSyscallRequest;
@@ -484,7 +515,7 @@ export interface QosKernelReplayResult {
   kernel: QosKernel;
   applied: string[];
   rejected: { hash: string; reason: string }[];
-  missingDependencies: { eventHash: string; dependencyHash: string; kind: "prev" | "grant" }[];
+  missingDependencies: { eventHash: string; dependencyHash: string; kind: QosDependencyKind }[];
   cyclicHashes: string[];
   syscalls: QosCanonicalSyscallTrace[];
   pendingSyscalls: string[];
@@ -510,7 +541,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
     changed = false;
     for (const event of order.ordered) {
       if (invalidEventHashes.has(event.hash)) continue;
-      const refs = [event.prev !== "genesis" ? event.prev : null, event.grant !== "root" ? event.grant : null].filter(Boolean) as string[];
+      const refs = eventDependencies(event).map(ref => ref.hash);
       if (refs.some((ref) => invalidEventHashes.has(ref))) {
         invalidEventHashes.add(event.hash);
         changed = true;
@@ -531,7 +562,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
     rejected.push({ hash: event.hash, reason });
   };
   for (const [position, event] of order.ordered.entries()) {
-    if (invalidEventHashes.has(event.hash) || invalidEventHashes.has(event.prev) || invalidEventHashes.has(event.grant)) {
+    if (invalidEventHashes.has(event.hash) || eventDependencies(event).some(ref => invalidEventHashes.has(ref.hash))) {
       invalidEventHashes.add(event.hash);
       rejected.push({ hash: event.hash, reason: "event has unresolved or cyclic causal dependencies" });
       continue;
@@ -544,9 +575,10 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
           processIdFor(name, event.capability) !== event.process || !scope || scope.process !== event.process) {
         rejectSyscall(event, "conflicting or invalid process-start"); continue;
       }
+      const before = kernel.snapshotLiveHandles();
       const result = kernel.createProcess({ name, owner: event.source, pid: event.process, rootId: `h:start:${event.hash}` });
-      if (!result.ok) rejected.push({ hash: event.hash, reason: result.detail ?? result.errno });
-      else { starts.set(event.process, event); applied.push(event.hash); }
+      if (!result.ok) rejectSyscall(event, result.detail ?? result.errno);
+      else { kernel.recordHandleVersions(before, event.hash); starts.set(event.process, event); applied.push(event.hash); }
       continue;
     }
     if (event.type === "syscall-request" || event.type === "syscall-result") {
@@ -562,6 +594,10 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
       if (event.type === "syscall-request") {
         const request = parseSyscallRequest(event.payload, event.process);
         if (!request) { rejectSyscall(event, "invalid or unsupported syscall payload"); continue; }
+        if (typeof request.args.handle === "string" &&
+            request.args.handleVersion !== kernel.handleVersion(event.process, request.args.handle)) {
+          rejectSyscall(event, "missing, stale or foreign handle version"); continue;
+        }
         requests.set(event.hash, { event, request });
         applied.push(event.hash);
         continue;
@@ -576,13 +612,18 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
           pending.event.capability !== event.capability) {
         rejectSyscall(event, "unmatched or repeated syscall result"); continue;
       }
+      if (typeof pending.request.args.handle === "string" &&
+          pending.request.args.handleVersion !== kernel.handleVersion(event.process, pending.request.args.handle)) {
+        rejectSyscall(event, "handle version changed before result"); continue;
+      }
+      const before = kernel.snapshotLiveHandles();
       const trial = kernel.cloneForReplay();
       const outcome = executeCanonicalSyscall(trial, pending.request, requestHash);
       if (canonicalJson(outcome) !== canonicalJson(payload.outcome)) {
         rejectSyscall(event, "syscall outcome differs from deterministic execution"); continue;
       }
       // Refusals are traceable but cannot publish speculative mutation.
-      if (outcome.ok) kernel = trial;
+      if (outcome.ok) { trial.recordHandleVersions(before, event.hash); kernel = trial; }
       consumed.add(requestHash);
       syscalls.push({ requestHash, resultHash: event.hash, caller: event.process, op: pending.request.op,
                       args: { ...pending.request.args }, outcome, position });
@@ -599,9 +640,10 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
       continue;
     }
     const transition = event.type === "process-suspend" ? "suspend" : event.type === "process-resume" ? "resume" : "terminate";
+    const before = kernel.snapshotLiveHandles();
     const result = kernel.replayLifecycle(event.process, transition);
     if (!result.ok) rejected.push({ hash: event.hash, reason: result.detail ?? result.errno });
-    else applied.push(event.hash);
+    else { kernel.recordHandleVersions(before, event.hash); applied.push(event.hash); }
   }
   return { kernel, applied, rejected, missingDependencies: order.missingDependencies, cyclicHashes: order.cyclicHashes, syscalls, pendingSyscalls: [...requests.keys()].filter(hash => !consumed.has(hash)) };
 }

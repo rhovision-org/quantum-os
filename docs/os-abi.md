@@ -176,7 +176,17 @@ earlier event chains arrive. The standalone kernel fixture API still uses local
 numbered handles. Existing experimental canonical histories containing numbered
 handle IDs have no automatic migration: coordinated clients must start a new
 journal or explicitly migrate its receipts rather than reinterpret them.
-Cross-process object/version dependencies, general operations, and distributed
+A known caller-owned handle must additionally carry `args.handleVersion`, the
+hash of its latest accepted creation or mutation event. Roots are stamped by
+process-start; derived handles by successful results; close/revoke/termination
+stamp affected handles, including tombstones. The dispatcher supplies the
+observed version by default. Missing/stale/foreign versions fail replay;
+a genuinely unknown caller handle without a version may yield EBADF. The
+version index lives in the replay digest and is copied with speculative state.
+Request/result and handle-version hashes are explicit causal dependencies,
+not inferred from arbitrary strings. This scoped contract does not extend
+authority across processes; concurrent shared-object version selection,
+general operations, and distributed
 admission/coordination remain open.
 
 ## Security invariants

@@ -221,6 +221,11 @@ export class QosCommand {
     const payload = { schema: "qos.syscall/1", caller: entry.id, op: operation.trim(), args };
     const current = () => replayQosKernel(this.room.log.events(), this.room.log.forkedSources);
     const before = current();
+    if (args && typeof args === "object" && !Array.isArray(args) &&
+        "handle" in args && typeof args.handle === "string" && !Object.hasOwn(args, "handleVersion")) {
+      const version = before.kernel.handleVersion(entry.id, args.handle);
+      if (version !== undefined) Object.assign(args, { handleVersion: version });
+    }
     if (previewCanonicalSyscall(before.kernel, payload, entry.id) === null) {
       this.host.say("invalid or unsupported canonical syscall");
       return;
