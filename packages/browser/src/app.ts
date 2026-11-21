@@ -8823,7 +8823,7 @@ async function connect(): Promise<void> {
           if (!accepted) addMessage("", `⚠ refused a QOS event from ${peerLabel(from)}`, "system");
           return;
         }
-        if (d.kind === "file-start") { attachments.fileStart(d); return; }
+        if (d.kind === "file-start") { attachments.fileStart(from, d); return; }
         if (d.kind === "file-chunk") { attachments.fileChunk(from, d); return; }
         if (d.kind === "call-start") {
           addMessage("", `📞 ${peerLabel(from)} started a call — click Call to join`, "system");
