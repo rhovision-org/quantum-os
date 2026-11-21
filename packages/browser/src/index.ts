@@ -55,9 +55,6 @@ export type { QosCommandHost } from "./qos-command.js";
 export {
   QOS_ABI_VERSION, QOS_ALL_RIGHTS, QOS_RIGHTS, QOS_SIGNALS, QOS_SYSCALLS, QosKernel, replayQosKernel,
 } from "./qos-kernel.js";
-// Deterministic syscall request/result journal with replay validation.
-export { QosSyscallJournal } from "./qos-syscall-journal.js";
-export type { QosSyscallRequest, QosSyscallOutcome, QosSyscallEntry, QosSyscallReplay } from "./qos-syscall-journal.js";
 export type {
   QosErrno, QosHandle, QosHandleInfo, QosProcess, QosProcessInfo, QosProcessState,
   QosResult, QosRightName, QosSignal, QosSyscallName, QosKernelReplayResult,

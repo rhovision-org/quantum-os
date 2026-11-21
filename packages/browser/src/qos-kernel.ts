@@ -3,7 +3,7 @@
 // A pure, deterministic model of the kernel objects described in docs/os-abi.md:
 // processes, capability handles, rights attenuation, signals, wait/exit, and a
 // canonical state digest. It deliberately imports no DOM, storage, network, or
-// app code. `qos-process.ts` remains the signed room-event contract; this module
+// app code. `qos-process.ts` remains the dyncap-attributed room-event contract; this module
 // is the kernel seam that contract will call.
 //
 // Not implemented here (reserved by the ABI, tracked in the roadmap):
@@ -330,6 +330,22 @@ export class QosKernel {
 
   list(): QosProcessInfo[] {
     return [...this.processes.values()].map((p) => this.info(p)).sort((a, b) => a.pid.localeCompare(b.pid));
+  }
+
+  /** Copy every replay-relevant field, including allocation counters.
+   * A speculative operation must never mutate the committed kernel. */
+  cloneForReplay(): QosKernel {
+    const copy = new QosKernel();
+    copy.nextPid = this.nextPid;
+    copy.nextHandle = this.nextHandle;
+    for (const [pid, proc] of this.processes) {
+      copy.processes.set(pid, {
+        ...proc,
+        pending: [...proc.pending],
+        handles: new Map([...proc.handles].map(([id, handle]) => [id, { ...handle }])),
+      });
+    }
+    return copy;
   }
 
   /** Canonical state used by the digest. Only stable, sorted data. */

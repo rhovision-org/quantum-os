@@ -127,7 +127,7 @@ for control flow.
 ## Planned syscall event payload
 
 This is the payload shape carried inside a `qos.event/1` event; v0 does not emit it.
-`qos.syscall/1` never forms a parallel journal.
+`qos.syscall/1` never forms a parallel journal. The internal `qos.test-trace/1` harness is only a local test fixture: it is neither admitted to a room nor exposed as a public API. Its ordered test input does not establish network-order convergence; that remains a canonical event integration obligation.
 
 ```json
 {
