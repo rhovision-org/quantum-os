@@ -4,9 +4,9 @@ on:
   push:
     # `work` is where changes land first; `main` is what is deployed. Both are
     # checked, so a merge to main is never the first time anything is run.
-    branches: [main, work]
+    branches: [main, work, feat/qos-kernel-scheduler-278]
   pull_request:
-    branches: [main, work]
+    branches: [main, work, feat/qos-kernel-journal-replay-317]
 
 jobs:
   rust:
