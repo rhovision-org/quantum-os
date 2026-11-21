@@ -621,7 +621,7 @@ export function compareEvents(a: QosEvent, b: QosEvent): number {
     compareStrings(a.hash, b.hash);
 }
 
-export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier";
+export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier" | "memory-frontier";
 export interface QosDependency { hash: string; kind: QosDependencyKind }
 /** Only schema-defined references are causal, never arbitrary payload strings. */
 export function eventDependencies(event: QosEvent): QosDependency[] {
@@ -633,7 +633,7 @@ export function eventDependencies(event: QosEvent): QosDependency[] {
     refs.push({ hash: event.payload.requestHash, kind: "request" });
   }
   if (event.type === "syscall-request" && event.payload?.schema === "qos.syscall/1" &&
-      typeof event.payload.op === "string" && ["cap_derive", "cap_close", "cap_revoke", "signal_grant", "signal"].includes(event.payload.op) &&
+      typeof event.payload.op === "string" && ["cap_derive", "cap_close", "cap_revoke", "signal_grant", "signal", "mem_put", "mem_get", "mem_stat", "mem_ref", "mem_drop", "mem_link", "mem_unlink"].includes(event.payload.op) &&
       isRecord(event.payload.args) && typeof event.payload.args.handleVersion === "string" &&
       HEX64.test(event.payload.args.handleVersion)) {
     refs.push({ hash: event.payload.args.handleVersion, kind: "handle-version" });
@@ -650,6 +650,14 @@ export function eventDependencies(event: QosEvent): QosDependency[] {
       event.payload.args.scheduleFrontier.length <= 4096) {
     for (const hash of event.payload.args.scheduleFrontier) if (typeof hash === "string" && HEX64.test(hash))
       refs.push({hash,kind:"scheduler-frontier"});
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&
+     typeof event.payload.op==="string"&&["mem_put","mem_get","mem_stat","mem_ref","mem_drop","mem_link","mem_unlink"].includes(event.payload.op)&&isRecord(event.payload.args)){
+    const args=event.payload.args;
+    if(Array.isArray(args.memoryFrontier)&&args.memoryFrontier.length<=4096)
+      for(const hash of args.memoryFrontier)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"memory-frontier"});
+    if((event.payload.op==="mem_link"||event.payload.op==="mem_unlink")&&typeof args.targetHandleVersion==="string"&&HEX64.test(args.targetHandleVersion))
+      refs.push({hash:args.targetHandleVersion,kind:"handle-version"});
   }
   return refs;
 }

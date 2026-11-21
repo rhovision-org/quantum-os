@@ -9,6 +9,7 @@
 // change `/poll` or `/gov`, and does not call a chain. Every lifecycle
 // transition is the dyncap-attributed event `QosProcessRoom` already knows how to make.
 
+import { MEMORY_OPS, type MemoryOp } from "./qos-memory.js";
 import { SCHEDULER_OPS, type SchedulerOp } from "./qos-scheduler.js";
 import type { DynCapState } from "./dyncap.js";
 import { replayQosKernel, previewCanonicalSyscall, canonicalSyscallReady } from "./qos-kernel.js";
@@ -189,6 +190,8 @@ export class QosCommand {
       }
       this.host.say(`  state digest: ${view.stateDigest}`);
       this.host.say(`  kernel digest: ${await kernel.kernel.stateDigest()}`);
+      const memory=kernel.kernel.memoryView();
+      this.host.say(`  memory objects: ${memory.objects.length} · reachable: ${memory.reachable.length} · logically unreferenced: ${memory.unreachable.length}`);
       this.host.say(`  scheduler: ${JSON.stringify(kernel.kernel.scheduleView())}`);
       this.host.say(`  canonical syscalls: ${kernel.syscalls.filter(item => item.caller === entry.id).length}`);
       if (view.finalDigest) this.host.say(`  final digest: ${view.finalDigest}`);
@@ -239,6 +242,13 @@ export class QosCommand {
     if (args && typeof args === "object" && !Array.isArray(args) &&
         SCHEDULER_OPS.includes(operation.trim() as SchedulerOp) && !Object.hasOwn(args,"scheduleFrontier"))
       Object.assign(args,{scheduleFrontier:before.kernel.schedulerFrontier()});
+    if(args && typeof args==="object" && !Array.isArray(args) && MEMORY_OPS.includes(operation.trim() as MemoryOp)){
+      if(!Object.hasOwn(args,"memoryFrontier"))Object.assign(args,{memoryFrontier:before.kernel.memoryFrontier()});
+      if("targetHandle" in args && typeof args.targetHandle==="string" && !Object.hasOwn(args,"targetHandleVersion")){
+        const version=before.kernel.handleVersion(entry.id,args.targetHandle);
+        if(version!==undefined)Object.assign(args,{targetHandleVersion:version});
+      }
+    }
     if (!canonicalSyscallReady(before.kernel, payload, entry.id)) {
       this.host.say("invalid, unsupported or stale canonical syscall");
       return;

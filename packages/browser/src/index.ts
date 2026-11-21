@@ -64,6 +64,13 @@ export type {
 export { QosScheduler, SCHEDULER_OPS, MAX_PRIORITY, MAX_SLEEP_TICKS } from "./qos-scheduler.js";
 export type { ScheduleView, SchedulerOp, SchedulerLifecycle } from "./qos-scheduler.js";
 
+// Content-addressed object metadata and optional availability adapters (#279).
+export { QosMemoryGraph, MEMORY_OPS, MAX_OBJECT_BYTES } from "./qos-memory.js";
+export type { ObjectDescriptor, ObjectLocator, MemoryObject, MemoryOp } from "./qos-memory.js";
+export { QosMemoryBytes, RoomByteCache, OpfsMemoryCache, objectIdentity } from "./qos-memory-bytes.js";
+export type { MemoryByteCache, MemoryDurableBackend } from "./qos-memory-bytes.js";
+export { RholoRegistryMemory } from "./qos-memory-rholo.js";
+
 // Personal success-framework goals — identity-scoped, local-only by default.
 export { GoalStore, GOAL_PRIORITIES, parseGoalAdd } from "./goal-store.js";
 export type {

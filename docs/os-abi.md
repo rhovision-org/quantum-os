@@ -85,8 +85,8 @@ lands.
 | `cap_revoke` | `handle` | revoked count | v0 |
 | `cap_close` | `handle` | — | v0 |
 | `open` | `object`, `rights`, `parent?` | handle | v0 (object handles) |
-| `read` | `handle` | bytes/text | reserved — memory #279 |
-| `write` | `handle`, `data` | bytes written | reserved — memory #279 |
+| `read` | `handle` | bytes/text | reserved generic ABI; bounded memory below |
+| `write` | `handle`, `data` | bytes written | reserved; immutable content uses mem_put |
 | `stat` | `handle` | object metadata | reserved — VFS #280 |
 | `mkdir` / `unlink` / `rename` | path/handle args | — | reserved — VFS #280 |
 | `mount` / `unmount` | handle/path | — | reserved — VFS #280 |
@@ -240,6 +240,57 @@ Control-plane syscalls remain independent of CPU-turn accounting; this is
 not an instruction executor or preemptive scheduler. Cooperation is required
 for liveness. Late conflicting histories may invalidate unfinalized receipts.
 The ordinary room root is not a distributed scheduler/finality authority.
+
+## Content-addressed memory (#279)
+
+Three distinct contracts:
+
+- **Identity:** SHA-256 of exact bytes, at most 64 KiB per object in this slice.
+- **History:** `qos.event/1` holds descriptors, handles and graph mutations,
+  never payload bytes. Replayed metadata is a claim, not a byte-possession
+  proof. `mem_put` declares a descriptor through the caller root; same content ID
+  and size deduplicate, conflicting lengths fail closed. `mem_get` and
+  `mem_stat` return metadata; byte retrieval is a separate availability API.
+  `mem_ref` attenuates an existing handle and `mem_drop` closes it.
+  `mem_link` / `mem_unlink` use a WRITE source handle and READ destination
+  handle in the caller namespace, with process-scoped edge ownership.
+- **Availability:** `QosMemoryBytes.prepare` hashes a detached byte snapshot,
+  optionally publishes explicitly to a configured `RholoRegistryMemory`,
+  requires verified readback, then caches and returns descriptor metadata.
+  `get` takes a current kernel callback plus caller PID and handle; it verifies
+  length/hash on both local and remote paths, rechecks authorization after I/O,
+  and never reconstructs bytes from a hash. OPFS and room-memory caches are
+  scoped adapters; `scripts/qos-cli/memory-byte-cache.mjs` is a filesystem
+  adapter for memory carriers (daemon message wiring remains open).
+
+Memory requests use exact sorted `memoryFrontier` (maximum 4096 receipts),
+plus handle-version references for both handles when linking. Successful
+mutations compact the frontier; other kernel transitions that change the
+live root set add receipts. Replay checks versions before request and
+result, commits only matching outcomes, and hashes graph state and roots.
+Independent concurrent mutations may invalidate speculative receipts:
+the conservative frontier is not a distributed conflict-resolution protocol.
+
+Reachability is an iterative mark traversal from all locally known live,
+unrevoked memory handles. Cycles are safe; orphan cycles are logically
+unreachable. Dropping one handle cannot collect an object reachable through
+another known handle or edge. Edges and descriptors remain in journal history
+after dereferencing. Local GC removes only known unreachable cached bytes,
+honors staging and caller-supplied pins, does not issue durable deletes, and
+does not infer global unreachability. Unknown cache entries are retained.
+Collector/read operations are serialized per service; multiple services/tabs
+need external coordination and fresh local snapshots. Cache loss and GC do
+not change the canonical digest.
+
+The registry adapter uses immutable insertArbitrary, signed deploy verdict
+and hash-verified lookup; no automatic deployment. Browser SDK and disk
+adapter are exposed, not automatically wired into the daemon or application
+UI. Registry readback against a real disposable Rholo node and multi-peer
+offline availability remain integration gates; the dedicated CI fixture
+uses an independent in-memory durable backend, not a live chain. Content IDs
+and journal locators are public room metadata, not confidentiality or proof
+of possession. The API enforces handle ownership, not secrecy of content
+published to a public registry.
 
 ## Security invariants
 

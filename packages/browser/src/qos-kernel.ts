@@ -14,6 +14,8 @@ import { canonicalJson, canonicalEventOrder, eventDependencies, type QosDependen
 
 import { QosScheduler, SCHEDULER_OPS, MAX_SCHEDULER_FRONTIER, type SchedulerOp, type ScheduleView } from "./qos-scheduler.js";
 
+import { QosMemoryGraph, MEMORY_OPS, MAX_MEMORY_FRONTIER, parseDescriptor, type MemoryOp, type MemoryObject, type ObjectDescriptor } from "./qos-memory.js";
+
 export const QOS_ABI_VERSION = 0;
 
 export const QOS_RIGHTS = {
@@ -33,7 +35,7 @@ export const QOS_ALL_RIGHTS =
 
 export const QOS_SYSCALLS = [
   "getpid", "getppid", "spawn", "exit", "wait", "signal",
-  "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open",
+  "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open", ...MEMORY_OPS,
   "read", "write", "stat", "mkdir", "unlink", "rename", "mount", "unmount",
   "send", "recv", "listen", "connect", "accept",
   "svc_register", "svc_lookup", "yield", "sleep", "sched_step", "sched_priority", "sched_wake", "log",
@@ -112,6 +114,67 @@ function signalExitCode(sig: QosSignal): number {
 export class QosKernel {
   private readonly processes = new Map<string, QosProcess>();
   private scheduler = new QosScheduler();
+  private memory = new QosMemoryGraph();
+
+  private memoryRoots(): string[] {
+    const roots = new Set<string>();
+    for (const p of this.processes.values()) for (const h of p.handles.values())
+      if (!h.revoked && h.object.startsWith("mem:")) roots.add(h.object.slice(4));
+    return [...roots].sort();
+  }
+  memoryView() { return this.memory.state(this.memoryRoots()); }
+  memoryFrontier(): string[] { return this.memory.frontier(); }
+  recordMemory(before: string, eventHash:string, operation?: MemoryOp):void {
+    if (operation && operation !== "mem_get" && operation !== "mem_stat") this.memory.commit(eventHash);
+    else if (before !== canonicalJson(this.memoryRoots())) this.memory.observe(eventHash);
+  }
+  memoryRootSnapshot():string { return canonicalJson(this.memoryRoots()); }
+
+  /** A put declares immutable content metadata; it does not certify byte availability. */
+  memoryPut(pid:string, rootId:string, descriptor:ObjectDescriptor, allocation:string):QosResult<QosHandleInfo> {
+    const caller=this.processes.get(pid);
+    if (!caller || caller.state!=="running") return err("ENOENT","caller is not running");
+    if (caller.root!==rootId) return err("EACCES","namespace root required");
+    const root=this.handle(caller,rootId);
+    if (!root.ok) return root;
+    const rights=QOS_RIGHTS.READ|QOS_RIGHTS.WRITE|QOS_RIGHTS.GRANT|QOS_RIGHTS.REVOKE;
+    if ((root.value.rights & rights)!==rights) return err("EACCES","root lacks memory rights");
+    const id=`h:memory:${allocation}`;
+    if (this.lineage.has(id)) return err("EINVAL","handle already allocated");
+    const validated=parseDescriptor(descriptor);
+    if (!validated || !this.memory.put(validated)) return err("EINVAL","invalid or conflicting content descriptor");
+    const h=this.makeHandle("mem:"+descriptor.id,rights,rootId,id);
+    caller.handles.set(h.id,h);
+    return ok(this.handleInfo(h));
+  }
+
+  private memoryHandle(pid:string,id:string,right:number):QosResult<QosHandle> {
+    const caller=this.processes.get(pid);
+    if (!caller || caller.state!=="running") return err("ENOENT","caller is not running");
+    const h=this.handle(caller,id);
+    if(!h.ok)return h;
+    if(!h.value.object.startsWith("mem:") || (h.value.rights & right)!==right) return err("EACCES","memory handle or right missing");
+    return h;
+  }
+  memoryStat(pid:string,id:string):QosResult<MemoryObject> {
+    const h=this.memoryHandle(pid,id,QOS_RIGHTS.READ);
+    if(!h.ok)return h;
+    const d=this.memory.stat(h.value.object.slice(4));
+    return d?ok(d):err("ENOENT","object metadata absent");
+  }
+  memoryRef(pid:string,id:string,rights:number,allocation:string):QosResult<QosHandleInfo> {
+    const h=this.memoryHandle(pid,id,QOS_RIGHTS.GRANT);
+    return h.ok?this.capDerive(pid,id,rights,`h:memory:${allocation}`):h;
+  }
+  memoryDrop(pid:string,id:string):QosResult<true> {
+    const h=this.memoryHandle(pid,id,0);
+    return h.ok?this.capClose(pid,id):h;
+  }
+  memoryLink(pid:string,from:string,to:string,remove:boolean):QosResult<true> {
+    const a=this.memoryHandle(pid,from,QOS_RIGHTS.WRITE),b=this.memoryHandle(pid,to,QOS_RIGHTS.READ);
+    if(!a.ok)return a;if(!b.ok)return b;
+    return this.memory.link(pid,a.value.object.slice(4),b.value.object.slice(4),remove)?ok(true):err("ENOENT","object metadata absent");
+  }
 
   scheduleView(): ScheduleView { return this.scheduler.view(); }
   schedulerFrontier(): string[] { return this.scheduler.frontier(); }
@@ -428,6 +491,7 @@ export class QosKernel {
   cloneForReplay(): QosKernel {
     const copy = new QosKernel();
     copy.scheduler = this.scheduler.clone();
+    copy.memory = this.memory.clone();
     copy.nextPid = this.nextPid;
     copy.nextHandle = this.nextHandle;
     for (const [id, parent] of this.lineage) copy.lineage.set(id, parent);
@@ -448,6 +512,7 @@ export class QosKernel {
     return {
       abi: QOS_ABI_VERSION,
       scheduler: this.scheduler.state(),
+      memory: this.memoryView(),
       nextPid: this.nextPid,
       nextHandle: this.nextHandle,
       processVersions: [...this.processVersions.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
@@ -519,7 +584,7 @@ export class QosKernel {
 export type QosCanonicalSyscallRequest = {
   schema: "qos.syscall/1";
   caller: string;
-  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp;
+  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp | MemoryOp;
   args: Record<string, unknown>;
 };
 export type QosCanonicalSyscallTrace = {
@@ -576,6 +641,21 @@ function parseSyscallRequest(payload: Record<string, unknown>, pid: string): Qos
       if (payload.op === "sched_priority" && (typeof args.priority !== "number" || !Number.isSafeInteger(args.priority))) return null;
       break;
     }
+    case "mem_put": case "mem_get": case "mem_stat": case "mem_ref": case "mem_drop": case "mem_link": case "mem_unlink": {
+      const keys=["handle","memoryFrontier"];
+      if(args && typeof args==="object" && Object.hasOwn(args,"handleVersion"))keys.push("handleVersion");
+      if(payload.op==="mem_put")keys.push("descriptor");
+      if(payload.op==="mem_ref")keys.push("rights");
+      if(payload.op==="mem_link"||payload.op==="mem_unlink")keys.push("targetHandle","targetHandleVersion");
+      if(!exactKeys(args,keys)||typeof args.handle!=="string"||
+         !Array.isArray(args.memoryFrontier)||args.memoryFrontier.length>MAX_MEMORY_FRONTIER||
+         !args.memoryFrontier.every((v,i,a)=>typeof v==="string"&&/^[0-9a-f]{64}$/.test(v)&&(i===0||a[i-1]<v)))return null;
+      if(keys.includes("handleVersion")&&(typeof args.handleVersion!=="string"||!/^[0-9a-f]{64}$/.test(args.handleVersion)))return null;
+      if(payload.op==="mem_put"&&!parseDescriptor(args.descriptor))return null;
+      if(payload.op==="mem_ref"&&(typeof args.rights!=="number"||!Number.isSafeInteger(args.rights)))return null;
+      if(keys.includes("targetHandle")&&(typeof args.targetHandle!=="string"||typeof args.targetHandleVersion!=="string"||!/^[0-9a-f]{64}$/.test(args.targetHandleVersion)))return null;
+      break;
+    }
     default: return null;
   }
   return payload as QosCanonicalSyscallRequest;
@@ -587,6 +667,11 @@ function executeCanonicalSyscall(kernel: QosKernel, request: QosCanonicalSyscall
     case "sched_step": case "yield": case "sched_wake": return kernel.schedulerTurn(pid, request.op);
     case "sleep": return kernel.schedulerTurn(pid, request.op, request.args.ticks as number);
     case "sched_priority": return kernel.schedulerTurn(pid, request.op, request.args.priority as number);
+    case "mem_put": return requestHash===undefined?err("EINVAL","request hash required"):kernel.memoryPut(pid,request.args.handle as string,parseDescriptor(request.args.descriptor)!,requestHash);
+    case "mem_get": case "mem_stat": return kernel.memoryStat(pid,request.args.handle as string);
+    case "mem_ref": return requestHash===undefined?err("EINVAL","request hash required"):kernel.memoryRef(pid,request.args.handle as string,request.args.rights as number,requestHash);
+    case "mem_drop": return kernel.memoryDrop(pid,request.args.handle as string);
+    case "mem_link": case "mem_unlink": return kernel.memoryLink(pid,request.args.handle as string,request.args.targetHandle as string,request.op==="mem_unlink");
     case "getpid": return kernel.getpid(pid);
     case "getppid": return kernel.getppid(pid);
     case "cap_derive": return kernel.capDerive(pid, request.args.handle as string, request.args.rights as number, requestHash === undefined ? undefined : `h:request:${requestHash}`);
@@ -608,6 +693,10 @@ function syscallVersionsMatch(kernel: QosKernel, request: QosCanonicalSyscallReq
   if (SCHEDULER_OPS.includes(request.op as SchedulerOp))
     return canonicalJson(args.scheduleFrontier) === canonicalJson(kernel.schedulerFrontier());
   if (typeof args.handle === "string" && args.handleVersion !== kernel.handleVersion(pid, args.handle)) return false;
+  if(MEMORY_OPS.includes(request.op as MemoryOp)){
+    if(canonicalJson(args.memoryFrontier)!==canonicalJson(kernel.memoryFrontier()))return false;
+    if(typeof args.targetHandle==="string"&&args.targetHandleVersion!==kernel.handleVersion(pid,args.targetHandle))return false;
+  }
   if (request.op === "signal" || request.op === "signal_grant")
     return args.targetVersion === kernel.processVersion(args.target as string);
   return true;
@@ -690,10 +779,11 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         rejectSyscall(event, "conflicting or invalid process-start"); continue;
       }
       const before = kernel.snapshotLiveHandles();
+      const beforeMemory = kernel.memoryRootSnapshot();
       const beforeProcesses = kernel.snapshotProcessState();
       const result = kernel.createProcess({ name, owner: event.source, pid: event.process, rootId: `h:start:${event.hash}` });
       if (!result.ok) rejectSyscall(event, result.detail ?? result.errno);
-      else { kernel.recordHandleVersions(before, event.hash); kernel.recordProcessVersions(beforeProcesses, event.hash); kernel.recordScheduler(event.hash); starts.set(event.process, event); applied.push(event.hash); }
+      else { kernel.recordHandleVersions(before, event.hash); kernel.recordProcessVersions(beforeProcesses, event.hash); kernel.recordScheduler(event.hash); kernel.recordMemory(beforeMemory,event.hash); starts.set(event.process, event); applied.push(event.hash); }
       continue;
     }
     if (event.type === "syscall-request" || event.type === "syscall-result") {
@@ -710,7 +800,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         const request = parseSyscallRequest(event.payload, event.process);
         if (!request) { rejectSyscall(event, "invalid or unsupported syscall payload"); continue; }
         if (!syscallVersionsMatch(kernel, request)) {
-          rejectSyscall(event, "missing, stale or foreign handle/process/scheduler version"); continue;
+          rejectSyscall(event, "missing, stale or foreign handle/process/scheduler/memory version"); continue;
         }
         requests.set(event.hash, { event, request });
         applied.push(event.hash);
@@ -727,9 +817,10 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         rejectSyscall(event, "unmatched or repeated syscall result"); continue;
       }
       if (!syscallVersionsMatch(kernel, pending.request)) {
-        rejectSyscall(event, "handle/process/scheduler version changed before result"); continue;
+        rejectSyscall(event, "handle/process/scheduler/memory version changed before result"); continue;
       }
       const before = kernel.snapshotLiveHandles();
+      const beforeMemory = kernel.memoryRootSnapshot();
       const beforeProcesses = kernel.snapshotProcessState();
       const trial = kernel.cloneForReplay();
       const outcome = executeCanonicalSyscall(trial, pending.request, requestHash);
@@ -737,7 +828,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         rejectSyscall(event, "syscall outcome differs from deterministic execution"); continue;
       }
       // Refusals are traceable but cannot publish speculative mutation.
-      if (outcome.ok) { trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); kernel = trial; }
+      if (outcome.ok) { trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); trial.recordMemory(beforeMemory,event.hash,MEMORY_OPS.includes(pending.request.op as MemoryOp)?pending.request.op as MemoryOp:undefined); kernel = trial; }
       consumed.add(requestHash);
       syscalls.push({ requestHash, resultHash: event.hash, caller: event.process, op: pending.request.op,
                       args: { ...pending.request.args }, outcome, position });
@@ -755,10 +846,11 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
     }
     const transition = event.type === "process-suspend" ? "suspend" : event.type === "process-resume" ? "resume" : "terminate";
     const before = kernel.snapshotLiveHandles();
+    const beforeMemory = kernel.memoryRootSnapshot();
     const beforeProcesses = kernel.snapshotProcessState();
     const result = kernel.replayLifecycle(event.process, transition);
     if (!result.ok) rejected.push({ hash: event.hash, reason: result.detail ?? result.errno });
-    else { kernel.recordHandleVersions(before, event.hash); kernel.recordProcessVersions(beforeProcesses, event.hash); kernel.recordScheduler(event.hash); applied.push(event.hash); }
+    else { kernel.recordHandleVersions(before, event.hash); kernel.recordProcessVersions(beforeProcesses, event.hash); kernel.recordScheduler(event.hash); kernel.recordMemory(beforeMemory,event.hash); applied.push(event.hash); }
   }
   return { kernel, applied, rejected, missingDependencies: order.missingDependencies, cyclicHashes: order.cyclicHashes, syscalls, pendingSyscalls: [...requests.keys()].filter(hash => !consumed.has(hash)) };
 }
