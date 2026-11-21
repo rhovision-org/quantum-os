@@ -4,9 +4,9 @@ on:
   push:
     # `work` is where changes land first; `main` is what is deployed. Both are
     # checked, so a merge to main is never the first time anything is run.
-    branches: [main, work, feat/qos-kernel-scheduler-278, feat/qos-kernel-memory-279]
+    branches: [main, work, feat/qos-kernel-scheduler-278, feat/qos-kernel-memory-279, feat/qos-kernel-vfs-280]
   pull_request:
-    branches: [main, work, feat/qos-kernel-journal-replay-317, feat/qos-kernel-scheduler-278]
+    branches: [main, work, feat/qos-kernel-journal-replay-317, feat/qos-kernel-scheduler-278, feat/qos-kernel-memory-279]
 
 jobs:
   rust:
@@ -166,6 +166,8 @@ jobs:
         run: node packages/browser/test/qos-scheduler.test.mjs
       - name: QOS content-addressed memory test
         run: node packages/browser/test/qos-memory.test.mjs
+      - name: QOS capability VFS test
+        run: node packages/browser/test/qos-vfs.test.mjs
       - name: QOS isolated syscall trace test
         run: node packages/browser/test/qos-syscall-journal.test.mjs
 

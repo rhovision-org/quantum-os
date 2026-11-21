@@ -9,10 +9,12 @@
 // change `/poll` or `/gov`, and does not call a chain. Every lifecycle
 // transition is the dyncap-attributed event `QosProcessRoom` already knows how to make.
 
+import { VFS_OPS, type VfsOp } from "./qos-vfs.js";
+import type { QosMemoryBytes } from "./qos-memory-bytes.js";
 import { MEMORY_OPS, type MemoryOp } from "./qos-memory.js";
 import { SCHEDULER_OPS, type SchedulerOp } from "./qos-scheduler.js";
 import type { DynCapState } from "./dyncap.js";
-import { replayQosKernel, previewCanonicalSyscall, canonicalSyscallReady } from "./qos-kernel.js";
+import { replayQosKernel, previewCanonicalSyscall, canonicalSyscallReady, type QosCanonicalSyscallTrace } from "./qos-kernel.js";
 import {
   QosProcessRoom,
   parseQosEvent,
@@ -31,6 +33,9 @@ export interface QosCommandHost {
   label?: (source: string) => string;
   /** Persist the dyncap sequence after a locally dyncap-attributed event. */
   onSigned?: () => void;
+  memory?: () => Promise<{service:QosMemoryBytes;network?:string}>;
+  loadJournal?: () => unknown;
+  saveJournal?: (events:QosEvent[]) => void;
 }
 
 interface TrackedProcess {
@@ -63,6 +68,23 @@ export class QosCommand {
   private readonly byId = new Map<string, TrackedProcess>();
   private readonly byName = new Map<string, string>();
   private commandQueue: Promise<void> = Promise.resolve();
+  private readonly restored:Promise<void>;
+  private saveJournal():void {
+    try{this.host.saveJournal?.(this.room.log.checkpointEvents());}
+    catch{this.host.say("local QOS journal persistence failed; current room history remains in memory");}
+  }
+  private async restoreJournal():Promise<void>{
+    const saved=this.host.loadJournal?.();
+    if(saved===undefined||saved===null)return;
+    if(!Array.isArray(saved))throw new Error("invalid saved QOS journal");
+    for(const input of saved){
+      const event=parseQosEvent(input);
+      if(!event)throw new Error("saved QOS journal failed shape validation");
+      const admitted=await this.room.log.ingest(event);
+      if(!admitted.ok&&!admitted.fork)throw new Error("saved QOS journal failed admission");
+      if(admitted.ok)this.track(event,event.source===this.host.identity.anchor?"you":event.source);
+    }
+  }
 
   constructor(private readonly host: QosCommandHost) {
     this.room = new QosProcessRoom({
@@ -70,6 +92,8 @@ export class QosCommand {
       identity: host.identity,
       transport: host.transport,
     });
+    this.restored=this.restoreJournal();
+    void this.restored.catch(()=>{});
   }
 
   /** Processes this peer has seen start, oldest first. */
@@ -87,12 +111,14 @@ export class QosCommand {
 
   /** Feed one inbound QOS envelope. Returns true when it was accepted or known. */
   async ingest(from: string, data: unknown): Promise<boolean> {
+    await this.restored;
     const event = parseQosEvent(data);
     if (!event) return false;
     const result = await this.room.log.ingest(event);
-    if (!result.ok) return false;
+    if (!result.ok) {if(result.fork)this.saveJournal();return false;}
     if (result.duplicate) return true;
 
+    this.saveJournal();
     const entry = this.track(event, from);
     if (event.type === "process-start" && entry) {
       this.host.say(`🧩 ${this.label(from)} started **${entry.name}** — \`/qos status ${entry.name}\``);
@@ -108,7 +134,7 @@ export class QosCommand {
 
   /** Handle the argument after `/qos` (no leading command). */
   async handle(raw: string): Promise<void> {
-    const run = this.commandQueue.then(() => this.dispatch(raw));
+    const run = this.commandQueue.then(async () => {await this.restored;await this.dispatch(raw);});
     this.commandQueue = run.then(() => undefined, () => undefined);
     return run;
   }
@@ -130,7 +156,9 @@ export class QosCommand {
       case "ps":
         return this.ps();
       case "syscall":
-        return this.syscall(rest);
+        await this.syscall(rest);return;
+      case "fs":
+        return this.fs(rest);
       case "suspend":
       case "resume":
       case "terminate":
@@ -157,6 +185,7 @@ export class QosCommand {
     const started = await this.room.startProcess(name, { question });
     this.host.onSigned?.();
     this.track(started.event, "you");
+    this.saveJournal();
     const view = await this.room.view(started.processId);
     this.host.say(`🧩 started **${name}** — ${view.status} · ${started.processId} · digest ${short(view.stateDigest)}`);
   }
@@ -207,7 +236,7 @@ export class QosCommand {
     }
   }
 
-  private async syscall(rest: string): Promise<void> {
+  private async syscall(rest: string): Promise<QosCanonicalSyscallTrace|undefined> {
     const [reference, operation, ...argParts] = rest.split("|");
     const entry = this.resolve(reference.trim());
     if (!entry || !operation) {
@@ -249,12 +278,33 @@ export class QosCommand {
         if(version!==undefined)Object.assign(args,{targetHandleVersion:version});
       }
     }
+    if(args&&typeof args==="object"&&!Array.isArray(args)&&VFS_OPS.includes(operation.trim() as VfsOp)){
+      if("handle" in args&&typeof args.handle==="string"&&operation.trim()!=="fs_init"){
+        const version=before.kernel.fsVersion(entry.id,args.handle);
+        if(version){
+          if(!Object.hasOwn(args,"baseRoot"))Object.assign(args,{baseRoot:version.root});
+          if(!Object.hasOwn(args,"rootVersion"))Object.assign(args,{rootVersion:version.version});
+        }
+      }
+      if("targetHandle" in args&&typeof args.targetHandle==="string"){
+        const version=before.kernel.handleVersion(entry.id,args.targetHandle);
+        if(version&&!Object.hasOwn(args,"targetHandleVersion"))Object.assign(args,{targetHandleVersion:version});
+        if(operation.trim()==="fs_mount"){
+          const source=before.kernel.fsVersion(entry.id,args.targetHandle);
+          if(source){
+            if(!Object.hasOwn(args,"sourceRoot"))Object.assign(args,{sourceRoot:source.root});
+            if(!Object.hasOwn(args,"sourceVersion"))Object.assign(args,{sourceVersion:source.version});
+          }
+        }
+      }
+    }
     if (!canonicalSyscallReady(before.kernel, payload, entry.id)) {
       this.host.say("invalid, unsupported or stale canonical syscall");
       return;
     }
     const request = await this.room.emit(entry.id, entry.start, "syscall-request", payload);
     this.host.onSigned?.();
+    this.saveJournal();
     const requested = current();
     const outcome = previewCanonicalSyscall(requested.kernel, payload, entry.id, request.hash);
     if (!requested.pendingSyscalls.includes(request.hash) || outcome === null) {
@@ -265,11 +315,76 @@ export class QosCommand {
       schema: "qos.syscall/1", requestHash: request.hash, outcome,
     });
     this.host.onSigned?.();
+    this.saveJournal();
     const after = current();
     const trace = after.syscalls.find(item => item.resultHash === result.hash);
-    if (!trace) { this.host.say("syscall result rejected by canonical replay"); return; }
+    if (!trace) { this.host.say("syscall result rejected by canonical replay: "+(after.rejected.find(r=>r.hash===result.hash)?.reason??"unknown reason")); return; }
     this.host.say(`syscall ${trace.op} ${trace.outcome.ok ? "OK" : trace.outcome.errno} · ${JSON.stringify(trace.outcome)} · position ${trace.position} · kernel digest ${await after.kernel.stateDigest()}`);
+    return trace;
   }
+  private async fs(rest:string):Promise<void>{
+    const [head,...body]=rest.split("|");
+    const [op,ref,handle,path,destination,...extra]=head.trim().split(/\s+/);
+    const entry=ref?this.resolve(ref):null;
+    const current=()=>replayQosKernel(this.room.log.events(),this.room.log.forkedSources).kernel;
+    const say=(s:string)=>this.host.say(s);
+    const usage="usage: /fs init <process> | /fs ls|stat|cat|mkdir|rm|put|put-durable|rename|mount|unmount <process> <namespace-handle> <path> [destination|source-handle] | /fs put ... | text";
+    if(!entry||entry.ownerAnchor!==this.host.identity.anchor||extra.length){say(usage);return;}
+    const call=(operation:string,args:Record<string,unknown>)=>this.syscall(entry.id+" | "+operation+" | "+JSON.stringify(args));
+    const root=current().getProcess(entry.id)?.root;
+    if(op==="init"){if(!root||handle||body.length){say(usage);return;}await call("fs_init",{handle:root});return;}
+    if(!handle||!path){say(usage);return;}
+    const version=current().fsVersion(entry.id,handle);
+    if(!version){say("namespace handle unavailable or not readable");return;}
+    const args={handle,path,baseRoot:version.root,rootVersion:version.version};
+    const simple:Record<string,string>={ls:"fs_ls",stat:"fs_stat",mkdir:"fs_mkdir",rm:"fs_unlink",unmount:"fs_unmount"};
+    if(Object.hasOwn(simple,op)){if(destination||body.length){say(usage);return;}await call(simple[op],args);return;}
+    if(op==="rename"||op==="mount"){
+      if(!destination||body.length){say(usage);return;}
+      await call(op==="rename"?"fs_rename":"fs_mount",{...args,...(op==="rename"?{destination}:{targetHandle:destination})});return;
+    }
+    if(op==="grant"){
+      // /fs grant <process> <handle> <recipient-pid> <numeric-rights>
+      if(!destination||body.length){say(usage);return;}
+      await call("fs_grant",{handle,baseRoot:version.root,rootVersion:version.version,target:path,rights:Number(destination)});return;
+    }
+    if(!this.host.memory){say("byte availability adapter not configured");return;}
+    if(op==="cat"){
+      if(destination||body.length){say(usage);return;}
+      const opened=await call("fs_open",args);
+      if(!opened?.outcome.ok)return;
+      const file=(opened.outcome.value as {id:string}).id;
+      try{
+        const {service}=await this.host.memory();
+        const bytes=await service.get(current,entry.id,file);
+        if(!bytes){say("file bytes unavailable or hash verification failed");return;}
+        say(new TextDecoder().decode(bytes));
+      }finally{await call("mem_drop",{handle:file});}
+      return;
+    }
+    if(op!=="put"&&op!=="put-durable"){say(usage);return;}
+    if(destination||!body.length||!root){say(usage);return;}
+    // Check namespace WRITE before any durable publication. Concurrent root
+    // changes can still leave an explicitly published unreferenced object.
+    const rights=current().fsCanPut(entry.id,handle,path);
+    if(!rights){say("file destination is not writable or is invalid");return;}
+    const {service,network}=await this.host.memory();
+    if(op==="put-durable"&&!network){say("durable backend not configured");return;}
+    const bytes=new TextEncoder().encode(body.join("|").replace(/^ /,""));
+    const descriptor=await service.prepare(bytes,op==="put-durable"?network:undefined);
+    let file:string|undefined;
+    try{
+      const receipt=await call("mem_put",{handle:root,descriptor});
+      if(!receipt?.outcome.ok)return;
+      file=(receipt.outcome.value as {id:string}).id;
+      const changed=await call("fs_put",{...args,targetHandle:file});
+      if(changed?.outcome.ok)say("file committed: "+descriptor.id+(descriptor.locator?" · "+descriptor.locator.uri:" · local cache"));
+    }finally{
+      service.releaseStaged(descriptor.id);
+      if(file)await call("mem_drop",{handle:file});
+    }
+  }
+
 
   /** OS-style process table is reconstructed from the canonical kernel replay. */
   private async ps(): Promise<void> {
@@ -326,6 +441,7 @@ export class QosCommand {
         ? await this.room.resume(entry.id, grant, reason || undefined)
         : await this.room.terminate(entry.id, grant, reason || undefined);
     this.host.onSigned?.();
+    this.saveJournal();
     const after = await this.room.view(entry.id);
     const done = verb === "suspend" ? "suspended" : verb === "resume" ? "resumed" : "terminated";
     this.host.say(`✓ **${entry.name}** ${done} — ${after.status} · ${event.hash.slice(0, 12)}… · digest ${short(after.stateDigest)}`);

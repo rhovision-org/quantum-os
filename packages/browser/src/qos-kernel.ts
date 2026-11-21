@@ -16,6 +16,9 @@ import { QosScheduler, SCHEDULER_OPS, MAX_SCHEDULER_FRONTIER, type SchedulerOp, 
 
 import { QosMemoryGraph, MEMORY_OPS, MAX_MEMORY_FRONTIER, parseDescriptor, type MemoryOp, type MemoryObject, type ObjectDescriptor } from "./qos-memory.js";
 
+import {QosVfs,VFS_OPS,type VfsOp} from "./qos-vfs.js";
+import {isObjectId} from "./qos-memory.js";
+
 export const QOS_ABI_VERSION = 0;
 
 export const QOS_RIGHTS = {
@@ -35,7 +38,7 @@ export const QOS_ALL_RIGHTS =
 
 export const QOS_SYSCALLS = [
   "getpid", "getppid", "spawn", "exit", "wait", "signal",
-  "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open", ...MEMORY_OPS,
+  "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open", ...MEMORY_OPS, ...VFS_OPS,
   "read", "write", "stat", "mkdir", "unlink", "rename", "mount", "unmount",
   "send", "recv", "listen", "connect", "accept",
   "svc_register", "svc_lookup", "yield", "sleep", "sched_step", "sched_priority", "sched_wake", "log",
@@ -115,11 +118,92 @@ export class QosKernel {
   private readonly processes = new Map<string, QosProcess>();
   private scheduler = new QosScheduler();
   private memory = new QosMemoryGraph();
+  private vfs = new QosVfs();
+
+  private fsHandle(pid:string,id:string,right:number):QosResult<QosHandle>{
+    const p=this.processes.get(pid);
+    if(!p||p.state!=="running")return err("ENOENT","caller is not running");
+    const h=this.handle(p,id);if(!h.ok)return h;
+    if(!h.value.object.startsWith("fs:")||(h.value.rights&right)!==right)return err("EACCES","namespace capability or right missing");
+    return h;
+  }
+  fsVersion(pid:string,handle:string){
+    const h=this.fsHandle(pid,handle,QOS_RIGHTS.READ);
+    if(!h.ok)return null;
+    const n=this.vfs.get(h.value.object.slice(3));
+    return n?{root:n.root,version:n.version}:null;
+  }
+  fsState(){return this.vfs.state();}
+  fsCanPut(pid:string,handle:string,path:string){
+    const h=this.fsHandle(pid,handle,QOS_RIGHTS.READ|QOS_RIGHTS.WRITE);
+    if(!h.ok)return false;
+    const id=h.value.object.slice(3),n=this.vfs.get(id);
+    return !!n&&this.vfs.clone().mutate(id,n.root,n.version,"fs_put",path,"0".repeat(64)).ok;
+  }
+  recordVfs(op:QosCanonicalSyscallRequest["op"],outcome:QosResult<unknown>,eventHash:string){
+    if(!outcome.ok||!["fs_init","fs_put","fs_mkdir","fs_unlink","fs_rename","fs_mount","fs_unmount"].includes(op))return;
+    const v=outcome.value as {namespace:string};
+    this.vfs.stamp(v.namespace,eventHash);
+  }
+  executeVfs(pid:string,op:VfsOp,args:Record<string,unknown>,allocation?:string):QosResult<unknown>{
+    const p=this.processes.get(pid);
+    if(!p||p.state!=="running")return err("ENOENT","caller is not running");
+    const handle=args.handle as string, allocated=`h:vfs:${allocation}`;
+    const all=QOS_RIGHTS.READ|QOS_RIGHTS.WRITE|QOS_RIGHTS.GRANT|QOS_RIGHTS.REVOKE;
+    if(op==="fs_init"){
+      if(!allocation||p.root!==handle)return err("EACCES","process root required");
+      const h=this.handle(p,handle);if(!h.ok)return h;
+      if((h.value.rights&all)!==all||this.lineage.has(allocated))return err("EACCES","namespace creation denied");
+      const n=this.vfs.create(allocation);if(!n.ok)return n;
+      const opened=this.makeHandle("fs:"+allocation,all,handle,allocated);p.handles.set(opened.id,opened);
+      return ok({namespace:allocation,root:n.value.root,handle:this.handleInfo(opened)});
+    }
+    const mutation=["fs_put","fs_mkdir","fs_unlink","fs_rename","fs_mount","fs_unmount"].includes(op);
+    const h=this.fsHandle(pid,handle,QOS_RIGHTS.READ|(mutation?QOS_RIGHTS.WRITE:0));
+    if(!h.ok)return h;
+    const namespace=h.value.object.slice(3),n=this.vfs.get(namespace);
+    if(!n)return err("ENOENT","namespace absent");
+    if(n.root!==args.baseRoot||n.version!==args.rootVersion)return err("EAGAIN","namespace base root/version conflict");
+    const path=args.path as string;
+    if(op==="fs_stat"||op==="fs_ls")return this.vfs.inspect(namespace,path,op==="fs_ls");
+    if(op==="fs_open"){
+      const file=this.vfs.file(namespace,path);if(!file.ok)return file;
+      if(!allocation||this.lineage.has(allocated)||!this.memory.stat(file.value))return err("EINVAL","file object or allocation invalid");
+      // Open returns a read-only immutable byte handle; writing is a COW namespace mutation.
+      const opened=this.makeHandle("mem:"+file.value,QOS_RIGHTS.READ,handle,allocated);p.handles.set(opened.id,opened);
+      return ok(this.handleInfo(opened));
+    }
+    if(op==="fs_grant"){
+      const rights=args.rights as number,recipient=this.processes.get(args.target as string);
+      if(!recipient||recipient.state!=="running")return err("ENOENT","recipient not running");
+      if(!allocation||this.lineage.has(allocated)||!validRights(rights)||!(rights&QOS_RIGHTS.READ)||
+        (rights&~all)!==0||!(h.value.rights&QOS_RIGHTS.GRANT)||(rights&~h.value.rights)!==0)return err("EACCES","cannot grant requested namespace rights");
+      const opened=this.makeHandle(h.value.object,rights,handle,allocated);recipient.handles.set(opened.id,opened);
+      return ok(this.handleInfo(opened));
+    }
+    let extra=args.destination as string|undefined,source:string|undefined;
+    if(op==="fs_put"){
+      const file=this.memoryHandle(pid,args.targetHandle as string,QOS_RIGHTS.READ);
+      if(!file.ok)return file;
+      extra=file.value.object.slice(4);
+      if(!this.memory.stat(extra))return err("ENOENT","file object absent");
+    }
+    if(op==="fs_mount"){
+      const mount=this.fsHandle(pid,args.targetHandle as string,QOS_RIGHTS.READ|QOS_RIGHTS.GRANT);
+      if(!mount.ok)return mount;
+      source=mount.value.object.slice(3);
+      const src=this.vfs.get(source);
+      if(!src||src.root!==args.sourceRoot||src.version!==args.sourceVersion)return err("EAGAIN","mount source version conflict");
+    }
+    const changed=this.vfs.mutate(namespace,n.root,n.version,op,path,extra,source);
+    return changed.ok?ok({namespace,root:changed.value.root}):changed;
+  }
 
   private memoryRoots(): string[] {
     const roots = new Set<string>();
     for (const p of this.processes.values()) for (const h of p.handles.values())
       if (!h.revoked && h.object.startsWith("mem:")) roots.add(h.object.slice(4));
+      else if(!h.revoked&&h.object.startsWith("fs:"))for(const id of this.vfs.fileIds(h.object.slice(3)))roots.add(id);
     return [...roots].sort();
   }
   memoryView() { return this.memory.state(this.memoryRoots()); }
@@ -492,6 +576,7 @@ export class QosKernel {
     const copy = new QosKernel();
     copy.scheduler = this.scheduler.clone();
     copy.memory = this.memory.clone();
+    copy.vfs = this.vfs.clone();
     copy.nextPid = this.nextPid;
     copy.nextHandle = this.nextHandle;
     for (const [id, parent] of this.lineage) copy.lineage.set(id, parent);
@@ -513,6 +598,7 @@ export class QosKernel {
       abi: QOS_ABI_VERSION,
       scheduler: this.scheduler.state(),
       memory: this.memoryView(),
+      vfs: this.fsState(),
       nextPid: this.nextPid,
       nextHandle: this.nextHandle,
       processVersions: [...this.processVersions.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
@@ -584,7 +670,7 @@ export class QosKernel {
 export type QosCanonicalSyscallRequest = {
   schema: "qos.syscall/1";
   caller: string;
-  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp | MemoryOp;
+  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp | MemoryOp | VfsOp;
   args: Record<string, unknown>;
 };
 export type QosCanonicalSyscallTrace = {
@@ -656,6 +742,24 @@ function parseSyscallRequest(payload: Record<string, unknown>, pid: string): Qos
       if(keys.includes("targetHandle")&&(typeof args.targetHandle!=="string"||typeof args.targetHandleVersion!=="string"||!/^[0-9a-f]{64}$/.test(args.targetHandleVersion)))return null;
       break;
     }
+    case "fs_init": case "fs_stat": case "fs_ls": case "fs_open": case "fs_put": case "fs_mkdir":
+    case "fs_unlink": case "fs_rename": case "fs_mount": case "fs_unmount": case "fs_grant": {
+      const keys=["handle"];
+      if(args&&typeof args==="object"&&Object.hasOwn(args,"handleVersion"))keys.push("handleVersion");
+      if(payload.op!=="fs_init")keys.push("baseRoot","rootVersion");
+      if(payload.op!=="fs_init"&&payload.op!=="fs_grant")keys.push("path");
+      if(payload.op==="fs_rename")keys.push("destination");
+      if(payload.op==="fs_put"||payload.op==="fs_mount")keys.push("targetHandle","targetHandleVersion");
+      if(payload.op==="fs_mount")keys.push("sourceRoot","sourceVersion");
+      if(payload.op==="fs_grant")keys.push("target","targetVersion","rights");
+      if(!exactKeys(args,keys)||typeof args.handle!=="string"||args.handle.length>256)return null;
+      for(const k of ["handleVersion","baseRoot","rootVersion","targetVersion","targetHandleVersion","sourceRoot","sourceVersion"])
+        if(keys.includes(k)&&!isObjectId(args[k]))return null;
+      for(const k of ["path","destination","targetHandle","target"])
+        if(keys.includes(k)&&(typeof args[k]!=="string"||(args[k] as string).length>1024))return null;
+      if(keys.includes("rights")&&(typeof args.rights!=="number"||!Number.isSafeInteger(args.rights)))return null;
+      break;
+    }
     default: return null;
   }
   return payload as QosCanonicalSyscallRequest;
@@ -672,6 +776,8 @@ function executeCanonicalSyscall(kernel: QosKernel, request: QosCanonicalSyscall
     case "mem_ref": return requestHash===undefined?err("EINVAL","request hash required"):kernel.memoryRef(pid,request.args.handle as string,request.args.rights as number,requestHash);
     case "mem_drop": return kernel.memoryDrop(pid,request.args.handle as string);
     case "mem_link": case "mem_unlink": return kernel.memoryLink(pid,request.args.handle as string,request.args.targetHandle as string,request.op==="mem_unlink");
+    case "fs_init": case "fs_stat": case "fs_ls": case "fs_open": case "fs_put": case "fs_mkdir": case "fs_unlink": case "fs_rename": case "fs_mount": case "fs_unmount": case "fs_grant":
+      return kernel.executeVfs(pid,request.op,request.args,requestHash);
     case "getpid": return kernel.getpid(pid);
     case "getppid": return kernel.getppid(pid);
     case "cap_derive": return kernel.capDerive(pid, request.args.handle as string, request.args.rights as number, requestHash === undefined ? undefined : `h:request:${requestHash}`);
@@ -696,6 +802,10 @@ function syscallVersionsMatch(kernel: QosKernel, request: QosCanonicalSyscallReq
   if(MEMORY_OPS.includes(request.op as MemoryOp)){
     if(canonicalJson(args.memoryFrontier)!==canonicalJson(kernel.memoryFrontier()))return false;
     if(typeof args.targetHandle==="string"&&args.targetHandleVersion!==kernel.handleVersion(pid,args.targetHandle))return false;
+  }
+  if(VFS_OPS.includes(request.op as VfsOp)){
+    if(typeof args.targetHandle==="string"&&args.targetHandleVersion!==kernel.handleVersion(pid,args.targetHandle))return false;
+    if(request.op==="fs_grant"&&args.targetVersion!==kernel.processVersion(args.target as string))return false;
   }
   if (request.op === "signal" || request.op === "signal_grant")
     return args.targetVersion === kernel.processVersion(args.target as string);
@@ -825,10 +935,10 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
       const trial = kernel.cloneForReplay();
       const outcome = executeCanonicalSyscall(trial, pending.request, requestHash);
       if (canonicalJson(outcome) !== canonicalJson(payload.outcome)) {
-        rejectSyscall(event, "syscall outcome differs from deterministic execution"); continue;
+        rejectSyscall(event, VFS_OPS.includes(pending.request.op as VfsOp)&&!outcome.ok&&outcome.errno==="EAGAIN"?"VFS conflict: "+outcome.detail:"syscall outcome differs from deterministic execution"); continue;
       }
       // Refusals are traceable but cannot publish speculative mutation.
-      if (outcome.ok) { trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); trial.recordMemory(beforeMemory,event.hash,MEMORY_OPS.includes(pending.request.op as MemoryOp)?pending.request.op as MemoryOp:undefined); kernel = trial; }
+      if (outcome.ok) { trial.recordVfs(pending.request.op,outcome,event.hash); trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); trial.recordMemory(beforeMemory,event.hash,MEMORY_OPS.includes(pending.request.op as MemoryOp)?pending.request.op as MemoryOp:undefined); kernel = trial; }
       consumed.add(requestHash);
       syscalls.push({ requestHash, resultHash: event.hash, caller: event.process, op: pending.request.op,
                       args: { ...pending.request.args }, outcome, position });

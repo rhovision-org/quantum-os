@@ -58,6 +58,9 @@ import { loadConfig as loadNodeConfig, saveConfig as saveNodeConfig, describeCon
          registryUriOf, powerboxUsed, DEFAULT_CONFIG as DEFAULT_NODE_CONFIG,
          readResult, readResultRecord, syncResultNonce, deployAnswer, deployVerdict,
          type NodeConfig } from "./rholang.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { QosMemoryBytes, OpfsMemoryCache, RoomByteCache, objectIdentity } from "./qos-memory-bytes.js";
+import { RholoRegistryMemory } from "./qos-memory-rholo.js";
 import { qucalcSearch, qucalcSolve,
          type SearchDone as QucalcSearchDone } from "./qucalc-search.js";
 
@@ -889,7 +892,25 @@ function qosCommandFor(ctx: RoomContext): QosCommand | null {
   if (!dyncapState) return null;
   const existing = qosCommands.get(ctx.roomId);
   if (existing) return existing;
+  const journalScope=Array.from(sha256(new TextEncoder().encode(ctx.roomId)),b=>b.toString(16).padStart(2,"0")).join("");
+  const journalKey="qos-journal-v1:"+dyncapState.anchor+":"+journalScope;
+  // The room-scoped origin-private byte cache is independent of the journal.
+  const volatileCache=new RoomByteCache();
   const cmd = new QosCommand({
+    loadJournal:()=>{const saved=localStorage.getItem(journalKey);return saved===null?null:JSON.parse(saved);},
+    saveJournal:events=>{
+      const encoded=JSON.stringify(events);
+      if(encoded.length>2*1024*1024)throw new Error("local journal checkpoint limit");
+      localStorage.setItem(journalKey,encoded);
+    },
+    memory:async()=>{
+      const scope=await objectIdentity(new TextEncoder().encode(ctx.roomId));
+      const cache=typeof navigator.storage?.getDirectory==="function"?new OpfsMemoryCache(scope):volatileCache;
+      const config=loadNodeConfig();
+      const network="node/"+await objectIdentity(new TextEncoder().encode(config.url.replace(/\/+$/,"")));
+      const backend=new RholoRegistryMemory(network,config);
+      return {service:new QosMemoryBytes(cache,[backend]),network};
+    },
     roomId: ctx.roomId,
     identity: dyncapState,
     transport: {
@@ -6044,6 +6065,10 @@ function handleCommand(raw: string): string[] {
       sys(`→ asked the ${role} (${peerLabel(agent.peerId)}) — ${text}`);
       break;
     }
+
+    case "fs":
+      runQosCommand("fs "+arg,"/fs");
+      break;
 
     case "qos":
       runQosCommand(arg);
