@@ -6310,7 +6310,7 @@ function handleCommand(raw: string): string[] {
           currentSeq: dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
         };
       };
-      void executeRhoProcessWithStoreBindingsAsync(process, (command) => runInput(command), (command) => {
+      void executeRhoProcessWithStoreBindingsAsync(process, (command) => runInput(command), async (command) => {
         if (/^\/poll\s+new\b/i.test(command)) return [...pollStore.keys()];
         if (/^\/lemma\b/i.test(command)) return [...lemmaStore.keys()];
         if (/^\/note\s+(?:grant|merge)\b/i.test(command)) return [...noteStore.keys()];
