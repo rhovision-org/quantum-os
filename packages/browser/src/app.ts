@@ -7884,6 +7884,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "note-pass") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const currency = String(d.currency ?? "");
           const N        = Number(d.denomination ?? 0);
           const token    = String(d.token ?? "");
@@ -7917,6 +7919,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "note-redeem") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const currency = String(d.currency ?? "");
           const N        = Number(d.denomination ?? 0);
           const token    = String(d.token ?? "");
@@ -7940,7 +7944,7 @@ async function connect(): Promise<void> {
           redemptionsHonored.set(token, { token, currency, denomination: N, redeemer: who, at: Date.now() });
           saveNotes();
           renderNotes();
-          const ok = qpeer?.send(from, { kind: "note-receipt", currency, denomination: N, token: receipt, original: token, issuer: myLabel });
+          const ok = signedSend(from, { kind: "note-receipt", currency, denomination: N, token: receipt, original: token, issuer: myLabel });
           if (!ok) {
             addMessage("", `  · receipt minted but could not deliver — peer unreachable`, "system");
             return;
@@ -7950,6 +7954,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "note-receipt") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const currency = String(d.currency ?? "");
           const N        = Number(d.denomination ?? 0);
           const token    = String(d.token ?? "");
