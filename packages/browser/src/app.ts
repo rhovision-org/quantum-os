@@ -858,9 +858,8 @@ async function loadDyncap(): Promise<void> {
   }
 }
 
-// Sign-and-broadcast: enqueues the signing so seq order is preserved across
-// concurrent outbound envelopes. Falls back to an unsigned send if dyncap
-// hasn't been initialized yet (early-init edge cases).
+// Sign-and-broadcast: enqueues signing so sequence order is preserved across
+// concurrent outbound envelopes. Missing identity drops the message (fail closed).
 function signedBroadcast(envelope: Record<string, unknown>): void {
   signQueue = signQueue.then(async () => {
     if (!qpeer) return;
@@ -872,9 +871,8 @@ function signedBroadcast(envelope: Record<string, unknown>): void {
 }
 
 function signedSend(peerId: string, envelope: Record<string, unknown>): boolean {
-  // For direct sends we return synchronously (false if no peer/channel);
-  // signing is queued and fires on the same channel.
-  if (!qpeer) return false;
+  // Queue direct signing in sequence; fail closed if identity is unavailable.
+  if (!qpeer || !dyncapState) return false;
   signQueue = signQueue.then(async () => {
     if (!qpeer || !dyncapState) return;
     const dyncap = await signEnvelope(dyncapState, activeRoom.roomId, envelope);
