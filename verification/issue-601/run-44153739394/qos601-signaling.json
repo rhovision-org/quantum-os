@@ -1,0 +1,12 @@
+{
+  "record_type": "qos601_ci_two_websocket_peers",
+  "observed": {
+    "aJoined": true,
+    "bSeesA": true,
+    "aSeesB": true,
+    "opaqueRelay": true
+  },
+  "client_type": "standalone WebSocket (NOT WebRTC browser)",
+  "room_capability_retained": false,
+  "recorded_utc": "2026-11-17T19:00:10.770Z"
+}

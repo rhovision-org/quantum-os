@@ -52,7 +52,8 @@ Usage:
   node agent.mjs --room <cap:room:… | room-URL> [--role facilitator] [options]
 
 Options:
-  --room <cap|url>   Room capability token or a quantum-os URL (#room=…). (required)
+  --room <cap|url>   Room capability token or a quantum-os URL (#room=…).
+  --room-fd <n>      Read one capability from a pipe fd instead (no bearer cap in argv).
   --role <r>         Agent role: ${Object.keys(ROLES).join(", ")} (default: ${DEFAULT_ROLE}).
                      \`observer\` records live games: \`/observer start <label> [payoffs a,b,c,d]
                      [stag=…] [hare=…] [predict: …]\` … \`/observer stop\` → games/<ts>-<label>.json
@@ -116,6 +117,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const x = argv[i];
     if (x === "--room") a.room = argv[++i];
+    else if (x === "--room-fd") a.roomFd = Number(argv[++i]);
     else if (x === "--role") a.role = argv[++i];
     else if (x === "--name") a.name = argv[++i];
     else if (x === "--signal") a.signal = argv[++i];
@@ -165,6 +167,14 @@ const short = (id) => String(id ?? "").slice(0, 8);
 const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export async function run(args) {
+  if (!args.help && args.roomFd !== undefined) {
+    if (args.room || !Number.isInteger(args.roomFd) || args.roomFd < 3) {
+      throw new Error("use either --room or a valid --room-fd (>= 3), not both");
+    }
+    // Pipe contents never enter argv or persistent room state. The parent closes its
+    // write end immediately; readFileSync sees EOF and does not wait indefinitely.
+    args.room = fs.readFileSync(args.roomFd, "utf8").trim();
+  }
   if (args.help || !args.room) { console.log(USAGE); if (typeof process !== "undefined") process.exit(args.help ? 0 : 1); return; }
 
   const roleKey = (args.role ?? DEFAULT_ROLE).toLowerCase();
@@ -189,7 +199,7 @@ export async function run(args) {
 
   const roomId = extractRoomCap(args.room);
   if (!roomId || !roomId.startsWith("cap:room:")) { console.error(`${TAG} could not parse cap:room: from --room`); process.exit(1); return; }
-  if (!validateCapability(roomId)) console.warn(`${TAG} warning: room token failed ZFA validation (continuing): ${roomId}`);
+  if (!validateCapability(roomId)) console.warn(`${TAG} warning: room token failed ZFA validation (continuing)`);
 
   // ---- measured-disruption policy (tunable; --quiet / --active shift it) ----
   // A bad or valueless numeric flag (`--budget abc`, or `--budget` as the last argv)

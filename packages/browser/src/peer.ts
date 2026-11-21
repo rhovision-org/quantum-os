@@ -122,6 +122,16 @@ function iceUfrag(sdp: string | null | undefined): string | null {
   return m ? m[1] : null;
 }
 
+function iceCandidateUfrag(candidate: RTCIceCandidateInit): string | null {
+  if (typeof candidate.usernameFragment === "string" && candidate.usernameFragment) {
+    return candidate.usernameFragment;
+  }
+  const m = /\bufrag\s+(\S+)/.exec(candidate.candidate ?? "");
+  return m ? m[1] : null;
+}
+
+const MAX_PENDING_ICE_PER_PEER = 128;
+
 /**
  * Ring + skip-link neighbor computation for the bounded-degree connection
  * overlay: sort everyone present lexicographically and connect to the peers
@@ -357,6 +367,9 @@ export class QOSPeer {
   // per-peer "we have an outstanding offer" flag for perfect-negotiation glare.
   private localStream: MediaStream | null = null;
   private makingOffer = new Map<string, boolean>();
+  // Candidates can arrive before the offer creates a PC, or while its remote
+  // description is still being installed. Keep a bounded per-peer queue.
+  private pendingIce = new Map<string, RTCIceCandidateInit[]>();
   // Per-peer grace timer for a transient ICE "disconnected": WebRTC can briefly
   // flap to "disconnected" and recover to "connected". We only declare the peer
   // gone if it has not recovered within this window — preventing a ghost from
@@ -1122,29 +1135,49 @@ export class QOSPeer {
     this.attemptAt.set(remotePeerId, Date.now());
     const pc = this.createPeerConnection(remotePeerId);
 
-    const ch = pc.createDataChannel("qos");
-    this.setupDataChannel(remotePeerId, ch);
-    // posix-net.ts's two socket transports — created alongside the chat
-    // channel so a single offer/answer establishes all three; see
-    // SocketChannelKind. Unused until something actually opens a socket to
-    // this peer, so the cost of always creating them is negligible.
-    this.setupSocketChannel(remotePeerId, pc.createDataChannel("qos-stream"), "stream");
-    this.setupSocketChannel(
-      remotePeerId,
-      pc.createDataChannel("qos-dgram", { ordered: false, maxRetransmits: 0 }),
-      "dgram",
-    );
+    // A local offer is one half of a negotiation attempt. Mark it before
+    // awaiting createOffer/setLocalDescription so an incoming offer that
+    // arrives during either await is handled as glare, not as a fresh stable
+    // connection. Clear it on every exit so later renegotiations are unaffected.
+    this.makingOffer.set(remotePeerId, true);
+    try {
+      const ch = pc.createDataChannel("qos");
+      this.setupDataChannel(remotePeerId, ch);
+      // posix-net.ts's two socket transports — created alongside the chat
+      // channel so a single offer/answer establishes all three; see
+      // SocketChannelKind. Unused until something actually opens a socket to
+      // this peer, so the cost of always creating them is negligible.
+      this.setupSocketChannel(remotePeerId, pc.createDataChannel("qos-stream"), "stream");
+      this.setupSocketChannel(
+        remotePeerId,
+        pc.createDataChannel("qos-dgram", { ordered: false, maxRetransmits: 0 }),
+        "dgram",
+      );
 
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
+      const offer = await pc.createOffer();
+      // Read through a function so TypeScript does not incorrectly keep a
+      // pre-await narrowing across the next asynchronous WebRTC operation.
+      const remoteOfferWon = () => pc.remoteDescription?.type === "offer";
+      // A polite peer may have accepted an incoming offer while createOffer()
+      // was pending. Its remote description remains an offer after answering;
+      // do not overwrite that answer with the now-stale local offer.
+      if (remoteOfferWon()) return;
+      await pc.setLocalDescription(offer);
+      // An incoming offer can also win while setLocalDescription() is pending.
+      if (remoteOfferWon() && pc.localDescription?.type === "answer") return;
 
-    this.signal({
-      type: "offer",
-      roomId: this.wireRoomId,
-      from: this.peerId,
-      to: remotePeerId,
-      sdp: offer.sdp!,
-    });
+      this.signal({
+        type: "offer",
+        roomId: this.wireRoomId,
+        from: this.peerId,
+        to: remotePeerId,
+        sdp: pc.localDescription?.sdp ?? offer.sdp!,
+      });
+    } catch (e) {
+      console.warn("[qos-peer] initiateConnection failed", e);
+    } finally {
+      this.makingOffer.set(remotePeerId, false);
+    }
   }
 
   private async handleOffer(fromPeerId: string, sdp: string): Promise<void> {
@@ -1165,15 +1198,17 @@ export class QOSPeer {
       this.makingOffer.set(fromPeerId, false);
       pc = undefined;
     }
-    if (!pc) {
-      pc = this.createPeerConnection(fromPeerId);
-      pc.ondatachannel = (event) => {
-        const ch = event.channel;
-        if (ch.label === "qos-stream") this.setupSocketChannel(fromPeerId, ch, "stream");
-        else if (ch.label === "qos-dgram") this.setupSocketChannel(fromPeerId, ch, "dgram");
-        else this.setupDataChannel(fromPeerId, ch);
-      };
-    }
+    if (!pc) pc = this.createPeerConnection(fromPeerId);
+    // Both sides may create an offer at the same time. The polite side rolls
+    // back its local offer and answers on the existing PC; it must still receive
+    // the remote offerer's data channels. Installing this only for a newly
+    // created PC silently drops the remote channels in the glare path.
+    pc.ondatachannel = (event) => {
+      const ch = event.channel;
+      if (ch.label === "qos-stream") this.setupSocketChannel(fromPeerId, ch, "stream");
+      else if (ch.label === "qos-dgram") this.setupSocketChannel(fromPeerId, ch, "dgram");
+      else this.setupDataChannel(fromPeerId, ch);
+    };
 
     // Perfect-negotiation glare handling: the peer with the smaller ID is polite.
     const polite = this.peerId < fromPeerId;
@@ -1181,10 +1216,14 @@ export class QOSPeer {
     if (collision && !polite) return;   // impolite peer ignores — its own offer wins
 
     try {
-      if (collision && polite) {
+      // When collision is raised only by makingOffer, createOffer may still
+      // be pending and no local description exists yet. Rollback is only valid
+      // once the local offer has actually changed signalingState.
+      if (collision && polite && pc.signalingState !== "stable") {
         await pc.setLocalDescription({ type: "rollback" });
       }
       await pc.setRemoteDescription({ type: "offer", sdp });
+      await this.flushPendingIce(fromPeerId, pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       this.signal({
@@ -1203,17 +1242,62 @@ export class QOSPeer {
     const pc = this.connections.get(fromPeerId);
     if (!pc) return;
     if (pc.signalingState !== "have-local-offer") return;   // stray/rolled-back answer
-    try { await pc.setRemoteDescription({ type: "answer", sdp }); }
-    catch (e) { console.warn("[qos-peer] handleAnswer failed", e); }
+    try {
+      await pc.setRemoteDescription({ type: "answer", sdp });
+      await this.flushPendingIce(fromPeerId, pc);
+    } catch (e) { console.warn("[qos-peer] handleAnswer failed", e); }
+  }
+
+  private queueIceCandidate(peerId: string, candidate: RTCIceCandidateInit): void {
+    const pending = this.pendingIce.get(peerId) ?? [];
+    if (pending.length >= MAX_PENDING_ICE_PER_PEER) pending.shift();
+    pending.push(candidate);
+    this.pendingIce.set(peerId, pending);
+  }
+
+  private async flushPendingIce(peerId: string, pc: RTCPeerConnection): Promise<void> {
+    if (!pc.remoteDescription) return;
+    const pending = this.pendingIce.get(peerId);
+    if (!pending?.length) return;
+
+    const remoteUfrag = iceUfrag(pc.remoteDescription.sdp);
+    const remaining: RTCIceCandidateInit[] = [];
+    for (const candidate of pending) {
+      const candidateUfrag = iceCandidateUfrag(candidate);
+      // A mismatched ufrag may belong to the next ICE-restart offer, which can
+      // itself arrive after its trickled candidates. Retain it, bounded, until
+      // the matching remote description is installed.
+      if (remoteUfrag && candidateUfrag && remoteUfrag !== candidateUfrag) {
+        remaining.push(candidate);
+        continue;
+      }
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.warn("[qos-peer] queued ICE candidate rejected", e);
+      }
+    }
+    if (remaining.length) this.pendingIce.set(peerId, remaining);
+    else this.pendingIce.delete(peerId);
   }
 
   private async handleIce(fromPeerId: string, candidate: RTCIceCandidateInit): Promise<void> {
     const pc = this.connections.get(fromPeerId);
-    if (!pc) return;
-    // Candidates can arrive while a description is being rolled back during glare;
-    // tolerate the resulting benign failures.
-    try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
-    catch { /* ignore */ }
+    const candidateUfrag = iceCandidateUfrag(candidate);
+    const remoteUfrag = iceUfrag(pc?.remoteDescription?.sdp);
+    if (!pc || !pc.remoteDescription ||
+        (remoteUfrag && candidateUfrag && remoteUfrag !== candidateUfrag)) {
+      this.queueIceCandidate(fromPeerId, candidate);
+      return;
+    }
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+    } catch (e) {
+      // A candidate can still race an SDP replacement. Preserve it for the next
+      // matching description rather than silently losing a valid path.
+      this.queueIceCandidate(fromPeerId, candidate);
+      console.warn("[qos-peer] ICE candidate deferred", e);
+    }
   }
 
   private createPeerConnection(remotePeerId: string): RTCPeerConnection {

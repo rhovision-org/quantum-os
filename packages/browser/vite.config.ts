@@ -3,6 +3,11 @@ import basicSsl from "@vitejs/plugin-basic-ssl";
 import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 
+// The #601 harness can reuse an existing Rholo HTTP API without changing the
+// browser's mixed-content and CORS safety model. The harness binds Vite to
+// loopback and rejects insecure non-loopback node URLs.
+const rnodeProxyTarget = process.env.QOS_RNODE_PROXY_TARGET ?? "http://127.0.0.1:40403";
+
 // The version the app reports about itself. Read from package.json at build
 // time so there is one place it is written down, and it cannot drift from what
 // was actually shipped.
@@ -70,7 +75,7 @@ export default defineConfig({
       // Coming through here it is https on the origin the page already loaded
       // from, on the cert already accepted:  /rholang rnode https://<host>:5173/rnode
       "/rnode": {
-        target: "http://127.0.0.1:40403",
+        target: rnodeProxyTarget,
         changeOrigin: true,
         rewrite: (p) => p.replace(/^\/rnode/, ""),
       },

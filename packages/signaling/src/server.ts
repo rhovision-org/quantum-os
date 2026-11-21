@@ -171,8 +171,8 @@ export class SignalingServer {
 
   start(): void {
     this.wss.on("connection", (ws) => this.onConnect(ws));
-    this._http.listen(this.port, () => {
-      console.log(`[quantum-os signaling] listening on ws://0.0.0.0:${this.port}`);
+    this._http.listen(this.port, process.env.SIGNAL_HOST || undefined, () => {
+      console.log(`[quantum-os signaling] listening on ws://${process.env.SIGNAL_HOST || "0.0.0.0"}:${this.port}`);
     });
 
     // Ping every 30s to keep the proxy from closing idle WebSocket connections.
