@@ -301,6 +301,7 @@ export class QosKernel {
     if (sig !== "SIGCHLD") {
       target.state = "exited";
       target.exitCode = signalExitCode(sig);
+      target.handles.clear();
     }
     return ok(true);
   }

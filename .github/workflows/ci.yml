@@ -4,9 +4,10 @@ on:
   push:
     # `work` is where changes land first; `main` is what is deployed. Both are
     # checked, so a merge to main is never the first time anything is run.
-    branches: [main, work]
+    # Stacked kernel slices also require an independently tested head.
+    branches: [main, work, "feat/qos-kernel-*"]
   pull_request:
-    branches: [main, work]
+    branches: [main, work, "feat/qos-*"]
 
 jobs:
   rust:

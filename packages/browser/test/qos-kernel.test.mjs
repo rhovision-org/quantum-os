@@ -149,6 +149,7 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   ok("owner can signal with a SIGNAL handle", killed.ok, errno(killed));
   const wv = k.getProcess(worker.value.pid);
   ok("terminating signal exits a suspended process", wv?.state === "exited" && wv.exitCode === -9, JSON.stringify(wv));
+  ok("terminating signal clears suspended process handles immediately", wv?.handles.length === 0);
 
   const waited = k.wait(init.pid, worker.value.pid);
   ok("wait reaps the child with its exit code", waited.ok && waited.value === -9, JSON.stringify(waited));
