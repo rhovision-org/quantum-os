@@ -3138,7 +3138,7 @@ let macroDepth = 0;
  */
 function requiresInteractiveApproval(command: string): boolean {
   const normalized = command.trim().replace(/^\/+/, "");
-  return /^(?:socket\s+(?:listen|connect)|rholang\s+deploy|rholang\s+macro|gov\s+claim|reset(?:\s|$)|rholang\s+key\s+(?:generate|replace))\b/i.test(normalized);
+  return /^(?:socket\s+(?:listen|connect)|rholang\s+deploy|rholang\s+macro|gov\s+claim|reset(?:\s|$)|rholang\s+key\s+(?:generate|forget|[0-9a-f]{64}))\b/i.test(normalized);
 }
 
 
