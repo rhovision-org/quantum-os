@@ -22,12 +22,15 @@ def status(url, context=None):
 
 def identity(proc):
     assert proc.poll() is None, "independent node exited"
+    # run-node.sh execs rnode after creating genesis inputs. Before HTTP
+    # readiness the same PID may still name bash; verify only after readiness.
+    st = status(BASE)
+    assert proc.poll() is None, "independent node exited after HTTP readiness"
     raw = Path(f"/proc/{proc.pid}/stat").read_text()
     with open(f"/proc/{proc.pid}/exe", "rb") as binary:
         digest = hashlib.file_digest(binary, "sha256").hexdigest()
     with (ROOT / "bin/rnode").open("rb") as expected:
         assert digest == hashlib.file_digest(expected, "sha256").hexdigest(), "unexpected node executable"
-    st = status(BASE)
     assert st["shardId"]
     return {"pid": proc.pid, "birth": raw[raw.rfind(") ") + 2:].split()[19],
             "binary_sha256": digest, "shardId": st["shardId"],
@@ -91,12 +94,14 @@ def main():
                 hashlib.sha256(evidence.read_bytes()).hexdigest() + "  " + evidence.name + "\n")
             print("PASS: independent node identity unchanged across QOS lifecycle")
         finally:
-            if (run_dir / "state.json").exists():
-                subprocess.run(HARNESS + ["down"], cwd=ROOT, env=env,
-                               check=False, timeout=30)
-            if node.poll() is None:
-                node.terminate()
-            node.wait(timeout=30)
+            try:
+                if (run_dir / "state.json").exists():
+                    subprocess.run(HARNESS + ["down"], cwd=ROOT, env=env,
+                                   check=False, timeout=30)
+            finally:
+                if node.poll() is None:
+                    node.terminate()
+                node.wait(timeout=30)
 
 
 if __name__ == "__main__":
