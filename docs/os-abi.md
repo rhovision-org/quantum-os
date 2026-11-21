@@ -189,7 +189,7 @@ not inferred from arbitrary strings. The bounded cross-process extension permits
 and the recipient PID as `target`. It creates a target-side SIGNAL|REVOKE
 parent and a recipient-side SIGNAL-only handle to exactly the granting process,
 with stable allocation IDs derived from the request hash. The recipient uses
-`signal` with the exact handle, target PID, and finite signal name. The
+`signal` with the exact handle, target PID, and finite signal name. Per #278, SIGKILL additionally requires the target owner (the caller and target share the owner anchor); delegated cross-owner SIGNAL alone cannot authorize SIGKILL. A refusal is journaled as EACCES. The
 target-side revoker can revoke the delegated handle using `cap_revoke`.
 A root with room-wide rights cannot itself signal a different process, and
 generic `open` is not exposed as a journal syscall. Self-signal requires the

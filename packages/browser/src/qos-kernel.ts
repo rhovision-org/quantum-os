@@ -349,7 +349,12 @@ export class QosKernel {
     if (!target) return err("ENOENT", "target does not exist");
     if (target.state !== "running" && target.state !== "suspended") return err("EINVAL", "target is not active");
     if (!QOS_SIGNALS.includes(sig)) return err("EINVAL", "unknown signal");
+    if (sig === "SIGKILL" && caller.owner !== target.owner) return err("EACCES", "SIGKILL is target-owner only");
 
+    if (callerPid === targetPid && explicitHandle !== undefined) {
+      const h = this.handle(caller, explicitHandle);
+      if (!h.ok || !(h.value.rights & QOS_RIGHTS.SIGNAL)) return err("EACCES", "self signal requires live SIGNAL authority");
+    }
     if (callerPid !== targetPid) {
       const candidates = explicitHandle === undefined ? [...caller.handles.values()] : [caller.handles.get(explicitHandle)];
       const hasSignal = candidates.some(
