@@ -1,10 +1,12 @@
-"""Contract tests for the #601 harness. No network, process launch, or devnet."""
+"""Contract tests for the #601 harness. No network or devnet; one disposable child process."""
 import importlib.util
 from contextlib import redirect_stdout
 import io
 from unittest.mock import patch
 import os
 import tempfile
+import subprocess
+import sys
 from pathlib import Path
 import unittest
 
@@ -65,6 +67,46 @@ class OperatorContract(unittest.TestCase):
         self.assertFalse(HARNESS.owned_alive({"pid": 999999999}))
         self.assertFalse(HARNESS.owned_alive({"pid": 0}))
         self.assertFalse(HARNESS.owned_alive({}))
+
+    def test_missing_birth_or_ownership_marker_refuses_signal(self):
+        with patch.object(HARNESS.os, "getpgid", return_value=42), patch.object(
+            HARNESS, "proc_birth", return_value="123"
+        ), patch.object(HARNESS.os, "killpg") as kill:
+            for record in ({"pid": 42, "started_by_harness": True},
+                           {"pid": 42, "birth": "123"},
+                           {"pid": 42, "birth": "124", "started_by_harness": True}):
+                HARNESS.terminate_owned(record)
+            kill.assert_not_called()
+
+    def test_existing_mode_refuses_node_record_before_any_signal(self):
+        state = {"mode": "existing", "services": {"agent": {"pid": 42}, "node": {"pid": 43}}}
+        with patch.object(HARNESS, "load_state", return_value=state), patch.object(
+            HARNESS, "terminate_owned"
+        ) as terminate:
+            with self.assertRaisesRegex(SystemExit, "unexpected lifecycle target"):
+                HARNESS.cmd_down(None)
+            terminate.assert_not_called()
+
+    def test_existing_down_preserves_independent_process(self):
+        with tempfile.TemporaryDirectory() as temp:
+            child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"],
+                                     start_new_session=True)
+            try:
+                birth = HARNESS.proc_birth(child.pid)
+                self.assertIsNotNone(birth)
+                state_file = Path(temp) / "state.json"
+                HARNESS.atomic_json(state_file, {"mode": "existing", "services": {}})
+                with patch.object(HARNESS, "STATE_FILE", state_file), patch.object(
+                    HARNESS, "STATE_DIR", Path(temp)
+                ), redirect_stdout(io.StringIO()):
+                    HARNESS.cmd_down(None)
+                self.assertIsNone(child.poll())
+                self.assertEqual(HARNESS.proc_birth(child.pid), birth)
+                self.assertFalse(state_file.exists())
+            finally:
+                if child.poll() is None:
+                    child.terminate()
+                child.wait(timeout=5)
 
     def test_proc_start_marker(self):
         self.assertIsNotNone(HARNESS.proc_birth(os.getpid()))

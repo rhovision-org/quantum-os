@@ -54,3 +54,9 @@ Verified artifact SHA-256:
 - **#298 remains open** pending the application-side review; nothing in #604 enables or schedules /goal, /qos, /gov chain, RhoQu v2 or other future QOS-specific Rholo node surfaces.
 - **#601 remains OPEN** until all required functions have direct source-pinned evidence or an explicitly accepted BLOCKED outcome. An INCOMPLETE row must not be silently promoted to PASS.
 - **Next gates:** /rholang browser status/eval transcript; source-to-binary provenance for a pinned current Rholo dev build; external-node no-effect evidence for `--existing-node`; signed deploy settlement/finality; and governance handoff. Rholo-dependent gates are deliberately deferred until the upstream data and replay inputs are available. Do not touch the four public validators.
+
+### Follow-up: existing-node lifecycle guard and witness
+
+Prior head e2cf26c completed general CI [44512933019](https://github.com/rhovision-org/quantum-os/actions/runs/44512933019) and integration [44512932982](https://github.com/rhovision-org/quantum-os/actions/runs/44512932982), including the deterministic in-room facilitator FAQ assertion. This supersedes the earlier pending facilitator status above.
+
+The follow-up requires a recorded ownership marker and matching process birth identity; existing-node shutdown refuses unexpected lifecycle targets before signaling. Eleven operator-contract tests passed remotely, including one independently launched dummy process. The new runner-only witness independently starts a disposable bundled binary, attaches QOS in existing-node mode, and compares node PID, birth, executable hash, version, shard, and HTTP availability before/during/after QOS shutdown. Its real-node execution is pending CI. This is a bounded lifecycle and routing witness, not a proof of immutable chain state, finality, current upstream build provenance, or public-validator acceptance.

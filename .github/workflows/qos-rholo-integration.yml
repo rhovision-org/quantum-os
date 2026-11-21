@@ -5,6 +5,7 @@ on:
     branches: [main, work]
     paths:
       - "scripts/localnet/qos-devnet.*"
+      - "scripts/localnet/qos-existing-node-smoke.py"
       - "scripts/localnet/qos-signed-smoke.mjs"
       - "scripts/localnet/qos-browser-smoke.mjs"
       - "scripts/qos-cli/signal-smoke.mjs"
@@ -23,7 +24,7 @@ jobs:
   disposable-node-smoke:
     name: Real bundled rnode + QOS lifecycle (NOT public #584)
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
       - name: Rust WASM toolchain
@@ -43,7 +44,7 @@ jobs:
       - name: Harness source contract
         run: |
           set -euo pipefail
-          python3 -m py_compile scripts/localnet/qos-devnet.py
+          python3 -m py_compile scripts/localnet/qos-devnet.py scripts/localnet/qos-existing-node-smoke.py
           bash -n scripts/localnet/qos-devnet.sh
           node --check scripts/qos-cli/agent.mjs
           node --check scripts/localnet/qos-signed-smoke.mjs
@@ -89,6 +90,8 @@ jobs:
           bash scripts/localnet/qos-devnet.sh down
           bash scripts/localnet/qos-devnet.sh status | grep -q 'STOPPED'
           sha256sum qos601-status.txt qos601-signaling.json qos601-signed-deploy.json > qos601-status.SHA256SUMS
+      - name: Independent disposable node lifecycle witness
+        run: python3 scripts/localnet/qos-existing-node-smoke.py
       - name: Upload sanitized evidence
         if: always()
         uses: actions/upload-artifact@v6
@@ -99,6 +102,7 @@ jobs:
             qos601-signaling.json
             qos601-signed-deploy.json
             qos601-status.SHA256SUMS
+            qos601-existing-node.json
           if-no-files-found: ignore
 
 # The smoke proves lifecycle + HTTP routing of a real disposable bundled node

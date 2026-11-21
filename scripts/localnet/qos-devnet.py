@@ -64,7 +64,10 @@ def owned_alive(record: dict) -> bool:
         pid = int(record["pid"])
         if pid < 2 or os.getpgid(pid) != pid:
             return False
-        if record.get("birth") is not None and proc_birth(pid) != record["birth"]:
+        if record.get("started_by_harness") is not True:
+            return False
+        birth = record.get("birth")
+        if not isinstance(birth, str) or not birth.isdecimal() or proc_birth(pid) != birth:
             return False
         return os.stat(f"/proc/{pid}").st_uid == os.getuid()
     except (OSError, KeyError, ValueError):
@@ -157,7 +160,12 @@ def start_service(label: str, argv: list[str], state: dict,
     finally:
         if output is not subprocess.DEVNULL:
             output.close()
-    record = {"pid": proc.pid, "birth": proc_birth(proc.pid), "started_by_harness": True}
+    birth = proc_birth(proc.pid)
+    if birth is None:
+        if proc.poll() is None:
+            proc.terminate()
+        fail(f"{label}: cannot establish process birth marker")
+    record = {"pid": proc.pid, "birth": birth, "started_by_harness": True}
     state["services"][label] = record
     atomic_json(STATE_FILE, state)
     return record
@@ -346,8 +354,17 @@ def cmd_down(_: argparse.Namespace) -> None:
     if not state:
         print("STOPPED (no harness-owned processes)")
         return
+    mode = state.get("mode")
+    services = state.get("services", {})
+    if mode not in {"existing", "bundled"} or not isinstance(services, dict):
+        fail("invalid lifecycle state; refusing all signals")
+    allowed = {"agent", "browser", "signaling"}
+    if mode == "bundled":
+        allowed.add("node")
+    if not services.keys() <= allowed:
+        fail("unexpected lifecycle target; refusing all signals")
     for label in ("agent", "browser", "signaling", "node"):
-        record = state.get("services", {}).get(label)
+        record = services.get(label)
         if record:
             terminate_owned(record)
             print(f"{label}: stop attempted on owned process group only")
