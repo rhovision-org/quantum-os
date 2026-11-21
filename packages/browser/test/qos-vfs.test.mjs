@@ -23,7 +23,13 @@ const replay=c=>replayQosKernel(c.room.log.events(),c.room.log.forkedSources);
 const sync=async(src,dst)=>{for(const e of src.room.log.checkpointEvents())await dst.ingest("peer",e);};
 const traces=c=>replay(c).syscalls;
 const last=c=>traces(c).at(-1);
-const q=async(c,ref,op,args)=>{await c.handle("syscall "+ref+" | "+op+" | "+JSON.stringify(args));assert.equal(last(c)?.op,op,lines.a.concat(lines.b).slice(-6).join("\n"));return last(c).outcome;};
+const q=async(c,ref,op,args)=>{
+ const before=new Set(traces(c).map(t=>t.resultHash));
+ await c.handle("syscall "+ref+" | "+op+" | "+JSON.stringify(args));
+ const fresh=traces(c).filter(t=>!before.has(t.resultHash));
+ assert.equal(fresh.length,1,lines.a.concat(lines.b).slice(-6).join("\n"));
+ assert.equal(fresh[0].op,op);return fresh[0].outcome;
+};
 let checks=0;
 function check(name,value){assert.ok(value,name);checks++;console.log("PASS: "+name);}
 await a.handle("start alice");await b.handle("start bob");

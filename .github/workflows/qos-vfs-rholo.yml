@@ -1,0 +1,47 @@
+name: QOS real Rholo VFS readback (#280)
+on:
+  push:
+    branches: [feat/qos-kernel-vfs-280]
+  pull_request:
+    branches: [main, work, feat/qos-kernel-memory-279]
+    paths:
+      - "packages/browser/src/qos-*.ts"
+      - "packages/browser/src/app.ts"
+      - "packages/browser/test/qos-vfs-rholo-ci.mjs"
+      - "scripts/localnet/qos-memory-ci.py"
+      - "bin/rnode"
+      - ".github/workflows/qos-vfs-rholo.yml"
+permissions:
+  contents: read
+jobs:
+  real-rholo-vfs:
+    name: Disposable Rholo /fs put-durable and fresh /fs cat
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm build:wasm
+      - run: pnpm install --frozen-lockfile
+      - name: Real VFS publication and independent recovery
+        run: python3 scripts/localnet/qos-memory-ci.py vfs
+      - name: Upload verified evidence
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qos280-real-rholo-vfs
+          path: |
+            qos280-rholo-evidence.json
+            qos280-rholo-evidence.SHA256SUMS
+          if-no-files-found: error

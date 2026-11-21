@@ -3644,6 +3644,7 @@ function handleCommand(raw: string): string[] {
         "  /macro [sub]     — write a +command: define · list · show · find · echo (a body of / commands, or of rholang)",
         "  +name <args>     — run a command somebody here defined (++text to send a literal + line)",
         "  /rhoqu <src>     — RhoQu macro: process/new/parallel/call → /commands",
+        "  /fs              — capability-rooted filesystems; /help fs for commands",
         "  /rholang <sub>   — run rholang on rnode: eval · deploy · echo · read · status · config (multi-line, end with a blank line)",
         "  @name in args    — expand named lemma (e.g. /qucalc @major @minor)",
         "  [multi word]      — a spaced name: /lemma [all men are mortal]  ·  cite as @[all men are mortal]",
