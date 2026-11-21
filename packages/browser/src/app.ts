@@ -2251,30 +2251,56 @@ function proposalTimedOut(id: string): void {
 /// expectation is violated (in which case caller should not finalize state).
 function applyCommit(state: ProposalState, commitRows: CommitRow[]): boolean {
   const myId = qpeer?.peerId ?? "";
-  const myRows = state.proposal.rows.filter(r => r.participant === myId);
-  const matched: CommitRow[] = [];
-  const remaining = commitRows.filter(c => c.participant === myId);
-  for (const myRow of myRows) {
-    const idx = remaining.findIndex(c =>
-      parseNoteLabel(c.getsToken)?.currency === myRow.gets.currency &&
-      noteDenomination(c.getsToken) === myRow.gets.denomination &&
-      parseNoteLabel(c.getsToken)?.kind === "note" &&
-      validateCapability(c.getsToken));
-    if (idx < 0) return false;
-    matched.push(remaining[idx]);
-    remaining.splice(idx, 1);
+  const proposalRows = state.proposal.rows;
+  const participants = uniqueParticipants(state.proposal);
+  // Validate the complete assignment before mutating wallet/lock state. A
+  // commit must contain exactly one row per participant, preserve each row's
+  // token specs, form the proposal's token cycle, and include my actual lock.
+  if (commitRows.length !== proposalRows.length || participants.length !== proposalRows.length) return false;
+  const byParticipant = new Map<string, CommitRow>();
+  const gives = new Set<string>();
+  const gets = new Set<string>();
+  for (const cr of commitRows) {
+    if (byParticipant.has(cr.participant) || !participants.includes(cr.participant)) return false;
+    byParticipant.set(cr.participant, cr);
   }
-  for (const cr of matched) {
-    lockedNotes.delete(cr.givesToken);
-    const parsed = parseNoteLabel(cr.getsToken);
-    if (!parsed) continue;
-    noteStore.set(cr.getsToken, {
-      token: cr.getsToken,
-      currency: parsed.currency,
-      denomination: noteDenomination(cr.getsToken),
-      receivedFrom: state.proposal.proposerName,
-    });
+  if (participants.some(p => !byParticipant.has(p))) return false;
+  for (const row of proposalRows) {
+    const cr = byParticipant.get(row.participant)!;
+    const give = parseNoteLabel(cr.givesToken);
+    const get = parseNoteLabel(cr.getsToken);
+    if (!give || give.kind !== "note" || give.currency !== row.gives.currency
+        || noteDenomination(cr.givesToken) !== row.gives.denomination || !validateCapability(cr.givesToken)
+        || !get || get.kind !== "note" || get.currency !== row.gets.currency
+        || noteDenomination(cr.getsToken) !== row.gets.denomination || !validateCapability(cr.getsToken)
+        || gives.has(cr.givesToken) || gets.has(cr.getsToken)) return false;
+    gives.add(cr.givesToken);
+    gets.add(cr.getsToken);
   }
+  for (let i = 0; i < proposalRows.length; i++) {
+    const row = proposalRows[i];
+    const next = proposalRows[(i + 1) % proposalRows.length];
+    if (byParticipant.get(row.participant)!.getsToken !== byParticipant.get(next.participant)!.givesToken) return false;
+  }
+  const myRow = proposalRows.find(r => r.participant === myId);
+  if (!myRow) return false;
+  const myCommit = byParticipant.get(myId)!;
+  const myLock = lockedNotes.get(myCommit.givesToken);
+  if (!myLock || myLock.proposalId !== state.proposal.id
+      || myCommit.givesToken !== myLock.token
+      || myLock.currency !== myRow.gives.currency
+      || myLock.denomination !== myRow.gives.denomination) return false;
+
+  // Validation succeeded; settle only now.
+  lockedNotes.delete(myCommit.givesToken);
+  const parsed = parseNoteLabel(myCommit.getsToken);
+  if (!parsed) return false; // guarded above; defensive
+  noteStore.set(myCommit.getsToken, {
+    token: myCommit.getsToken,
+    currency: parsed.currency,
+    denomination: noteDenomination(myCommit.getsToken),
+    receivedFrom: state.proposal.proposerName,
+  });
   return true;
 }
 
