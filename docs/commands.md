@@ -754,6 +754,8 @@ The "persistence" is "as long as one of the replicating peers is online" — the
 
 RhoQu macro language — a thin syntactic surface that compiles to the shipped slash commands. The body is parsed by `packages/browser/src/rhoqu.ts` into an AST and transpiled to a `string[]` of `/commands`, each dispatched in order through the regular handler.
 
+**RhoQu v2 runtime:** typed process IR, runtime when, local parallel execution, structured results, and binding semantics are documented in [RhoQu v2 runtime semantics](rhoqu-v2-runtime.md). This describes v2; legacy behavior below remains for compatibility.
+
 | Construct | Meaning |
 |---|---|
 | `process name(args…) { body }` | Define a parameterized macro. Calls inline at call site with substituted `$arg`s. |
