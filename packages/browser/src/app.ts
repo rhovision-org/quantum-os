@@ -5314,13 +5314,29 @@ function handleCommand(raw: string): string[] {
       if (!passEntry) { sys(`you don't hold ${lemmaRefStr(passLemma)} — nothing to pass`); break; }
       const targetId = findPeerByName(targetName);
       if (!targetId) { sys(`unknown peer: '${targetName}'  (check Peers list for exact name)`); break; }
-      const sent = qpeer.send(targetId, { kind: "lemma-pass", name: passLemma, twists: passEntry.twists, cap: passEntry.cap });
-      if (!sent) { sys(`cannot reach ${targetName} — data channel not open`); break; }
-      lemmaStore.delete(passLemma);
-      saveLemmas();
-      renderLemmas();
-      sys(`· ${lemmaRefStr(passLemma)} transferred to ${targetName} — removed from your lemmas`);
-      if (passEntry.cap) sys(`  cap: ${passEntry.cap}`);
+      const envelope = { kind: "lemma-pass", name: passLemma, twists: passEntry.twists, cap: passEntry.cap };
+      const send = signQueue.then(async () => {
+        if (!qpeer || !dyncapState) return false;
+        const dyncap = await signEnvelope(dyncapState, activeRoom.roomId, envelope);
+        saveDyncap();
+        return qpeer.send(targetId, { ...envelope, dyncap });
+      });
+      signQueue = send.then(() => undefined, () => undefined);
+      void send.then((sent) => {
+        if (!sent) { addMessage("", `cannot reach ${targetName} — data channel not open; lemma retained`, "system"); return; }
+        const current = lemmaStore.get(passLemma);
+        // Do not remove a changed entry if another local action replaced it while signing.
+        if (!current || current.twists !== passEntry.twists || current.cap !== passEntry.cap) {
+          addMessage("", `transfer sent, but local ${lemmaRefStr(passLemma)} changed meanwhile; retained locally`, "system");
+          return;
+        }
+        lemmaStore.delete(passLemma);
+        saveLemmas();
+        renderLemmas();
+        addMessage("", `· ${lemmaRefStr(passLemma)} transferred to ${targetName} — removed from your lemmas`, "system");
+        if (passEntry.cap) addMessage("", `  cap: ${passEntry.cap}`, "system");
+      }).catch((e) => addMessage("", `transfer failed; lemma retained: ${String(e)}`, "system"));
+      sys(`· signing transfer to ${targetName}…`);
       break;
     }
 
@@ -7815,6 +7831,12 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "lemma-pass") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (!d.dyncap || status.startsWith("  · refused")) {
+            addMessage(from, `passes ${lemmaRefStr(String(d.name ?? ""))}`, "peer", peerLabel(from));
+            addMessage("", "  · refused: lemma transfers require a verified signed envelope", "system");
+            return;
+          }
           const name = canonLemma(String(d.name ?? ""));
           const twists = String(d.twists ?? "").trim();
           const cap = d.cap ? String(d.cap) : undefined;
