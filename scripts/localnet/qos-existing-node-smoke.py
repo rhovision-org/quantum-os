@@ -25,6 +25,8 @@ def identity(proc):
     raw = Path(f"/proc/{proc.pid}/stat").read_text()
     with open(f"/proc/{proc.pid}/exe", "rb") as binary:
         digest = hashlib.file_digest(binary, "sha256").hexdigest()
+    with (ROOT / "bin/rnode").open("rb") as expected:
+        assert digest == hashlib.file_digest(expected, "sha256").hexdigest(), "unexpected node executable"
     st = status(BASE)
     assert st["shardId"]
     return {"pid": proc.pid, "birth": raw[raw.rfind(") ") + 2:].split()[19],
@@ -39,8 +41,11 @@ def main():
     run_dir = temp / "qos601-existing"
     data_dir = temp / "qos601-external-node-data"
     assert not run_dir.exists() and not data_dir.exists()
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 40403))
+    # This job runs on a fresh runner. Fail closed if any expected port
+    # is occupied, rather than adopting a service or killing a listener.
+    for port in (40403, 4444, 5173):
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", port))
     env = dict(os.environ, QOS_RUN_DIR=str(run_dir), QOS_RNODE_DATA=str(data_dir),
                RNODE=str(ROOT / "bin/rnode"), DEPLOYER_KEY="")
     with (temp / "qos601-external-node.log").open("wb") as log:
@@ -75,12 +80,16 @@ def main():
             assert not (run_dir / "state.json").exists()
             after = identity(node)
             assert after == before, "independent node identity changed"
-            (ROOT / "qos601-existing-node.json").write_text(json.dumps({
+            evidence = ROOT / "qos601-existing-node.json"
+            evidence.write_text(json.dumps({
                 "scope": "disposable CI loopback; lifecycle identity and HTTP routing only",
                 "before": before, "during": during, "after": after,
                 "harness_owned_services": sorted(state["services"]),
                 "proxy_shard_matches": True, "state_removed": True,
             }, indent=2) + "\n")
+            (ROOT / "qos601-existing-node.SHA256SUMS").write_text(
+                hashlib.sha256(evidence.read_bytes()).hexdigest() + "  " + evidence.name + "\n")
+            print("PASS: independent node identity unchanged across QOS lifecycle")
         finally:
             if (run_dir / "state.json").exists():
                 subprocess.run(HARNESS + ["down"], cwd=ROOT, env=env,
