@@ -1,8 +1,7 @@
 /// RhoQu — macro layer over quantum-os /commands.
 ///
-/// Commit 1 of the spec: a hand-rolled recursive-descent parser + transpiler
-/// that turns RhoQu source into a flat array of `/command` strings to be
-/// executed sequentially by the dispatcher.
+/// Recursive-descent parser with a compatibility string transpiler and structured
+/// process output. Commands may capture a dispatcher ID with `bind name /cmd;`.
 ///
 /// Supported in this commit:
 ///   process Name(arg1, arg2) { body }      — definitions
@@ -10,6 +9,7 @@
 ///   parallel { stmt1; stmt2; … }            — sequential expansion (true parallel = separate peers)
 ///   Name(val1, val2);                       — call a defined process; $arg substitution in body
 ///   /cmd ...;                                — raw command, $arg substitution applied
+///   bind name /poll new question;              — bind ID returned by dispatcher
 ///   // comment up to next ; or newline       — skipped
 ///
 /// Deferred to future commits:
@@ -18,8 +18,8 @@
 ///   timeout Ns { ... }
 ///   send / receive primitives ('!', '?', '->')
 ///
-/// The transpiler is pure: source string → string[]. The dispatcher runs
-/// each command via handleCommand; errors in one don't stop subsequent.
+/// `transpile` remains source → string[] for legacy callers; `transpileProcess`
+/// retains bindings in structured command IR for live execution.
 
 import type { RhoProcess, RhoCommandNode } from "./rhoqu-process.js";
 

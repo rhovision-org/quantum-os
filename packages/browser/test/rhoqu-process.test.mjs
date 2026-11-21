@@ -5,14 +5,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const bundle = await build({
   stdin: {
-    contents: 'export { processFromCommands, executeRhoProcess } from "./src/rhoqu-process.ts";',
+    contents: 'export { processFromCommands, executeRhoProcess, executeRhoProcessWithPollBindings } from "./src/rhoqu-process.ts"; export { transpileProcess } from "./src/rhoqu.ts";',
     resolveDir: root,
     loader: "ts",
     sourcefile: "rhoqu-process-test-entry.ts",
   },
   bundle: true, format: "esm", platform: "node", write: false,
 });
-const { processFromCommands, executeRhoProcess } = await import(
+const { processFromCommands, executeRhoProcess, executeRhoProcessWithPollBindings, transpileProcess } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
 let pass = 0, fail = 0;
@@ -73,5 +73,23 @@ executeRhoProcess({ kind: "sequence", steps: [
   return [];
 });
 ok("latest successful binding replaces prior value", refreshCommands[2] === "/use id-b id-b");
+// Parser-to-dispatch integration: binding syntax reaches the process IR and
+// the live adapter captures IDs from the authoritative store, not display text.
+const liveProcess = transpileProcess("bind pollId /poll new decision; /poll add $pollId Option A; /poll status $LAST_ID;");
+ok("bind syntax produces command IR with named binding", liveProcess.steps.length === 3 && liveProcess.steps[0].bind === "pollId" && liveProcess.steps[0].command === "/poll new decision");
+const liveIds = new Set();
+const liveCommands = [];
+const liveResults = executeRhoProcessWithPollBindings(liveProcess, command => {
+  liveCommands.push(command);
+  if (command === "/poll new decision") { liveIds.add("poll-real-42"); return ["poll created"]; }
+  return ["ran:" + command];
+}, () => [...liveIds]);
+ok("live dispatcher ID binds following command", liveCommands[1] === "/poll add poll-real-42");
+ok("LAST_ID uses ID returned by live dispatcher", liveCommands[2] === "/poll status poll-real-42");
+ok("live integration results remain successful", liveResults.length === 3 && liveResults.every(r => r.ok));
+const noCreationIds = new Set();
+const noCreationCommands = [];
+executeRhoProcessWithPollBindings(liveProcess, command => { noCreationCommands.push(command); return ["no poll created"]; }, () => [...noCreationIds]);
+ok("failed poll creation leaves named binding unresolved", noCreationCommands[1] === "/poll add $pollId" && noCreationCommands[2] === "/poll status $LAST_ID");
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-process.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
