@@ -51,6 +51,13 @@ ok("package rejects parallel with fewer than two branches", invalidParallelRejec
 let invalidTimestampRejected = false;
 try { await createRhoProcessPackage(process, { ...provenance, exportedAt: "not-a-date" }); } catch (error) { invalidTimestampRejected = String(error).includes("schema validation"); }
 ok("package rejects invalid export timestamp", invalidTimestampRejected);
+let deepTree = { kind: "command", command: "/deep" };
+for (let i = 0; i < 70; i++) deepTree = { kind: "sequence", steps: [deepTree] };
+let depthRejected = false;
+try { await importRhoProcessPackage({ format: "rho-process-package", version: 1, provenance, process: deepTree, contentHash: "0".repeat(64) }); } catch (error) { depthRejected = String(error).includes("schema validation"); }
+ok("import rejects deeply nested process trees", depthRejected);
+let oversizedRejected = false;	ry { await importRhoProcessPackage(" ".repeat(1_048_577)); } catch (error) { oversizedRejected = String(error).includes("size limit"); }
+ok("import rejects oversized package input", oversizedRejected);
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-package.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
 
