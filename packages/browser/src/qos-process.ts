@@ -979,7 +979,7 @@ export async function orchestrate(
   }
   rejected.sort((a, b) => compareStrings(a.hash, b.hash));
 
-  // Lifecycle transitions are root-signed. Invalid transitions are reported
+  // Lifecycle transitions must carry root-capability dyncap attribution. Invalid transitions are reported
   // and skipped; a later valid transition still applies.
   const lifecycle = all
     .filter((event) => LIFECYCLE_TYPES.has(event.type) && event.source === start.source && resolved.has(event.hash))

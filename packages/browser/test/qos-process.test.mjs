@@ -3,7 +3,7 @@
 // Exercises the QOS process contract end to end without a network:
 //
 //   - the finite event schema and strict rholalc-facing parser;
-//   - signed start/suspend/resume/terminate lifecycle events;
+//   - dyncap-attributed start/suspend/resume/terminate lifecycle events;
 //   - the example composition (nominations -> ranked poll -> lemma-of-record
 //     -> optional anchor) on three peer identities;
 //   - identical final/state digests on independent peers fed the same
@@ -155,14 +155,14 @@ console.log("\nprocess identity and dyncap attribution");
   const id = await identity(10);
   const { room } = makeRoom(id);
   const started = await room.startProcess("lifecycle", {
-    question: "does the process stay named and signed?",
+    question: "does the process stay named and dyncap-attributed?",
     minNominations: 1,
     entropyHex: "00112233",
   });
   const pid = started.processId;
   const events = room.log.eventsFor(pid);
   ok("start is a named, capability-guarded process event", started.event.type === "process-start" && pid.startsWith("qos:proc:"));
-  ok("start carries a dyncap-signed envelope", started.event.dyncap.anchor === id.anchor && started.event.dyncap.seq === started.event.seq);
+  ok("start carries the expected dyncap attribution envelope", started.event.dyncap.anchor === id.anchor && started.event.dyncap.seq === started.event.seq);
   ok("start's capability is valid ZFA", Z.validateCapability(started.capability));
   eq("start leaves the process running", (await room.view(pid)).status, "running");
 
