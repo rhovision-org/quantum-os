@@ -314,6 +314,76 @@ ok("rights compose to 127", QOS_ALL_RIGHTS === 127);
   const reverse = replayQosKernel([...room.log.events()].reverse());
   ok("version conflicts and state converge across delivery permutations",JSON.stringify(after.rejected) === JSON.stringify(reverse.rejected) && await after.kernel.stateDigest() === await reverse.kernel.stateDigest());
 }
+// Cross-process SIGNAL is granted by the target, never by arbitrary room-root open.
+{
+  const roomId = "cap:room:03010563656127610341634101250325";
+  const identities = await Promise.all([101,102].map(n => newDynCapState(new Uint8Array(32).fill(n))));
+  identities.sort((a,b) => a.anchor < b.anchor ? -1 : a.anchor > b.anchor ? 1 : 0);
+  const make = identity => new QosProcessRoom({roomId,identity,transport:{broadcast:()=>{}}});
+  const donor = make(identities[0]), receiver = make(identities[1]);
+  const d = await donor.startProcess("signal-target",{entropyHex:"ad"});
+  const r = await receiver.startProcess("signal-recipient",{entropyHex:"ae"});
+  await donor.log.mergeFrom(receiver.log); await receiver.log.mergeFrom(donor.log);
+  const replay = room => replayQosKernel(room.log.events(),room.log.forkedSources);
+  const rootD = replay(donor).kernel.getProcess(d.processId).root;
+  const rootR = replay(receiver).kernel.getProcess(r.processId).root;
+  async function call(room, start, op, input) {
+    const k = replay(room).kernel, pid = start.processId, args = {...input};
+    if (typeof args.handle === "string" && k.handleVersion(pid,args.handle)) args.handleVersion = k.handleVersion(pid,args.handle);
+    if (typeof args.target === "string") args.targetVersion = k.processVersion(args.target);
+    const payload = {schema:"qos.syscall/1",caller:pid,op,args};
+    const request = await room.emit(pid,start.event,"syscall-request",payload);
+    assert.ok(replay(room).pendingSyscalls.includes(request.hash), op+" request not admitted");
+    const outcome = previewCanonicalSyscall(replay(room).kernel,payload,pid,request.hash);
+    assert.ok(outcome);
+    const result = await room.emit(pid,start.event,"syscall-result",{schema:"qos.syscall/1",requestHash:request.hash,outcome});
+    assert.ok(replay(room).syscalls.some(t => t.resultHash === result.hash), op+" result not replayed");
+    return {request,result,outcome};
+  }
+  const denied = await call(receiver,r,"signal",{handle:rootR,target:d.processId,signal:"SIGKILL"});
+  ok("own room root cannot signal another process", errno(denied.outcome) === "EACCES");
+  const grant = await call(donor,d,"signal_grant",{handle:rootD,target:r.processId});
+  assert.ok(grant.outcome.ok);
+  const {handle,revoker} = grant.outcome.value;
+  ok("target consent issues only a target-bound SIGNAL handle", handle.rights === R.SIGNAL && handle.object === "proc:"+d.processId && handle.id === "h:signal:"+grant.request.hash);
+  ok("grant retains a revocable parent in target namespace", revoker.id === handle.parent && (revoker.rights & R.REVOKE) !== 0);
+  await receiver.log.mergeFrom(donor.log);
+  ok("grant result is recipient handle version", replay(receiver).kernel.handleVersion(r.processId,handle.id) === grant.result.hash);
+  const revoked = await call(donor,d,"cap_revoke",{handle:revoker.id});
+  assert.ok(revoked.outcome.ok);
+  await receiver.log.mergeFrom(donor.log);
+  ok("revocation reaches recipient's handle and updates its version", revoked.outcome.value === 2 && replay(receiver).kernel.handleVersion(r.processId,handle.id) === revoked.result.hash);
+  const refused = await call(receiver,r,"signal",{handle:handle.id,target:d.processId,signal:"SIGKILL"});
+  ok("revoked SIGNAL cannot control target", errno(refused.outcome) === "EACCES");
+  const fresh = await call(donor,d,"signal_grant",{handle:rootD,target:r.processId});
+  assert.ok(fresh.outcome.ok);
+  await receiver.log.mergeFrom(donor.log);
+  const kill = await call(receiver,r,"signal",{handle:fresh.outcome.value.handle.id,target:d.processId,signal:"SIGKILL"});
+  ok("explicit live granted handle permits signal", kill.outcome.ok);
+  const state = replay(receiver);
+  ok("signal terminates target and clears its handles", state.kernel.getProcess(d.processId)?.state === "exited" && state.kernel.getProcess(d.processId)?.handles.length === 0);
+  ok("signal result stamps target lifecycle version",state.kernel.processVersion(d.processId) === kill.result.hash);
+  const events = receiver.log.events();
+  const reverse = new QosEventLog(roomId);
+  for (const event of [...events].reverse()) assert.ok((await reverse.ingest(event)).ok);
+  const other = replayQosKernel(reverse.events(),reverse.forkedSources);
+  ok("cross-process delivery permutations converge", state.rejected.length === 0 && other.rejected.length === 0 && await state.kernel.stateDigest() === await other.kernel.stateDigest() && JSON.stringify(state.syscalls) === JSON.stringify(other.syscalls));
+  const gap = replayQosKernel(events.filter(e => e.hash !== fresh.result.hash));
+  ok("missing grant receipt prevents dependent signal",gap.kernel.getProcess(d.processId)?.state === "running" && gap.missingDependencies.some(e => e.kind === "handle-version" && e.dependencyHash === fresh.result.hash));
+  const stale = await receiver.emit(r.processId,r.event,"syscall-request",{schema:"qos.syscall/1",caller:r.processId,op:"signal",args:{handle:fresh.outcome.value.handle.id,handleVersion:fresh.result.hash,target:d.processId,targetVersion:d.event.hash,signal:"SIGTERM"}});
+  ok("old target lifecycle receipt cannot be replayed after signal",replay(receiver).rejected.some(e=>e.hash===stale.hash && e.reason.includes("stale")));
+}
+// Suspended children are active, not reaped by wait.
+{
+  const {k,init} = bootstrap();
+  const img = k.open(init.pid,"image:shell",R.EXEC|R.GRANT).value;
+  const child = k.spawn(init.pid,img.id,"sleeping").value;
+  assert.ok(k.replayLifecycle(child.pid,"suspend").ok);
+  ok("wait cannot reap a suspended child",errno(k.wait(init.pid,child.pid))==="EAGAIN");
+  ok("suspended child remains suspended",k.getProcess(child.pid)?.state==="suspended");
+  const ctl = k.open(init.pid,"proc:"+child.pid,R.SIGNAL).value;
+  ok("explicit SIGNAL can terminate suspended target",k.signal(init.pid,child.pid,"SIGTERM",ctl.id).ok && k.getProcess(child.pid)?.handles.length===0);
+}
 // --- deterministic replay -------------------------------------------------
 {
   const run = async () => {

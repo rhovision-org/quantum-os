@@ -10,7 +10,7 @@
 // transition is the dyncap-attributed event `QosProcessRoom` already knows how to make.
 
 import type { DynCapState } from "./dyncap.js";
-import { replayQosKernel, previewCanonicalSyscall } from "./qos-kernel.js";
+import { replayQosKernel, previewCanonicalSyscall, canonicalSyscallReady } from "./qos-kernel.js";
 import {
   QosProcessRoom,
   parseQosEvent,
@@ -171,7 +171,9 @@ export class QosCommand {
         return;
       }
       const view = await this.room.view(entry.id);
-      this.host.say(`**${entry.name}** — ${view.status} · ${view.phase}`);
+      const kernel = replayQosKernel(this.room.log.events(), this.room.log.forkedSources);
+      const process = kernel.kernel.getProcess(entry.id);
+      this.host.say(`**${entry.name}** — kernel: ${process?.state ?? "unavailable"} · orchestration: ${view.status}/${view.phase}`);
       this.host.say(`  process: ${entry.id}`);
       this.host.say(`  owner: ${this.ownerLabel(entry)}`);
       this.host.say(`  events: ${view.eventCount} · quorum ${view.quorum.required}${view.quorum.met ? " met" : ` missing ${view.quorum.missing.length}`}`);
@@ -185,7 +187,6 @@ export class QosCommand {
         this.host.say(`  rejected ${view.rejected.length} · conflicted ${view.conflictedSources.length} · broken chains ${view.brokenChains.length}`);
       }
       this.host.say(`  state digest: ${view.stateDigest}`);
-      const kernel = replayQosKernel(this.room.log.events(), this.room.log.forkedSources);
       this.host.say(`  kernel digest: ${await kernel.kernel.stateDigest()}`);
       this.host.say(`  canonical syscalls: ${kernel.syscalls.filter(item => item.caller === entry.id).length}`);
       if (view.finalDigest) this.host.say(`  final digest: ${view.finalDigest}`);
@@ -193,9 +194,11 @@ export class QosCommand {
     }
 
     this.host.say(`QOS processes (${this.byId.size}):`);
+    const replay = replayQosKernel(this.room.log.events(), this.room.log.forkedSources);
     for (const entry of this.list()) {
       const view = await this.room.view(entry.id);
-      this.host.say(`  ${view.status === "running" ? "●" : view.status === "terminated" ? "✓" : "○"} ${entry.name}  ${view.status}/${view.phase}  ${view.eventCount} events  ${short(view.stateDigest)}  ${entry.id}`);
+      const state = replay.kernel.getProcess(entry.id)?.state ?? "unavailable";
+      this.host.say(`  ${state === "running" ? "●" : state === "exited" ? "✓" : "○"} ${entry.name}  kernel:${state} orchestration:${view.status}/${view.phase}  ${view.eventCount} events  ${short(view.stateDigest)}  ${entry.id}`);
     }
   }
 
@@ -226,8 +229,13 @@ export class QosCommand {
       const version = before.kernel.handleVersion(entry.id, args.handle);
       if (version !== undefined) Object.assign(args, { handleVersion: version });
     }
-    if (previewCanonicalSyscall(before.kernel, payload, entry.id) === null) {
-      this.host.say("invalid or unsupported canonical syscall");
+    if (args && typeof args === "object" && !Array.isArray(args) &&
+        "target" in args && typeof args.target === "string" && !Object.hasOwn(args, "targetVersion")) {
+      const version = before.kernel.processVersion(args.target);
+      if (version !== undefined) Object.assign(args, { targetVersion: version });
+    }
+    if (!canonicalSyscallReady(before.kernel, payload, entry.id)) {
+      this.host.say("invalid, unsupported or stale canonical syscall");
       return;
     }
     const request = await this.room.emit(entry.id, entry.start, "syscall-request", payload);

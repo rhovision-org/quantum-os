@@ -31,7 +31,7 @@ export const QOS_ALL_RIGHTS =
 
 export const QOS_SYSCALLS = [
   "getpid", "getppid", "spawn", "exit", "wait", "signal",
-  "cap_derive", "cap_revoke", "cap_close", "open",
+  "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open",
   "read", "write", "stat", "mkdir", "unlink", "rename", "mount", "unmount",
   "send", "recv", "listen", "connect", "accept",
   "svc_register", "svc_lookup", "yield", "sleep", "log",
@@ -116,6 +116,19 @@ export class QosKernel {
   private readonly lineage = new Map<string, string | null>();
   // Version stamps are canonical event hashes, including tombstone versions.
   private readonly versions = new Map<string, { pid: string; hash: string }>();
+  private readonly processVersions = new Map<string, string>();
+
+  processVersion(pid: string): string | undefined { return this.processVersions.get(pid); }
+
+  snapshotProcessState(): Map<string, string> {
+    return new Map([...this.processes].map(([pid, p]) =>
+      [pid, canonicalJson([p.state, p.exitCode, p.pending])]));
+  }
+
+  recordProcessVersions(before: Map<string, string>, eventHash: string): void {
+    for (const [pid, value] of this.snapshotProcessState())
+      if (before.get(pid) !== value) this.processVersions.set(pid, eventHash);
+  }
 
   /** Do not expose another process's handle version through this lookup. */
   handleVersion(pid: string, handle: string): string | undefined {
@@ -304,19 +317,43 @@ export class QosKernel {
     return ok(true);
   }
 
+  /** Target-owner consent: grant only SIGNAL over oneself, with a revoker
+   * retained by the target. No generic room-root open is exposed by replay. */
+  grantSignal(targetPid: string, rootId: string, recipientPid: string, allocation: string): QosResult<{ revoker: QosHandleInfo; handle: QosHandleInfo }> {
+    const target = this.processes.get(targetPid), recipient = this.processes.get(recipientPid);
+    if (!target || target.state !== "running" || !recipient || recipient.state !== "running")
+      return err("ENOENT", "grant requires two running processes");
+    if (targetPid === recipientPid) return err("EINVAL", "recipient must be another process");
+    if (target.root !== rootId) return err("EACCES", "target root required");
+    const root = this.handle(target, rootId);
+    if (!root.ok) return root;
+    if ((root.value.rights & (QOS_RIGHTS.GRANT | QOS_RIGHTS.SIGNAL | QOS_RIGHTS.REVOKE)) !==
+        (QOS_RIGHTS.GRANT | QOS_RIGHTS.SIGNAL | QOS_RIGHTS.REVOKE))
+      return err("EACCES", "root lacks grant authority");
+    const revokerId = `h:signal-revoker:${allocation}`, handleId = `h:signal:${allocation}`;
+    if (this.lineage.has(revokerId) || this.lineage.has(handleId)) return err("EINVAL", "grant already allocated");
+    const object = `proc:${targetPid}`;
+    const revoker = this.makeHandle(object, QOS_RIGHTS.SIGNAL | QOS_RIGHTS.REVOKE, rootId, revokerId);
+    const handle = this.makeHandle(object, QOS_RIGHTS.SIGNAL, revoker.id, handleId);
+    target.handles.set(revoker.id, revoker);
+    recipient.handles.set(handle.id, handle);
+    return ok({ revoker: this.handleInfo(revoker), handle: this.handleInfo(handle) });
+  }
+
   /** Send a signal. Self-signalling is allowed; another process requires a
    *  live handle to `proc:<target>` carrying SIGNAL. */
-  signal(callerPid: string, targetPid: string, sig: QosSignal): QosResult<true> {
+  signal(callerPid: string, targetPid: string, sig: QosSignal, explicitHandle?: string): QosResult<true> {
     const caller = this.processes.get(callerPid);
     if (!caller || caller.state !== "running") return err("ENOENT", "caller is not running");
     const target = this.processes.get(targetPid);
     if (!target) return err("ENOENT", "target does not exist");
-    if (target.state !== "running") return err("EINVAL", "target is not running");
+    if (target.state !== "running" && target.state !== "suspended") return err("EINVAL", "target is not active");
     if (!QOS_SIGNALS.includes(sig)) return err("EINVAL", "unknown signal");
 
     if (callerPid !== targetPid) {
-      const hasSignal = [...caller.handles.values()].some(
-        (h) => !h.revoked && (h.rights & QOS_RIGHTS.SIGNAL) && h.object === `proc:${targetPid}`,
+      const candidates = explicitHandle === undefined ? [...caller.handles.values()] : [caller.handles.get(explicitHandle)];
+      const hasSignal = candidates.some(
+        (h) => h && !h.revoked && (h.rights & QOS_RIGHTS.SIGNAL) && h.object === `proc:${targetPid}`,
       );
       if (!hasSignal) return err("EACCES", "no SIGNAL handle for target");
     }
@@ -325,6 +362,7 @@ export class QosKernel {
     if (sig !== "SIGCHLD") {
       target.state = "exited";
       target.exitCode = signalExitCode(sig);
+      target.handles.clear();
     }
     return ok(true);
   }
@@ -337,7 +375,7 @@ export class QosKernel {
     if (!child) return err("ENOENT", "child does not exist");
     if (child.parent !== callerPid) return err("EACCES", "not the parent");
     if (child.state === "reaped") return err("ENOENT", "child already reaped");
-    if (child.state === "running") return err("EAGAIN", "child still running");
+    if (child.state === "running" || child.state === "suspended") return err("EAGAIN", "child still active");
     const code = child.exitCode ?? 0;
     child.state = "reaped";
     child.handles.clear();
@@ -373,6 +411,7 @@ export class QosKernel {
     copy.nextHandle = this.nextHandle;
     for (const [id, parent] of this.lineage) copy.lineage.set(id, parent);
     for (const [id, version] of this.versions) copy.versions.set(id, { ...version });
+    for (const [pid, version] of this.processVersions) copy.processVersions.set(pid, version);
     for (const [pid, proc] of this.processes) {
       copy.processes.set(pid, {
         ...proc,
@@ -389,6 +428,7 @@ export class QosKernel {
       abi: QOS_ABI_VERSION,
       nextPid: this.nextPid,
       nextHandle: this.nextHandle,
+      processVersions: [...this.processVersions.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
       versions: [...this.versions.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([id, v]) => [id, { ...v }]),
       lineage: [...this.lineage.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
       processes: [...this.processes.values()]
@@ -457,7 +497,7 @@ export class QosKernel {
 export type QosCanonicalSyscallRequest = {
   schema: "qos.syscall/1";
   caller: string;
-  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke";
+  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal";
   args: Record<string, unknown>;
 };
 export type QosCanonicalSyscallTrace = {
@@ -490,6 +530,19 @@ function parseSyscallRequest(payload: Record<string, unknown>, pid: string): Qos
       if (payload.op === "cap_derive" && (typeof args.rights !== "number" || !Number.isSafeInteger(args.rights))) return null;
       break;
     }
+    case "signal_grant":
+    case "signal": {
+      const keys = payload.op === "signal_grant"
+        ? ["handle", "handleVersion", "target", "targetVersion"]
+        : ["handle", "target", "targetVersion", "signal"];
+      if (payload.op === "signal" && args && typeof args === "object" && Object.hasOwn(args, "handleVersion")) keys.push("handleVersion");
+      if (!exactKeys(args, keys) || typeof args.handle !== "string" ||
+          typeof args.target !== "string" || typeof args.targetVersion !== "string" ||
+          !/^[0-9a-f]{64}$/.test(args.targetVersion)) return null;
+      if (keys.includes("handleVersion") && (typeof args.handleVersion !== "string" || !/^[0-9a-f]{64}$/.test(args.handleVersion))) return null;
+      if (payload.op === "signal" && !QOS_SIGNALS.includes(args.signal as QosSignal)) return null;
+      break;
+    }
     default: return null;
   }
   return payload as QosCanonicalSyscallRequest;
@@ -503,8 +556,31 @@ function executeCanonicalSyscall(kernel: QosKernel, request: QosCanonicalSyscall
     case "cap_derive": return kernel.capDerive(pid, request.args.handle as string, request.args.rights as number, requestHash === undefined ? undefined : `h:request:${requestHash}`);
     case "cap_close": return kernel.capClose(pid, request.args.handle as string);
     case "cap_revoke": return kernel.capRevoke(pid, request.args.handle as string);
+    case "signal_grant": return requestHash === undefined ? err("EINVAL", "request hash required") :
+      kernel.grantSignal(pid, request.args.handle as string, request.args.target as string, requestHash);
+    case "signal": {
+      const target = request.args.target as string;
+      // Canonical self-signals use the caller root, never a guessed handle.
+      if (target === pid && request.args.handle !== kernel.getProcess(pid)?.root)
+        return err("EACCES", "self signal requires root");
+      return kernel.signal(pid, target, request.args.signal as QosSignal, request.args.handle as string);
+    }
   }
 }
+function syscallVersionsMatch(kernel: QosKernel, request: QosCanonicalSyscallRequest): boolean {
+  const args = request.args, pid = request.caller;
+  if (typeof args.handle === "string" && args.handleVersion !== kernel.handleVersion(pid, args.handle)) return false;
+  if (request.op === "signal" || request.op === "signal_grant")
+    return args.targetVersion === kernel.processVersion(args.target as string);
+  return true;
+}
+
+/** Preflight for the command adapter; malformed/stale requests must not poison its chain. */
+export function canonicalSyscallReady(kernel: QosKernel, payload: Record<string, unknown>, pid: string): boolean {
+  const request = parseSyscallRequest(payload, pid);
+  return request !== null && syscallVersionsMatch(kernel, request);
+}
+
 /** Predict the outcome without changing the source kernel. */
 export function previewCanonicalSyscall(kernel: QosKernel, payload: Record<string, unknown>, pid: string, requestHash?: string): QosResult<unknown> | null {
   const request = parseSyscallRequest(payload, pid);
@@ -576,9 +652,10 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         rejectSyscall(event, "conflicting or invalid process-start"); continue;
       }
       const before = kernel.snapshotLiveHandles();
+      const beforeProcesses = kernel.snapshotProcessState();
       const result = kernel.createProcess({ name, owner: event.source, pid: event.process, rootId: `h:start:${event.hash}` });
       if (!result.ok) rejectSyscall(event, result.detail ?? result.errno);
-      else { kernel.recordHandleVersions(before, event.hash); starts.set(event.process, event); applied.push(event.hash); }
+      else { kernel.recordHandleVersions(before, event.hash); kernel.recordProcessVersions(beforeProcesses, event.hash); starts.set(event.process, event); applied.push(event.hash); }
       continue;
     }
     if (event.type === "syscall-request" || event.type === "syscall-result") {
@@ -594,9 +671,8 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
       if (event.type === "syscall-request") {
         const request = parseSyscallRequest(event.payload, event.process);
         if (!request) { rejectSyscall(event, "invalid or unsupported syscall payload"); continue; }
-        if (typeof request.args.handle === "string" &&
-            request.args.handleVersion !== kernel.handleVersion(event.process, request.args.handle)) {
-          rejectSyscall(event, "missing, stale or foreign handle version"); continue;
+        if (!syscallVersionsMatch(kernel, request)) {
+          rejectSyscall(event, "missing, stale or foreign handle/process version"); continue;
         }
         requests.set(event.hash, { event, request });
         applied.push(event.hash);
@@ -612,18 +688,18 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
           pending.event.capability !== event.capability) {
         rejectSyscall(event, "unmatched or repeated syscall result"); continue;
       }
-      if (typeof pending.request.args.handle === "string" &&
-          pending.request.args.handleVersion !== kernel.handleVersion(event.process, pending.request.args.handle)) {
-        rejectSyscall(event, "handle version changed before result"); continue;
+      if (!syscallVersionsMatch(kernel, pending.request)) {
+        rejectSyscall(event, "handle/process version changed before result"); continue;
       }
       const before = kernel.snapshotLiveHandles();
+      const beforeProcesses = kernel.snapshotProcessState();
       const trial = kernel.cloneForReplay();
       const outcome = executeCanonicalSyscall(trial, pending.request, requestHash);
       if (canonicalJson(outcome) !== canonicalJson(payload.outcome)) {
         rejectSyscall(event, "syscall outcome differs from deterministic execution"); continue;
       }
       // Refusals are traceable but cannot publish speculative mutation.
-      if (outcome.ok) { trial.recordHandleVersions(before, event.hash); kernel = trial; }
+      if (outcome.ok) { trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); kernel = trial; }
       consumed.add(requestHash);
       syscalls.push({ requestHash, resultHash: event.hash, caller: event.process, op: pending.request.op,
                       args: { ...pending.request.args }, outcome, position });
@@ -641,9 +717,10 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
     }
     const transition = event.type === "process-suspend" ? "suspend" : event.type === "process-resume" ? "resume" : "terminate";
     const before = kernel.snapshotLiveHandles();
+    const beforeProcesses = kernel.snapshotProcessState();
     const result = kernel.replayLifecycle(event.process, transition);
     if (!result.ok) rejected.push({ hash: event.hash, reason: result.detail ?? result.errno });
-    else { kernel.recordHandleVersions(before, event.hash); applied.push(event.hash); }
+    else { kernel.recordHandleVersions(before, event.hash); kernel.recordProcessVersions(beforeProcesses, event.hash); applied.push(event.hash); }
   }
   return { kernel, applied, rejected, missingDependencies: order.missingDependencies, cyclicHashes: order.cyclicHashes, syscalls, pendingSyscalls: [...requests.keys()].filter(hash => !consumed.has(hash)) };
 }

@@ -621,7 +621,7 @@ export function compareEvents(a: QosEvent, b: QosEvent): number {
     compareStrings(a.hash, b.hash);
 }
 
-export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version";
+export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version";
 export interface QosDependency { hash: string; kind: QosDependencyKind }
 /** Only schema-defined references are causal, never arbitrary payload strings. */
 export function eventDependencies(event: QosEvent): QosDependency[] {
@@ -633,10 +633,16 @@ export function eventDependencies(event: QosEvent): QosDependency[] {
     refs.push({ hash: event.payload.requestHash, kind: "request" });
   }
   if (event.type === "syscall-request" && event.payload?.schema === "qos.syscall/1" &&
-      typeof event.payload.op === "string" && ["cap_derive", "cap_close", "cap_revoke"].includes(event.payload.op) &&
+      typeof event.payload.op === "string" && ["cap_derive", "cap_close", "cap_revoke", "signal_grant", "signal"].includes(event.payload.op) &&
       isRecord(event.payload.args) && typeof event.payload.args.handleVersion === "string" &&
       HEX64.test(event.payload.args.handleVersion)) {
     refs.push({ hash: event.payload.args.handleVersion, kind: "handle-version" });
+  }
+  if (event.type === "syscall-request" && event.payload?.schema === "qos.syscall/1" &&
+      (event.payload.op === "signal" || event.payload.op === "signal_grant") &&
+      isRecord(event.payload.args) && typeof event.payload.args.targetVersion === "string" &&
+      HEX64.test(event.payload.args.targetVersion)) {
+    refs.push({ hash: event.payload.args.targetVersion, kind: "process-version" });
   }
   return refs;
 }

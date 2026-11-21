@@ -126,7 +126,7 @@ for control flow.
 
 ## Canonical syscall event payload (bounded #317 slice)
 
-This is the payload shape carried inside a `qos.event/1` event. The bounded root-attributed implementation accepts getpid, getppid, cap_derive, cap_close and cap_revoke. Broader ops remain planned.
+This is the payload shape carried inside a `qos.event/1` event. The bounded root-attributed implementation accepts getpid, getppid, cap_derive, cap_close, cap_revoke, signal_grant and signal. Broader ops remain planned.
 `qos.syscall/1` never forms a parallel journal. The internal `qos.test-trace/1` harness is only a local test fixture: it is neither admitted to a room nor exposed as a public API. Its ordered test input does not establish network-order convergence; that remains a canonical event integration obligation.
 
 ```json
@@ -184,10 +184,31 @@ observed version by default. Missing/stale/foreign versions fail replay;
 a genuinely unknown caller handle without a version may yield EBADF. The
 version index lives in the replay digest and is copied with speculative state.
 Request/result and handle-version hashes are explicit causal dependencies,
-not inferred from arbitrary strings. This scoped contract does not extend
-authority across processes; concurrent shared-object version selection,
-general operations, and distributed
-admission/coordination remain open.
+not inferred from arbitrary strings. The bounded cross-process extension permits only target-owner consent:
+`signal_grant` runs as the target process and names its own root as `handle`,
+and the recipient PID as `target`. It creates a target-side SIGNAL|REVOKE
+parent and a recipient-side SIGNAL-only handle to exactly the granting process,
+with stable allocation IDs derived from the request hash. The recipient uses
+`signal` with the exact handle, target PID, and finite signal name. The
+target-side revoker can revoke the delegated handle using `cap_revoke`.
+A root with room-wide rights cannot itself signal a different process, and
+generic `open` is not exposed as a journal syscall. Self-signal requires the
+caller root. Terminating signals clear target handles; suspended children
+cannot be reaped by wait.
+
+Both new operations carry `targetVersion`, the observed receipt for the
+target/recipient process lifecycle state (state, exit code, pending signals).
+The process version index is replay-derived, cloned and hashed with kernel
+state. Explicit process-version edges are included in the causal graph, and
+both handle and process versions are rechecked before result commit. The
+command adapter fills observed versions and rejects stale inputs before
+publication. Kernel status is displayed separately from governance orchestration.
+
+This is a bounded model of consensual control, not distributed authorization
+finality or cryptographic source authentication. Concurrent conflicting
+histories may invalidate prior speculative receipts; no monotonic acceptance
+is claimed. General cross-process delegation, shared-object conflict policy,
+scheduler and VFS remain open.
 
 ## Security invariants
 
