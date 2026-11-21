@@ -9,6 +9,8 @@
 // change `/poll` or `/gov`, and does not call a chain. Every lifecycle
 // transition is the dyncap-attributed event `QosProcessRoom` already knows how to make.
 
+import { DEVICE_OPS,DEVICE_KINDS,deviceRequest,type DeviceOp,type DeviceDescriptor } from "./qos-device.js";
+import { DeviceBroker,deviceFailure,type DeviceDriver } from "./qos-device-host.js";
 import { IDENTITY_OPS,PROXY_ACTIONS,type IdentityOp } from "./qos-identity.js";
 import { SHELL_OPS,CONFIG_COMMANDS,splitShell,parsePipeline,boundedText,type ShellOp } from "./qos-shell.js";
 import { VFS_OPS, type VfsOp } from "./qos-vfs.js";
@@ -36,6 +38,7 @@ export interface QosCommandHost {
   /** Persist the dyncap sequence after a locally dyncap-attributed event. */
   onSigned?: () => void;
   memory?: () => Promise<{service:QosMemoryBytes;network?:string}>;
+  deviceDriver?: (descriptor:DeviceDescriptor)=>Promise<DeviceDriver|null>;
   loadJournal?: () => unknown;
   saveJournal?: (events:QosEvent[]) => void;
 }
@@ -70,6 +73,7 @@ export class QosCommand {
   private readonly byId = new Map<string, TrackedProcess>();
   private readonly byName = new Map<string, string>();
   private commandQueue: Promise<void> = Promise.resolve();
+  private readonly deviceBroker=new DeviceBroker();
   private shellSelection:{pid:string;namespace:string}|null=null;
   private readonly restored:Promise<void>;
   private saveJournal():void {
@@ -118,10 +122,11 @@ export class QosCommand {
     const event = parseQosEvent(data);
     if (!event) return false;
     const result = await this.room.log.ingest(event);
-    if (!result.ok) {if(result.fork)this.saveJournal();return false;}
+    if (!result.ok) {if(result.fork){this.saveJournal();await this.reconcileDevices();}return false;}
     if (result.duplicate) return true;
 
     this.saveJournal();
+    await this.reconcileDevices();
     const entry = this.track(event, from);
     if (event.type === "process-start" && entry) {
       this.host.say(`🧩 ${this.label(from)} started **${entry.name}** — \`/qos status ${entry.name}\``);
@@ -137,7 +142,7 @@ export class QosCommand {
 
   /** Handle the argument after `/qos` (no leading command). */
   async handle(raw: string): Promise<void> {
-    const run = this.commandQueue.then(async () => {await this.restored;await this.dispatch(raw);});
+    const run = this.commandQueue.then(async () => {await this.restored;try{await this.dispatch(raw);}finally{await this.reconcileDevices();}});
     this.commandQueue = run.then(() => undefined, () => undefined);
     return run;
   }
@@ -162,6 +167,7 @@ export class QosCommand {
         await this.syscall(rest);return;
       case "fs":
         return this.fs(rest);
+      case "dev":return this.deviceCommand(rest);
       case "whoami":case "id":
         if(!rest){this.host.say("UID "+this.host.identity.anchor+" · dyncap TOFU continuity; no superuser");return;}
         return this.identityCommand("id_info",rest);
@@ -368,6 +374,11 @@ export class QosCommand {
         if(typeof a.dataHandle==="string"&&!Object.hasOwn(a,"dataVersion"))a.dataVersion=before.kernel.handleVersion(entry.id,a.dataHandle);
       }
     }
+    if(args&&typeof args==="object"&&!Array.isArray(args)&&DEVICE_OPS.includes(operation.trim() as DeviceOp)){
+      const a=args as Record<string,unknown>,op=operation.trim();
+      if(op==="dev_list"&&!Object.hasOwn(a,"authorityFrontier"))a.authorityFrontier=before.kernel.handleFrontier(entry.id);
+      if(op==="dev_observe"&&typeof a.ticket==="string"&&!Object.hasOwn(a,"ticketVersion"))a.ticketVersion=before.kernel.deviceTicket(a.ticket)?.version;
+    }
     if (!canonicalSyscallReady(before.kernel, payload, entry.id)) {
       this.host.say("invalid, unsupported or stale canonical syscall");
       return;
@@ -455,6 +466,51 @@ export class QosCommand {
     }
   }
 
+
+  private async reconcileDevices(){
+    try{await this.deviceBroker.reconcile(()=>this.shellKernel());}
+    catch{this.host.say("device resource release failed at host boundary");}
+  }
+  private async deviceCommand(rest:string):Promise<void>{
+    const [head,...body]=rest.split("|");
+    const [op,ref,handle,arg,mask,...extra]=head.trim().split(/\s+/),entry=this.resolve(ref);
+    const say=(s:string)=>this.host.say(s);
+    const usage="usage: /dev list <process> | define <process> <kind> <rights> | grant <process> <grant> <target-pid> <rights> | open <process> <grant> <rights> | bind|close <process> <session> | read <process> <session> <limit> | write <process> <session> | hex; ioctl <process> <session> status|zfa | hex; abandon <process> <ticket>";
+    if(!entry||entry.ownerAnchor!==this.host.identity.anchor||extra.length){say(usage);return;}
+    const pid=entry.id,k=()=>this.shellKernel(),call=(operation:string,args:Record<string,unknown>)=>this.syscall(pid+" | "+operation+" | "+JSON.stringify(args));
+    if(op==="list"&&!handle&&!body.length){await call("dev_list",{});return;}
+    if(op==="define"&&DEVICE_KINDS.includes(handle as typeof DEVICE_KINDS[number])&&arg&&!mask&&!body.length){
+      const root=k().getProcess(pid)?.root;if(root)await call("dev_define",{handle:root,kind:handle,rights:Number(arg)});return;
+    }
+    if(!handle){say(usage);return;}
+    if(op==="grant"&&arg&&mask&&!body.length){await call("dev_grant",{handle,target:this.resolve(arg)?.id??arg,rights:Number(mask)});return;}
+    if(op==="open"&&arg&&!mask&&!body.length){await call("dev_open",{handle,rights:Number(arg)});return;}
+    if(op==="close"&&!arg&&!body.length){await call("dev_close",{handle});return;}
+    if(op==="bind"&&!arg&&!body.length){
+      const session=k().deviceSession(pid,handle);
+      if(!session||!this.host.deviceDriver){say("no live device session or explicit host adapter");return;}
+      const driver=await this.host.deviceDriver(session.descriptor);
+      if(!driver){say("explicit resource binding unavailable for this device kind");return;}
+      if(!this.deviceBroker.bind(k,pid,handle,driver)){await driver.close();say("device binding refused");return;}
+      say("device bound: "+handle);return;
+    }
+    if(op==="abandon"&&!arg&&!body.length){
+      await call("dev_observe",{ticket:handle,observation:deviceFailure("EINTR","unknown")});return;
+    }
+    let request:unknown;
+    if(op==="read"&&arg&&!mask&&!body.length)request={action:"read",limit:Number(arg)};
+    else if(op==="write"&&!arg&&body.length===1)request={action:"write",hex:body[0].trim()};
+    else if(op==="ioctl"&&arg&&!mask&&body.length<=1)request={action:"ioctl",code:arg,hex:body[0]?.trim()??""};
+    else{say(usage);return;}
+    if(!deviceRequest(request)){say("invalid device request");return;}
+    const receipt=await call("dev_request",{handle,request});
+    if(!receipt?.outcome.ok)return;
+    const ticket=(receipt.outcome.value as {id:string}).id;
+    // Only a freshly committed request from this command can dispatch. A
+    // restored pending ticket is never re-executed; abandon records uncertainty.
+    const observation=await this.deviceBroker.perform(k,pid,ticket);
+    await call("dev_observe",{ticket,observation});
+  }
 
   private async identityCommand(op:string,rest:string):Promise<void>{
     const [ref,handle,arg,...extra]=rest.trim().split(/\s+/),entry=this.resolve(ref);

@@ -25,6 +25,8 @@ const shellHash=(text:string)=>Array.from(sha256(new TextEncoder().encode(text))
 
 import {IDENTITY_OPS,PROXY_ACTIONS,MAX_PROXIES,isUid,isProxyToken,type IdentityOp,type AuthorityProxy} from "./qos-identity.js";
 
+import {DEVICE_OPS,DEVICE_KINDS,DEVICE_MAX_REQUESTS,DEVICE_MAX_DESCRIPTORS,deviceRequest,deviceObservation,deviceRights,deviceRight,type DeviceOp,type DeviceDescriptor,type DeviceTicket,type DeviceKind} from "./qos-device.js";
+
 export const QOS_ABI_VERSION = 0;
 
 export const QOS_RIGHTS = {
@@ -44,7 +46,7 @@ export const QOS_ALL_RIGHTS =
 
 export const QOS_SYSCALLS = [
   "getpid", "getppid", "spawn", "exit", "wait", "signal",
-  "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open", ...MEMORY_OPS, ...VFS_OPS, ...SHELL_OPS, ...IDENTITY_OPS,
+  "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open", ...MEMORY_OPS, ...VFS_OPS, ...SHELL_OPS, ...IDENTITY_OPS, ...DEVICE_OPS,
   "read", "write", "stat", "mkdir", "unlink", "rename", "mount", "unmount",
   "send", "recv", "listen", "connect", "accept",
   "svc_register", "svc_lookup", "yield", "sleep", "sched_step", "sched_priority", "sched_wake", "log",
@@ -125,6 +127,86 @@ export class QosKernel {
   private scheduler = new QosScheduler();
   private memory = new QosMemoryGraph();
   private vfs = new QosVfs();
+  private devices=new Map<string,DeviceDescriptor>();
+  private deviceTickets=new Map<string,DeviceTicket>();
+  deviceDescriptor(id:string){const d=this.devices.get(id);return d?{...d}:null;}
+  deviceTicket(id:string){const r=this.deviceTickets.get(id);return r?JSON.parse(JSON.stringify(r)) as DeviceTicket:null;}
+  deviceSession(pid:string,handle:string){
+    const p=this.processes.get(pid);if(!p||p.state!=="running")return null;
+    const h=this.handle(p,handle);if(!h.ok||!h.value.object.startsWith("dev:")||!h.value.rights)return null;
+    const d=this.devices.get(h.value.object.slice(4));if(!d)return null;
+    return {descriptor:{...d},rights:h.value.rights,version:this.handleVersion(pid,handle)};
+  }
+  deviceAuthorized(pid:string,ticket:string){
+    const t=this.deviceTickets.get(ticket);
+    if(!t||t.pid!==pid||t.observation!==null)return false;
+    const session=this.deviceSession(pid,t.handle);
+    return !!session&&session.descriptor.id===t.device&&session.version===t.handleVersion&&(session.rights&deviceRight(t.request))===deviceRight(t.request);
+  }
+  recordDevice(op:QosCanonicalSyscallRequest["op"],outcome:QosResult<unknown>,hash:string){
+    if(op==="dev_request"&&outcome.ok){
+      const t=this.deviceTickets.get((outcome.value as {id:string}).id);if(t)t.version=hash;
+    }
+  }
+  executeDevice(pid:string,op:DeviceOp,args:Record<string,unknown>,allocation?:string):QosResult<unknown>{
+    const p=this.processes.get(pid);if(!p||p.state!=="running")return err("ENOENT","process not running");
+    if(op==="dev_list"){
+      const visible=[...p.handles.values()].filter(h=>!h.revoked&&(h.object.startsWith("dev:")||h.object.startsWith("devgrant:")));
+      return ok(visible.sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0).map(h=>({handle:this.handleInfo(h),descriptor:this.deviceDescriptor(h.object.slice(h.object.indexOf(":")+1))})));
+    }
+    if(op==="dev_observe"){
+      const t=this.deviceTickets.get(args.ticket as string);
+      if(!t||t.pid!==pid)return err("EACCES","ticket not owned");
+      if(t.observation!==null)return err("EINVAL","observation already committed");
+      const observation=deviceObservation(args.observation,t.request);
+      if(!observation)return err("EINVAL","invalid observation schema");
+      if(observation.ok&&!this.deviceAuthorized(pid,t.id))return err("EACCES","device authority changed before observation");
+      t.observation=observation;
+      return ok({id:t.id,observation});
+    }
+    const h=this.handle(p,args.handle as string);if(!h.ok)return h;
+    const id="h:device:"+allocation;
+    if(op==="dev_define"){
+      const kind=args.kind as DeviceKind,rights=args.rights as number;
+      if(h.value.id!==p.root||(h.value.rights&(QOS_RIGHTS.GRANT|QOS_RIGHTS.REVOKE))!==(QOS_RIGHTS.GRANT|QOS_RIGHTS.REVOKE)||!allocation||this.devices.size>=DEVICE_MAX_DESCRIPTORS||
+         !validRights(rights)||(rights&~deviceRights(kind))!==0||(rights&~h.value.rights)!==0||this.lineage.has(id))return err("EACCES","descriptor registration refused");
+      // Logical descriptor registration is not a host resource grant. The
+      // adapter must independently bind an explicitly selected resource.
+      const d:DeviceDescriptor={id:allocation,kind,owner:p.owner,rights};
+      this.devices.set(d.id,d);
+      const grant=this.makeHandle("devgrant:"+d.id,rights|QOS_RIGHTS.GRANT|QOS_RIGHTS.REVOKE,h.value.id,id);
+      p.handles.set(grant.id,grant);return ok({descriptor:d,handle:this.handleInfo(grant)});
+    }
+    if(op==="dev_close"){
+      if(!h.value.object.startsWith("dev:"))return err("EINVAL","not a device session");
+      return this.capClose(pid,h.value.id);
+    }
+    if(op==="dev_grant"||op==="dev_open"){
+      if(!h.value.object.startsWith("devgrant:")||!allocation||this.lineage.has(id))return err("EACCES","explicit device grant required");
+      const d=this.devices.get(h.value.object.slice(9)),rights=args.rights as number;
+      if(!d||!validRights(rights)||(rights&~h.value.rights)!==0)return err("EACCES","device rights cannot widen");
+      if(op==="dev_grant"){
+        const target=this.processes.get(args.target as string);
+        if(!target||target.state!=="running")return err("ENOENT","recipient unavailable");
+        if(!(h.value.rights&QOS_RIGHTS.GRANT)||(rights&deviceRights(d.kind))===0||(rights&~(d.rights|QOS_RIGHTS.GRANT|QOS_RIGHTS.REVOKE))!==0)return err("EACCES","grant refused");
+        const g=this.makeHandle(h.value.object,rights,h.value.id,id);target.handles.set(g.id,g);
+        return ok(this.handleInfo(g));
+      }
+      if((rights&~d.rights)!==0)return err("EACCES","open rights exceed descriptor");
+      const opened=this.makeHandle("dev:"+d.id,rights,h.value.id,id);p.handles.set(id,opened);
+      return ok({descriptor:{...d},handle:this.handleInfo(opened)});
+    }
+    if(op!=="dev_request")return err("EINVAL","unsupported device operation");
+    const session=this.deviceSession(pid,h.value.id);
+    if(!session)return err("EACCES","open device session required");
+    const request=deviceRequest(args.request,session.descriptor.kind);
+    if(!request)return err("EINVAL","ioctl or device request outside ABI");
+    if((session.rights&deviceRight(request))!==deviceRight(request))return err("EACCES","device right missing");
+    if(!allocation||!session.version||this.deviceTickets.size>=DEVICE_MAX_REQUESTS||this.deviceTickets.has(allocation)||
+      [...this.deviceTickets.values()].some(t=>t.handle===h.value.id&&t.observation===null))return err("EAGAIN","pending request or device journal limit");
+    const t:DeviceTicket={id:allocation,pid,handle:h.value.id,handleVersion:session.version,device:session.descriptor.id,request,version:"",observation:null};
+    this.deviceTickets.set(t.id,t);return ok({id:t.id,device:t.device,request:t.request});
+  }
   private proxies=new Map<string,AuthorityProxy>();
   private proxyUses=new Map<string,Set<string>>();
   proxyObservedUses(token:string){return [...(this.proxyUses.get(token)??[])].sort();}
@@ -714,7 +796,7 @@ export class QosKernel {
     if (!validRights(rights)) return err("EINVAL", "rights must be a non-empty known mask");
     const parent = this.handle(caller, handleId);
     if (!parent.ok) return parent;
-    if (!(parent.value.rights & QOS_RIGHTS.GRANT)) return err("EACCES", "handle lacks GRANT");
+    if (parent.value.object.startsWith("dev:") || !(parent.value.rights & QOS_RIGHTS.GRANT)) return err("EACCES", "handle lacks GRANT or is an open device session");
     if ((rights & ~parent.value.rights) !== 0) return err("EACCES", "cannot widen rights");
     if (allocatedId !== undefined && this.lineage.has(allocatedId)) return err("EINVAL", "handle ID already allocated");
     const h = this.makeHandle(parent.value.object, rights, parent.value.id, allocatedId);
@@ -894,6 +976,8 @@ export class QosKernel {
     copy.scheduler = this.scheduler.clone();
     copy.memory = this.memory.clone();
     copy.vfs = this.vfs.clone();
+    copy.devices=new Map([...this.devices].map(([id,d])=>[id,{...d}]));
+    copy.deviceTickets=new Map([...this.deviceTickets].map(([id,t])=>[id,JSON.parse(JSON.stringify(t)) as DeviceTicket]));
     copy.proxies=new Map([...this.proxies].map(([id,p])=>[id,{...p}]));
     copy.proxyUses=new Map([...this.proxyUses].map(([id,uses])=>[id,new Set(uses)]));
     copy.shellContexts=new Map([...this.shellContexts].map(([pid,c])=>[pid,{...c,env:{...c.env}}]));
@@ -920,6 +1004,8 @@ export class QosKernel {
       scheduler: this.scheduler.state(),
       memory: this.memoryView(),
       vfs: this.fsState(),
+      devices:[...this.devices.values()].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0),
+      deviceTickets:[...this.deviceTickets.values()].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0),
       proxies:this.proxyState(),
       proxyUses:[...this.proxyUses.entries()].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([id,uses])=>[id,[...uses].sort()]),
       shellContexts:[...this.shellContexts.entries()].sort(([a],[b])=>a<b?-1:a>b?1:0),
@@ -995,7 +1081,7 @@ export class QosKernel {
 export type QosCanonicalSyscallRequest = {
   schema: "qos.syscall/1";
   caller: string;
-  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp | MemoryOp | VfsOp | ShellOp | IdentityOp;
+  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp | MemoryOp | VfsOp | ShellOp | IdentityOp | DeviceOp;
   args: Record<string, unknown>;
   observed?:string[];
 };
@@ -1154,6 +1240,31 @@ function parseSyscallRequest(payload: Record<string, unknown>, pid: string): Qos
       if(keys.includes("dataHandle")&&(typeof args.dataHandle!=="string"||args.dataHandle.length>256||!isObjectId(args.dataVersion)))return null;
       break;
     }
+    case "dev_list":
+      if(!exactKeys(args,["authorityFrontier"])||!Array.isArray(args.authorityFrontier)||args.authorityFrontier.length>4096||
+        !args.authorityFrontier.every((v,i,a)=>isObjectId(v)&&(i===0||a[i-1]<v)))return null;
+      break;
+    case "dev_observe":
+      if(!exactKeys(args,["ticket","ticketVersion","observation"])||!isObjectId(args.ticket)||!isObjectId(args.ticketVersion)||
+        !args.observation||typeof args.observation!=="object")return null;
+      // Strict request-specific observation validation is in executeDevice.
+      if(JSON.stringify(args.observation).length>9000)return null;
+      break;
+    case "dev_define":case "dev_grant":case "dev_open":case "dev_close":case "dev_request":{
+      const keys=["handle"];
+      if(args&&typeof args==="object"&&Object.hasOwn(args,"handleVersion"))keys.push("handleVersion");
+      if(["dev_define","dev_grant","dev_open"].includes(payload.op))keys.push("rights");
+      if(payload.op==="dev_define")keys.push("kind");
+      if(payload.op==="dev_grant")keys.push("target","targetVersion");
+      if(payload.op==="dev_request")keys.push("request");
+      if(!exactKeys(args,keys)||typeof args.handle!=="string"||args.handle.length>256)return null;
+      if(keys.includes("handleVersion")&&!isObjectId(args.handleVersion))return null;
+      if(keys.includes("rights")&&(typeof args.rights!=="number"||!validRights(args.rights)))return null;
+      if(payload.op==="dev_define"&&!DEVICE_KINDS.includes(args.kind as DeviceKind))return null;
+      if(payload.op==="dev_grant"&&(typeof args.target!=="string"||args.target.length>256||!isObjectId(args.targetVersion)))return null;
+      if(payload.op==="dev_request"&&!deviceRequest(args.request))return null;
+      break;
+    }
     default: return null;
   }
   return payload as QosCanonicalSyscallRequest;
@@ -1176,6 +1287,8 @@ function executeCanonicalSyscall(kernel: QosKernel, request: QosCanonicalSyscall
       return kernel.executeShell(pid,request.op,request.args,requestHash);
     case "id_info":case "id_groups":case "id_cap":case "id_chmod":case "id_chown":case "proxy_create":case "proxy_set":case "proxy_use":case "group_action":
       return kernel.executeIdentity(pid,request.op,request.args,requestHash);
+    case "dev_define":case "dev_grant":case "dev_open":case "dev_close":case "dev_list":case "dev_request":case "dev_observe":
+      return kernel.executeDevice(pid,request.op,request.args,requestHash);
     case "getpid": return kernel.getpid(pid);
     case "getppid": return kernel.getppid(pid);
     case "cap_derive": return kernel.capDerive(pid, request.args.handle as string, request.args.rights as number, requestHash === undefined ? undefined : `h:request:${requestHash}`);
@@ -1215,6 +1328,9 @@ function syscallVersionsMatch(kernel: QosKernel, request: QosCanonicalSyscallReq
       if(request.op==="sh_finish"&&canonicalJson(args.memoryFrontier)!==canonicalJson(kernel.memoryFrontier()))return false;
     }
   }
+  if(request.op==="dev_list")return canonicalJson(args.authorityFrontier)===canonicalJson(kernel.handleFrontier(pid));
+  if(request.op==="dev_grant")return args.targetVersion===kernel.processVersion(args.target as string);
+  if(request.op==="dev_observe")return args.ticketVersion===kernel.deviceTicket(args.ticket as string)?.version;
   if(request.op==="id_cap"||request.op==="id_chmod")
     return canonicalJson(args.authorityFrontier)===canonicalJson(kernel.handleFrontier(pid,request.op==="id_chmod"?args.handle as string:undefined));
   if(request.op==="id_chown")return args.targetVersion===kernel.processVersion(args.target as string);
@@ -1357,7 +1473,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         rejectSyscall(event, VFS_OPS.includes(pending.request.op as VfsOp)&&!outcome.ok&&outcome.errno==="EAGAIN"?"VFS conflict: "+outcome.detail:"syscall outcome differs from deterministic execution"); continue;
       }
       // Refusals are traceable but cannot publish speculative mutation.
-      if (outcome.ok) { trial.recordVfs(pending.request.op,outcome,event.hash); trial.recordShell(event.process,pending.request.op,outcome,event.hash); trial.recordIdentity(pending.request.op,outcome,event.hash,pending.request.args); trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); trial.recordMemory(beforeMemory,event.hash,MEMORY_OPS.includes(pending.request.op as MemoryOp)?pending.request.op as MemoryOp:pending.request.op==="sh_finish"&&(outcome.value as {namespace?:string}).namespace?"mem_put":undefined); kernel = trial; }
+      if (outcome.ok) { trial.recordVfs(pending.request.op,outcome,event.hash); trial.recordShell(event.process,pending.request.op,outcome,event.hash); trial.recordIdentity(pending.request.op,outcome,event.hash,pending.request.args); trial.recordDevice(pending.request.op,outcome,event.hash); trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); trial.recordMemory(beforeMemory,event.hash,MEMORY_OPS.includes(pending.request.op as MemoryOp)?pending.request.op as MemoryOp:pending.request.op==="sh_finish"&&(outcome.value as {namespace?:string}).namespace?"mem_put":undefined); kernel = trial; }
       consumed.add(requestHash);
       syscalls.push({ requestHash, resultHash: event.hash, caller: event.process, op: pending.request.op,
                       args: { ...pending.request.args }, outcome, position });

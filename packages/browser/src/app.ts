@@ -1,5 +1,5 @@
 import { loadZfa, generateCapability, validateCapability,
-         spectralGap, achievesZfa, isPauliClosed,
+         spectralGap, achievesZfa, achievesZfaPairwise, isPauliClosed,
          classifyCoupling, isPairwiseBalanced, signedAction,
          foldsToScalar, COUPLED_BASELINE } from "./zfa.js";
 import { QOSPeer, DEFAULT_ICE } from "./peer.js";
@@ -61,6 +61,7 @@ import { loadConfig as loadNodeConfig, saveConfig as saveNodeConfig, describeCon
 import { sha256 } from "@noble/hashes/sha2.js";
 import { QosMemoryBytes, OpfsMemoryCache, RoomByteCache, objectIdentity } from "./qos-memory-bytes.js";
 import { RholoRegistryMemory } from "./qos-memory-rholo.js";
+import { opfsBlockDriver, zfaDriver, rholoStatusDriver } from "./qos-device-host.js";
 import { qucalcSearch, qucalcSolve,
          type SearchDone as QucalcSearchDone } from "./qucalc-search.js";
 
@@ -910,6 +911,13 @@ function qosCommandFor(ctx: RoomContext): QosCommand | null {
       const network="node/"+await objectIdentity(new TextEncoder().encode(config.url.replace(/\/+$/,"")));
       const backend=new RholoRegistryMemory(network,config);
       return {service:new QosMemoryBytes(cache,[backend]),network};
+    },
+    deviceDriver:async descriptor=>{
+      if(descriptor.kind==="opfs-block"&&typeof navigator.storage?.getDirectory==="function")return opfsBlockDriver(journalScope,descriptor.id);
+      if(descriptor.kind==="zfa")return zfaDriver(achievesZfaPairwise,"qos-zfa-pairwise-wrapper");
+      if(descriptor.kind==="rholo-status")return rholoStatusDriver(loadNodeConfig().url);
+      // Never seize an active chat data channel, media track or socket.
+      return null;
     },
     roomId: ctx.roomId,
     identity: dyncapState,
@@ -6067,6 +6075,10 @@ function handleCommand(raw: string): string[] {
       sys(`→ asked the ${role} (${peerLabel(agent.peerId)}) — ${text}`);
       break;
     }
+
+    case "dev":
+      runQosCommand("dev "+arg,"/dev");
+      break;
 
     case "fs":
       runQosCommand("fs "+arg,"/fs");
