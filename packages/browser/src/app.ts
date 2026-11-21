@@ -864,7 +864,7 @@ async function loadDyncap(): Promise<void> {
 function signedBroadcast(envelope: Record<string, unknown>): void {
   signQueue = signQueue.then(async () => {
     if (!qpeer) return;
-    if (!dyncapState) { qpeer.broadcast(envelope); return; }
+    if (!dyncapState) return;
     const dyncap = await signEnvelope(dyncapState, activeRoom.roomId, envelope);
     saveDyncap();
     qpeer.broadcast({ ...envelope, dyncap });
@@ -941,7 +941,7 @@ function goalsForIdentity(): GoalStore | null {
 /// affected peer is flagged contested and the user is notified.
 async function verifyDyncapIfPresent(from: string, d: Record<string, unknown>): Promise<string> {
   const raw = d.dyncap;
-  if (!raw || typeof raw !== "object") return "";
+  if (!raw || typeof raw !== "object") return "  · refused: unsigned envelope";
   const dyncap = raw as DyncapField;
   const prior = dyncapChains.get(from);
   const result: VerifyResult = await verifyEnvelope(prior, activeRoom.roomId, d, dyncap);
@@ -8085,7 +8085,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "state-discrepancy") {
-          await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const storeName = String(d.storeName ?? "");
           const key       = String(d.key       ?? "");
           const obsRaw    = d.observations;
