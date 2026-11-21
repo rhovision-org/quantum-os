@@ -28,6 +28,7 @@ export function openRhoQuPackageUI(authorAnchor?: string): void {
   anchor.style.cssText = "width:100%;box-sizing:border-box;background:#111318;color:#eee;border:1px solid #444;border-radius:6px;padding:8px;margin:0 0 8px;font:12px monospace";
   const source = document.createElement("textarea"); source.placeholder = "process Example() { /poll new Decision; }\nExample();"; source.style.cssText = "width:100%;min-height:130px;box-sizing:border-box;background:#111318;color:#eee;border:1px solid #444;border-radius:6px;padding:8px;font:12px/1.5 monospace;resize:vertical";
   const file = document.createElement("input"); file.type = "file"; file.accept = ".json,application/json"; file.style.display = "none";
+  source.addEventListener("input",()=>{ imported=null; });
   const previewBox = document.createElement("pre"); previewBox.style.cssText = "white-space:pre-wrap;max-height:220px;overflow:auto;background:#111318;border:1px solid #444;border-radius:6px;padding:8px;font:12px/1.5 monospace"; previewBox.textContent = "Process preview will appear here.";
   const status = document.createElement("div"); status.style.cssText = "min-height:18px;margin:6px 0;font:12px monospace";
   const buttons = document.createElement("div"); buttons.style.cssText = "display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px";
