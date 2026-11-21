@@ -1,0 +1,27 @@
+// Deterministic syscall journal: replay must reproduce outcomes and kernel digest.
+import { build } from "esbuild";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import assert from "node:assert/strict";
+const here = dirname(fileURLToPath(import.meta.url));
+const root = join(here, "..");
+const bundle = await build({ stdin: { contents: `export { QosSyscallJournal } from "./src/qos-syscall-journal.ts";`, resolveDir: root, loader: "ts", sourcefile: "qos-syscall-journal-entry.ts" }, bundle: true, format: "esm", platform: "node", write: false });
+const { QosSyscallJournal } = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
+let pass = 0, fail = 0;
+const ok = (name, condition) => { if (condition) { pass++; console.log(`  ok   ${name}`); } else { fail++; console.log(`  FAIL ${name}`); } };
+const journal = new QosSyscallJournal();
+const init = await journal.invoke({ op: "bootstrap", name: "init", owner: "anchor:test" });
+ok("bootstrap process recorded", init.ok && init.value.pid === "proc:1");
+const opened = await journal.invoke({ op: "open", caller: "proc:1", object: "file:test", rights: 1, parentHandle: "h:1" });
+ok("open succeeds and handle recorded", opened.ok && opened.value.id === "h:2");
+const refused = await journal.invoke({ op: "open", caller: "proc:1", object: "file:bad", rights: 128, parentHandle: "h:1" });
+ok("refusal recorded as outcome", !refused.ok && refused.errno === "EINVAL");
+const entries = journal.list();
+const replay = await QosSyscallJournal.replay(entries);
+ok("replay accepts all journal entries", replay.accepted.length === entries.length && replay.rejected.length === 0);
+ok("replay reproduces final kernel digest", replay.stateDigest === await journal.digest());
+const tampered = entries.map(e => ({ ...e })); tampered[1] = { ...tampered[1], outcome: { ok: true, value: "forged" } };
+const badReplay = await QosSyscallJournal.replay(tampered);
+ok("tampered result is rejected", badReplay.rejected.length > 0);
+console.log(`\n${pass} passed, ${fail} failed`);
+if (fail) process.exitCode = 1;
