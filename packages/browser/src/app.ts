@@ -8005,6 +8005,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "sync-series") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const raw = d.entries;
           if (!Array.isArray(raw)) return;
           let added = 0;
@@ -8024,6 +8026,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "sync-lemmas") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const raw = d.entries;
           if (!Array.isArray(raw)) return;
           if (ignoredForSync.has(from)) {
@@ -8059,6 +8063,8 @@ async function connect(): Promise<void> {
           return;
         }
         if (d.kind === "sync-currencies") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
           const raw = d.entries;
           if (!Array.isArray(raw)) return;
           if (ignoredForSync.has(from)) {
