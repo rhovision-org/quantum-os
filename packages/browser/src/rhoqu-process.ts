@@ -47,11 +47,12 @@ export function executeRhoProcessWithPollBindings(
 ): RhoCommandResult[] {
   return executeRhoProcess(process, (command) => {
     const before = /^\/poll\s+new\b/i.test(command) ? new Set(getPollIds()) : null;
-    const lines = executeCommand(command);
+    const raw = executeCommand(command);
+    const execution: RhoCommandExecution = Array.isArray(raw) ? { lines: raw } : raw as RhoCommandExecution;
     if (before) {
       const created = getPollIds().filter((id) => !before.has(id));
-      if (created.length === 1) return { lines, id: created[0] };
+      if (created.length === 1) return { ...execution, id: created[0] };
     }
-    return lines;
+    return raw;
   });
 }
