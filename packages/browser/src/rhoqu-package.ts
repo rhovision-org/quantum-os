@@ -52,10 +52,10 @@ function validSequence(value: unknown): value is RhoSequenceNode {
 function validNode(value: unknown): value is RhoProcessNode {
   if (!isRecord(value) || typeof value.kind !== "string") return false;
   if (value.kind === "command") {
-    return typeof value.command === "string" && (value.bind === undefined || (typeof value.bind === "string" && /^[A-Za-z_][A-Za-z0-9_-]*$/.test(value.bind) && value.bind !== "LAST_ID"));
+    return typeof value.command === "string" && value.command.trim().length > 0 && value.command.length <= 8192 && (value.bind === undefined || (typeof value.bind === "string" && /^[A-Za-z_][A-Za-z0-9_-]*$/.test(value.bind) && value.bind.toUpperCase() !== "LAST_ID"));
   }
   if (value.kind === "sequence") return validSequence(value);
-  if (value.kind === "parallel") return Array.isArray(value.branches) && value.branches.every(validNode);
+  if (value.kind === "parallel") return Array.isArray(value.branches) && value.branches.length >= 2 && value.branches.length <= 64 && value.branches.every(validNode);
   if (value.kind === "when") {
     return validExpr(value.condition) && isRecord(value.env) && Object.values(value.env).every(v => typeof v === "string") && validSequence(value.then) && (value.else === undefined || validSequence(value.else));
   }
@@ -64,7 +64,7 @@ function validNode(value: unknown): value is RhoProcessNode {
 function validPackageBase(value: unknown): boolean {
   return isRecord(value) && value.format === "rho-process-package" && value.version === 1
     && isRecord(value.provenance) && typeof value.provenance.authorAnchor === "string" && /^[0-9a-f]{64}$/i.test(value.provenance.authorAnchor)
-    && typeof value.provenance.exportedAt === "string"
+    && typeof value.provenance.exportedAt === "string" && Number.isFinite(Date.parse(value.provenance.exportedAt))
     && (value.provenance.source === undefined || typeof value.provenance.source === "string")
     && validSequence(value.process);
 }

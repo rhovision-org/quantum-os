@@ -42,6 +42,15 @@ ok("import rejects unsupported schema", schemaRejected);
 let anchorRejected = false;
 try { await createRhoProcessPackage(process, { authorAnchor: "not-a-dyncap-anchor", exportedAt: provenance.exportedAt }); } catch (error) { anchorRejected = String(error).includes("schema validation"); }
 ok("package rejects malformed dyncap anchor", anchorRejected);
+let emptyCommandRejected = false;
+try { await createRhoProcessPackage({ kind: "sequence", steps: [{ kind: "command", command: "  " }] }, provenance); } catch (error) { emptyCommandRejected = String(error).includes("schema validation"); }
+ok("package rejects empty command nodes", emptyCommandRejected);
+let invalidParallelRejected = false;
+try { await createRhoProcessPackage({ kind: "sequence", steps: [{ kind: "parallel", branches: [{ kind: "command", command: "/only-one" }] }] }, provenance); } catch (error) { invalidParallelRejected = String(error).includes("schema validation"); }
+ok("package rejects parallel with fewer than two branches", invalidParallelRejected);
+let invalidTimestampRejected = false;
+try { await createRhoProcessPackage(process, { ...provenance, exportedAt: "not-a-date" }); } catch (error) { invalidTimestampRejected = String(error).includes("schema validation"); }
+ok("package rejects invalid export timestamp", invalidTimestampRejected);
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-package.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);
 
