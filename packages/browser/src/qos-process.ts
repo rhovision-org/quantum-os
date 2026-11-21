@@ -2,7 +2,7 @@
 ///
 /// The gate's claim is that the room primitives are enough for long-lived,
 /// named processes: a process is a capability-guarded continuation over the
-/// room's ZFA process space, every lifecycle step is a signed event, and any
+/// room's ZFA process space, every lifecycle step is a dyncap-attributed event, and any
 /// peer can recompute the orchestration result from the same envelopes.
 ///
 /// This module is deliberately **pure and transport-free**:
@@ -963,7 +963,7 @@ export async function orchestrate(
 
   const byHash = new Map(all.map((event) => [event.hash, event]));
 
-  // Resolve every event's authority first. An event with a valid signature but
+  // Resolve every event's authority first. An event with a valid dyncap chain but
   // no valid grant is not orchestration input; it is reported, not guessed at.
   const resolved = new Map<string, ResolvedCapability>();
   for (const event of all) {

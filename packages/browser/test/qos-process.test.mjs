@@ -147,10 +147,10 @@ ok("adding an event type not in the parent is refused",
   Q.attenuateScope(participant, { ...participant, events: ["nomination", "anchor"] }) === null);
 
 // ---------------------------------------------------------------------------
-// 3. Signed lifecycle
+// 3. Dyncap-attributed lifecycle
 // ---------------------------------------------------------------------------
 
-console.log("\nprocess identity and signed lifecycle");
+console.log("\nprocess identity and dyncap attribution");
 {
   const id = await identity(10);
   const { room } = makeRoom(id);
@@ -167,14 +167,14 @@ console.log("\nprocess identity and signed lifecycle");
   eq("start leaves the process running", (await room.view(pid)).status, "running");
 
   await room.suspend(pid, started.event, "pause");
-  eq("suspend is a signed event and leaves the process suspended", (await room.view(pid)).status, "suspended");
+  eq("suspend is a dyncap-attributed event and leaves the process suspended", (await room.view(pid)).status, "suspended");
   await room.resume(pid, started.event, "continue");
-  eq("resume is a signed event and leaves the process running", (await room.view(pid)).status, "running");
+  eq("resume is a dyncap-attributed event and leaves the process running", (await room.view(pid)).status, "running");
   await room.terminate(pid, started.event, "done");
   const terminated = await room.view(pid);
-  eq("terminate is a signed event and is terminal", terminated.status, "terminated");
+  eq("terminate is a dyncap-attributed event and is terminal", terminated.status, "terminated");
   const lifecycle = room.log.eventsFor(pid).map((event) => event.type);
-  eq("the signed lifecycle vocabulary is present", lifecycle,
+  eq("the lifecycle vocabulary is present", lifecycle,
     ["process-start", "process-suspend", "process-resume", "process-terminate"]);
   ok("the process action history still achieves ZFA", Q.zfaHistoryAchievesZfa(room.log.eventsFor(pid)));
 }
