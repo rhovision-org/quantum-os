@@ -62,14 +62,22 @@ jobs:
           python3 scripts/localnet/prepare-isolated-finality.py audit-rholo/tools/devnet.sh
           git -C audit-rholo diff -- tools/devnet.sh > finality-evidence/devnet-harness.patch
           sha256sum "$OMEGA_FIXTURE_WALLETS" > finality-evidence/fixture-wallets.sha256
-          docker network create --internal "$DEVNET_NETWORK"
+          # Internal bridges on this runner do not expose the published loopback
+          # ports. Use a dedicated bridge with a fail-closed forwarding rule.
+          docker network create --driver bridge --opt com.docker.network.bridge.name=br-omega-g4 "$DEVNET_NETWORK"
+          test "$(docker network inspect --format '{{.EnableIPv6}}' "$DEVNET_NETWORK")" = false
+          sudo iptables -w -I DOCKER-USER 1 -i br-omega-g4 ! -o br-omega-g4 -j DROP
+          sudo iptables -w -C DOCKER-USER -i br-omega-g4 ! -o br-omega-g4 -j DROP
+          sudo iptables -w -S DOCKER-USER > finality-evidence/forwarding-rules.txt
           (cd audit-rholo && tools/devnet.sh up --validators 4 --fresh --autopropose --epoch-length 10) 2>&1 | tee finality-evidence/start.log
-          test "$(docker network inspect --format '{{.Internal}}' "$DEVNET_NETWORK")" = true
+          sudo iptables -w -C DOCKER-USER -i br-omega-g4 ! -o br-omega-g4 -j DROP
           for i in 0 1 2 3; do
             name="$DEVNET_PREFIX-validator-$i"
             if [ "$i" = 0 ]; then name="$DEVNET_PREFIX-bootstrap"; fi
             test "$(docker inspect --format '{{.State.Running}}' "$name")" = true
             test "$(docker inspect --format '{{.HostConfig.NetworkMode}}' "$name")" = "$DEVNET_NETWORK"
+            test "$(docker exec "$name" curl --max-time 5 -fsS http://127.0.0.1:40403/api/status | jq -r .networkId)" = omega-g4-isolated
+            test "$(curl --max-time 5 -fsS "http://127.0.0.1:$((40403+i*1000))/api/status" | jq -r .networkId)" = omega-g4-isolated
             docker inspect --format '{{.Name}} {{.Id}} {{range .Mounts}}{{if eq .Destination "/var/lib/rnode"}}{{.Name}}{{end}}{{end}}' "$name"
           done | tee finality-evidence/validator-identities.txt
           test "$(awk '{print $3}' finality-evidence/validator-identities.txt | sort -u | wc -l)" -eq 4
@@ -93,6 +101,8 @@ jobs:
             name="$DEVNET_PREFIX-validator-$i"
             if [ "$i" = 0 ]; then name="$DEVNET_PREFIX-bootstrap"; fi
             docker logs "$name" > "finality-evidence/$name.log" 2>&1 || true
+            docker exec "$name" curl --max-time 5 -fsS http://127.0.0.1:40403/api/status > "finality-evidence/$name-local-status.json" 2>"finality-evidence/$name-local-status.err" || true
+            curl --max-time 5 -fsS "http://127.0.0.1:$((40403+i*1000))/api/status" > "finality-evidence/$name-host-status.json" 2>"finality-evidence/$name-host-status.err" || true
             curl --max-time 5 -fsS "http://127.0.0.1:$((40403+i*1000))/health" > "finality-evidence/$name-health.json" || true
           done
           (cd finality-evidence && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
@@ -100,6 +110,7 @@ jobs:
         if: always()
         run: |
           if test -x audit-rholo/tools/devnet.sh; then (cd audit-rholo && tools/devnet.sh down -v); fi
+          sudo iptables -w -D DOCKER-USER -i br-omega-g4 ! -o br-omega-g4 -j DROP 2>/dev/null || true
       - uses: actions/upload-artifact@v6
         if: always()
         with:
