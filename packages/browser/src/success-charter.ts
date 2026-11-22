@@ -210,8 +210,14 @@ export async function validateSuccessCharter(
   if (typeof value.charterHash !== "string" || !/^[0-9a-f]{64}$/.test(value.charterHash)) {
     errors.push("charterHash must be a lowercase SHA-256 hex string");
   } else if (inputErrors.length === 0) {
-    const expected = await successCharterHash(normalize(value as unknown as SuccessCharterInput));
-    if (value.charterHash !== expected) errors.push("charterHash does not match the canonical content");
+    const normalized = normalize(value as unknown as SuccessCharterInput);
+    const { charterHash, signatures, ...rawContent } = value;
+    // Reject extensions or unnormalized fields that the builder would drop or
+    // change. The wire hash must bind exactly what RhoGov will read back.
+    if (canonicalJson(rawContent) !== canonicalJson(normalized))
+      errors.push("charter content is not the canonical schema projection");
+    const expected = await successCharterHash(normalized);
+    if (charterHash !== expected) errors.push("charterHash does not match the canonical content");
   }
 
   if (errors.length === 0) scanRoomCap(value, "charter", errors);

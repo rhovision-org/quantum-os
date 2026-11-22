@@ -151,7 +151,9 @@ verification is still required for those labels.
 **signed** `success-charter/1` artifact. That stores the exact record, not
 merely its hash. The 12 kB transport bound is explicit; oversized charters
 are refused, not silently truncated. A colliding id or changed on-chain
-payload is a blocking mismatch.
+payload is a blocking mismatch. The wire validator also rejects fields or
+unnormalized values that differ from the hashed canonical schema projection;
+it cannot validate a hash for one document and transmit another.
 
 Signatures use `sc1:<anchor>:<compressed-secp256k1-pubkey>:<compact-signature>`
 over `SHA-256("qos:success-charter/1:handoff\\n" + charterHash + "\\n" + anchor)`.
