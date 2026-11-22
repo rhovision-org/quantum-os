@@ -37,7 +37,7 @@ async function getJson(url) {
   if (!res.ok) throw new Error("Rholo GET " + res.status);
   return res.json();
 }
-async function explore(nodeUrl, term) {
+async function explore(nodeUrl, term, pinned = null) {
   const base = verifyBase(nodeUrl);
   async function post(path, body) {
     const res = await fetch(base + path, {method:"POST",
@@ -51,6 +51,17 @@ async function explore(nodeUrl, term) {
     if (!result || !Array.isArray(result.expr)) throw new Error("missing Rholo expr");
     return { values: result.expr.map(decodeRhoExpr), block: result.block ?? null };
   }
+  // A compound absence proof must use the *same* post-state snapshot.
+  // Never fall back to an unpinned read when an explicit pin is required.
+  if (pinned) {
+    const r = await post("/api/explore-deploy-by-block-hash", {
+      term, blockHash:pinned.observedHash, usePreStateHash:false
+    });
+    if (r.block?.blockHash && r.block.blockHash !== pinned.observedHash)
+      throw new Error("Rholo response block does not match requested snapshot");
+    return { ...r, readAt:pinned.readAt, observedHash:pinned.observedHash,
+             observedHeight:pinned.observedHeight };
+  }
   // RhoGov uses the latest block for an immediately readable proposal;
   // this is *not* necessarily finalized. Snapshot the actual block hash.
   let latest = null, latestHeight = null;
@@ -63,6 +74,8 @@ async function explore(nodeUrl, term) {
   if (latest) {
     try {
       const r = await post("/api/explore-deploy-by-block-hash", {term, blockHash:latest, usePreStateHash:false});
+      if (r.block?.blockHash && r.block.blockHash !== latest)
+        throw new Error("Rholo response block does not match requested snapshot");
       return { ...r, readAt:"latest-block-unfinalized-possible", observedHash:latest,
                observedHeight:latestHeight };
     } catch (err) {
@@ -87,24 +100,23 @@ export async function readCharterIssue(nodeUrl, issueUri, charterHash) {
   if (!/^rho:id:[a-z0-9]+$/.test(issueUri)) throw new Error("invalid Issue contract URI");
   const term = rgov.readProgram(issueUri, "issueOf", [JSON.stringify(id)]);
   const result = await explore(nodeUrl, term);
-  if (result.values.length === 0) {
-    // A missing Issue is represented by Nil, whose explore result has no
-    // expressions on Rholo. Distinguish that from a missing/broken contract:
-    // only a verified Issue/4 "issues" list authorizes absence.
-    const probe = await explore(nodeUrl, rgov.readProgram(issueUri, "issues", []));
+  if (result.values.length > 1) throw new Error("Issue/4 returned multiple values");
+  const entry = result.values[0];
+  if (Array.isArray(entry) && entry[0] === "gov-error") throw new Error("RhoGov read: " + String(entry[1]));
+  const raw = result.values.length === 0 || entry === null || entry === "Nil" ? null : entry;
+  if (raw === null) {
+    // Nil may also mean the contract is missing. Prove index absence against
+    // the identical block, not a subsequent tip or default fringe.
+    if (result.readAt !== "latest-block-unfinalized-possible" || !result.observedHash)
+      throw new Error("Issue/4 absence requires a pinned block snapshot");
+    const probe = await explore(nodeUrl, rgov.readProgram(issueUri, "issues", []), result);
     if (probe.values.length !== 1 || !Array.isArray(probe.values[0])) {
       throw new Error("Issue/4 contract presence not proven; refusing absence claim");
     }
     if (probe.values[0].includes(id)) {
       throw new Error("Issue id indexed but issueOf returned Nil; inconsistent read");
     }
-    return {raw:null, readAt:result.readAt, block:result.block,
-            observedBlockHash:result.observedHash, observedHeight:result.observedHeight};
   }
-  if (result.values.length !== 1) throw new Error("Issue/4 returned multiple values");
-  const entry = result.values[0];
-  if (Array.isArray(entry) && entry[0] === "gov-error") throw new Error("RhoGov read: " + String(entry[1]));
-  const raw = entry === null || entry === "Nil" ? null : entry;
   return { raw, readAt: result.readAt, block: result.block,
            observedBlockHash:result.observedHash, observedHeight:result.observedHeight };
 }

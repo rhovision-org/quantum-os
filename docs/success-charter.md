@@ -128,7 +128,12 @@ full multi-party signing/independent council tally are separate promotion gates.
 Proposal ID, node endpoint and Issue contract**. It attempts at most one
 signed deploy; uncertain outcomes are not automatically retried. If the
 immutable Issue is already present, the exact canonical title and signers
-must match or it fails closed. Group metadata records only a proposal
+must match or it fails closed. A missing proposal (including explicit Nil)
+authorizes an absence claim only when both `issueOf` and the Issue/4 index
+are read at the same explicit block hash. If that pinned snapshot cannot be
+read, handoff refuses to submit. This is snapshot-level consistency, not a
+proof of finality or of atomic read-before-write across concurrent submitters.
+Group metadata records only a proposal
 ID/hash/Issue URI after independent read-back of the exact artifact.
 
 `status` is read-only and reports `pending | unknown` under the current
