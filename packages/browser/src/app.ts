@@ -43,6 +43,8 @@ import { buildSuccessCharter, validateSuccessCharter, type SuccessCharter } from
 import { signCharterAuthorization, verifyCharterAuthorizations, charterProposalId } from "./charter-chain.js";
 import { readCharterStatusByHash, readRhoGovGroup, submitCharter } from "./charter-rhogov.js";
 
+import { RhoQuPreviewStore } from "./rhoqu-preview.js";
+import { successSnapshot, renderSuccessPanel } from "./success-panel.js";
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
 import { hashBlob, entryFromWire, sortEntries, findEntry, describeEntry, shortHash,
@@ -129,6 +131,10 @@ function setHideRoom(on: boolean): void {
 const sidebarEl       = document.getElementById("sidebar")!;
 const overlayEl       = document.getElementById("sidebar-overlay")!;
 const toggleBtn       = document.getElementById("sidebar-toggle") as HTMLButtonElement;
+const successOpenBtn  = document.getElementById("success-open") as HTMLButtonElement;
+const successDialog   = document.getElementById("success-dialog") as HTMLDialogElement;
+const successContent  = document.getElementById("success-content") as HTMLDivElement;
+const successCloseBtn = document.getElementById("success-close") as HTMLButtonElement;
 const myNameEl        = document.getElementById("my-name") as HTMLInputElement;
 const myIdEl          = document.getElementById("my-id")!;
 const roomIdEl        = document.getElementById("room-id")!;
@@ -418,6 +424,9 @@ const qosCommands = new Map<string, QosCommand>();
 // /login replaces the identity; never written into room state.
 let goalStore: GoalStore | null = null;
 let goalStoreAnchor = "";
+// A preview is a transient local approval intent, never a room message or
+// persistent signing authority. Old intent is consumed before dispatch.
+const rhoquPreviews = new RhoQuPreviewStore<RhoQuOnHandler>();
 let posixNet: PosixNet | null = null;
 let socketListeners: Map<string, { port: number; type: SocketType; unlisten: () => void }> = new Map();
 let socketConns: Map<string, QosSocket> = new Map();
@@ -940,6 +949,47 @@ function goalsForIdentity(): GoalStore | null {
   return goalStore;
 }
 
+// This panel intentionally reads the existing GoalStore and active-room /gov
+// objects only. It never signs, broadcasts, or persists a second group model.
+function refreshSuccessPanel(): void {
+  if (!successDialog.open) return;
+  const goals = goalsForIdentity();
+  if (!goals) {
+    successContent.textContent = "Identity is not ready yet.";
+    return;
+  }
+  renderSuccessPanel(successContent,
+    successSnapshot(
+      goals.list(), [...groupStore.values()], goals.listHabits(), goals.listReviews(),
+    ), {
+      addGoal(text, priority) {
+        goalsForIdentity()?.add(text, priority);
+        refreshSuccessPanel();
+      },
+      completeGoal(id) {
+        goalsForIdentity()?.complete(id);
+        refreshSuccessPanel();
+      },
+      addHabit(text, cadence) {
+        goalsForIdentity()?.addHabit(text, cadence);
+        refreshSuccessPanel();
+      },
+      tickHabit(id) {
+        goalsForIdentity()?.checkInHabit(id);
+        refreshSuccessPanel();
+      },
+      recordReview(text) {
+        goalsForIdentity()?.recordReview(text);
+        refreshSuccessPanel();
+      },
+      openGroup(id) {
+        successDialog.close();
+        const group = groupStore.get(id);
+        if (group) showGroupCard(group);
+      },
+    });
+}
+
 /// Verify an inbound envelope's dyncap if present. Returns a status string for
 /// chat display (empty when no dyncap was carried). On fork detection, the
 /// affected peer is flagged contested and the user is notified.
@@ -1449,6 +1499,28 @@ function renderChatLine(line: ChatLine): void {
   messagesEl.appendChild(div);
 }
 
+// Private goal output is deliberately ephemeral and plain text. It is never
+// a room ChatLine, and is discarded on room replay or identity restoration.
+function isPrivateGoalCommand(text: string): boolean {
+  return /^\/\s*goal(?:\s|$)/i.test(text.trim());
+}
+function clearPrivateGoalOutput(): void {
+  messagesEl.querySelectorAll(".private-goal-output").forEach(el => el.remove());
+}
+function showPrivateGoalOutput(text: string): void {
+  if (!isUiActive()) return;
+  const line = document.createElement("div");
+  line.className = "msg system-line private-goal-output";
+  const label = document.createElement("span");
+  label.className = "text";
+  label.textContent = text;
+  line.appendChild(label);
+  messagesEl.appendChild(line);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  const entries = messagesEl.querySelectorAll(".private-goal-output");
+  if (entries.length > 100) entries[0].remove();
+}
+
 function addMessage(from: string, text: string, kind: "peer" | "self" | "system" = "peer", label?: string): void {
   const line: ChatLine = { from, text, kind, label };
   activeRoom.chatLog.push(line);
@@ -1552,6 +1624,7 @@ function switchToRoom(roomId: string): void {
   uiActiveRoom = next;
   next.hasUnread = false;        // viewing the room clears the unread flag
   applyActiveRoomToUI();
+  refreshSuccessPanel();
 }
 
 function applyActiveRoomToUI(): void {
@@ -3557,7 +3630,7 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
   }
 }
 
-function handleCommand(raw: string): string[] {
+function handleCommand(raw: string, directUserInput = false): string[] {
   const body = raw.slice(1).trim();
   const parts = body.split(/\s+/);
   const cmd = parts[0].toLowerCase();
@@ -3569,7 +3642,13 @@ function handleCommand(raw: string): string[] {
     ? body.slice(cmd.length).replace(/^[^\S\n]+/, "")
     : parts.slice(1).join(" ");
   const lines: string[] = [];
-  const sys = (text: string) => { addMessage("", text, "system"); lines.push(text); };
+  const sys = (text: string) => {
+    if (cmd === "goal") {
+      showPrivateGoalOutput(text);
+      return; // Don't return private results to room automation callers.
+    }
+    addMessage("", text, "system"); lines.push(text);
+  };
 
   switch (cmd) {
     case "help": {
@@ -3615,7 +3694,7 @@ function handleCommand(raw: string): string[] {
         "  /qos [sub]       — named QOS processes: start · status · suspend · resume · terminate",
         "  /ps              — QOS process table (pid · name · state · owner)",
         "  /kill <name|id>  — terminate a process you own (owner-only alias)",
-        "  /goal [sub]      — private personal goals: add · list · done · review · share",
+        "  /goal [sub]      — private personal goals: add · list · done · review note|history · habit add|tick|list|remove · share",
         "  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)",
         "  /<role|name> [cmd] — address any live agent by role or display name (e.g. /heckler help)",
         "  /probe [sub]     — discrepancy probe window state (status|clear)",
@@ -6143,21 +6222,26 @@ function handleCommand(raw: string): string[] {
           break;
         }
         const goal = goals.add(parsed.text, parsed.priority);
+        refreshSuccessPanel();
         sys(`🎯 added **${goal.id}** — ${goal.text} · ${goal.priority}`);
         break;
       }
       if (sub === "done") {
         if (!rest) { sys("usage: /goal done <id>"); break; }
         const goal = goals.complete(rest);
+        refreshSuccessPanel();
         sys(goal ? `✓ ${goal.id} done — ${goal.text}` : `no goal ${rest} — /goal list`);
         break;
       }
       if (sub === "remove") {
         if (!rest) { sys("usage: /goal remove <id>"); break; }
-        sys(goals.remove(rest) ? `removed ${rest}` : `no goal ${rest} — /goal list`);
+        const removed = goals.remove(rest);
+        refreshSuccessPanel();
+        sys(removed ? `removed ${rest}` : `no goal ${rest} — /goal list`);
         break;
       }
       if (sub === "share") {
+        if (!directUserInput) { sys("share requires direct /goal share input; automation cannot publish private goals"); break; }
         if (!rest) { sys("usage: /goal share <id>"); break; }
         const shared = goals.share(rest);
         if (!shared) { sys(`no goal ${rest} — /goal list`); break; }
@@ -6165,6 +6249,55 @@ function handleCommand(raw: string): string[] {
         // Explicit, signed, one goal only. Personal state never syncs implicitly.
         signedBroadcast({ kind: "goal-share", goal: shared, by: myName || "a peer" });
         sys(`→ shared ${shared.id} into the room — this one goal only`);
+        break;
+      }
+      if (sub === "habit") {
+        const verb = rest.split(/\s+/, 1)[0]?.toLowerCase() || "list";
+        const args = rest.slice(verb.length).trim();
+        if (verb === "add") {
+          const split = args.lastIndexOf("|");
+          const text = (split < 0 ? args : args.slice(0, split)).trim();
+          const cadence = (split < 0 ? "daily" : args.slice(split + 1).trim().toLowerCase());
+          if (!text || (cadence !== "daily" && cadence !== "weekly")) {
+            sys("usage: /goal habit add <text> [| daily|weekly]");
+            break;
+          }
+          const h = goals.addHabit(text, cadence);
+          refreshSuccessPanel();
+          sys("habit added: " + h.id + " · " + h.text + " (" + h.cadence + ")");
+          break;
+        }
+        if (verb === "tick") {
+          const h = goals.checkInHabit(args);
+          refreshSuccessPanel();
+          sys(h ? "✓ checked in: " + h.id : "unknown habit — /goal habit list");
+          break;
+        }
+        if (verb === "remove") {
+          const removed = goals.removeHabit(args);
+          refreshSuccessPanel();
+          sys(removed ? "habit removed: " + args : "unknown habit — /goal habit list");
+          break;
+        }
+        if (verb !== "list") { sys("usage: /goal habit add|tick|remove|list"); break; }
+        const habits = goals.listHabits();
+        if (!habits.length) { sys("no personal habits yet"); break; }
+        for (const h of habits) sys(h.id + " · " + h.text + " · " + h.cadence + " · " + h.checkIns.length + " check-ins");
+        break;
+      }
+      if (sub === "review" && rest.startsWith("note ")) {
+        const review = goals.recordReview(rest.slice(5));
+        refreshSuccessPanel();
+        sys("review " + review.id + " saved locally");
+        break;
+      }
+      if (sub === "review" && rest === "history") {
+        const reviews = goals.listReviews();
+        if (!reviews.length) { sys("no review history yet"); break; }
+        for (const r of reviews.slice(-15)) sys(r.id + " · " +
+          new Date(r.at).toISOString().slice(0, 10) +
+          " · " + r.open + " open · " + r.done + " done · " +
+          r.habitsChecked + " habits checked" + (r.text ? " — " + r.text : ""));
         break;
       }
       if (sub === "review") {
@@ -6419,6 +6552,10 @@ function handleCommand(raw: string): string[] {
         sys("usage: /rhoqu <source>");
         sys("  /rhoqu list                          — show registered on-handlers");
         sys("  /rhoqu clear                         — drop all on-handlers in this room");
+        sys("  /rhoqu preview <source>              — review expanded commands without running");
+        sys("  /rhoqu approve <token>               — explicit one-use approval + confirmation");
+        sys("  /rhoqu cancel <token>                — discard a preview");
+        sys("  /rhoqu pending                       — count unexpired local previews");
         sys("  process P(a, b) { /grant $a; /lemma $b; } P(fork-a, alice);");
         sys("  if has(@met-bob) { /qucalc @met-bob; } else { /lemma met-bob ^v; }");
         sys("  on forks(msg) { /qucalc @msg; }      — register a channel-msg handler");
@@ -6440,6 +6577,75 @@ function handleCommand(raw: string): string[] {
         myCurrentSeq: () => dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
         registerOnHandler: (h) => { rhoquHandlers.push(h); },
       };
+      // A reviewable source snapshot. This excludes bearer room caps and
+      // secret seeds; it is only a drift check for the current room state.
+      const fingerprint = (): string => JSON.stringify({
+        room: activeRoom.roomId, identity: dyncapState?.anchor,
+        peers: [...peers].sort(), connected: Boolean(qpeer),
+        seq: dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
+        lemmas: [...lemmaStore.entries()].map(([name, value]) => [name, value.twists])
+          .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+        notes: [...noteStore.values()].map(n => [n.currency, n.denomination, n.token])
+          .sort((a, b) => String(a[2]).localeCompare(String(b[2]))),
+        currencies: [...knownCurrencies.values()].map(c => c.currency).sort(),
+        polls: [...pollStore.values()].map(p => [p.id, p.status, p.options.length])
+          .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+      });
+      const scopedRoom = activeRoom.roomId;
+      const scopedAnchor = dyncapState?.anchor ?? "";
+      if (src.startsWith("preview ")) {
+        try {
+          const source = src.slice("preview ".length).trim();
+          const handlers: RhoQuOnHandler[] = [];
+          const commands = rhoquTranspile(source, {
+            ...rhoCtx, registerOnHandler: h => handlers.push(h),
+          });
+          const plan = rhoquPreviews.prepare(
+            source, commands, handlers, scopedRoom, scopedAnchor, fingerprint(),
+          );
+          sys("RhoQu preview " + plan.token + " · " + commands.length +
+            " commands · " + handlers.length + " handlers" +
+            (plan.highImpact ? " · state-changing / high-impact" : " · read-only"));
+          for (const [index, command] of commands.entries()) {
+            sys("  " + (index + 1) + ". " + command);
+          }
+          for (const h of handlers) sys("  handler: on " + h.channel + "(" + h.binding + ")");
+          sys("No command executed. Explicitly inspect, then /rhoqu approve " + plan.token +
+            " (single-use, expires in 10m).");
+        } catch (error) { sys("preview refused: " + String(error)); }
+        break;
+      }
+      if (src.startsWith("approve ")) {
+        try {
+          const token = src.slice("approve ".length).trim();
+          const plan = rhoquPreviews.take(token, scopedRoom, scopedAnchor, fingerprint());
+          const approved = confirm("Execute " + plan.commands.length +
+            " previewed RhoQu commands" + (plan.highImpact ?
+              " with state-changing / potentially sensitive effects" : "") +
+            " in this room? This may sign or broadcast actions.");
+          if (!approved) { sys("RhoQu approval declined; token consumed."); break; }
+          for (const h of plan.handlers) rhoquHandlers.push(h);
+          // Existing runInput remains the *only* dispatcher; individual
+          // /commands continue to enforce their original capability checks.
+          let dispatched = 0;
+          for (const c of plan.commands) {
+            try { runInput(c); dispatched++; }
+            catch (error) { sys("RhoQu command failed: " + c + " — " + String(error)); break; }
+          }
+          sys("RhoQu approved: " + dispatched + "/" + plan.commands.length +
+            " dispatched; asynchronous command outcomes must be checked separately.");
+        } catch (error) { sys("approval refused: " + String(error)); }
+        break;
+      }
+      if (src.startsWith("cancel ")) {
+        sys(rhoquPreviews.cancel(src.slice("cancel ".length).trim()) ?
+          "RhoQu preview cancelled" : "RhoQu preview not found");
+        break;
+      }
+      if (src === "pending") {
+        sys("pending previews in this room: " + rhoquPreviews.pending(scopedRoom));
+        break;
+      }
       let cmds: string[];
       try {
         cmds = rhoquTranspile(src, rhoCtx);
@@ -6758,8 +6964,16 @@ function handleCommand(raw: string): string[] {
         const restored = await deserializeState(parsed.state, activeRoom.roomId);
         if (!restored) { addMessage("", "recovery string is corrupt (bad seed)", "system"); return; }
         dyncapState = restored;
+        clearPrivateGoalOutput();
+        inputHistory.length = 0;
+        histIdx = -1;
+        histDraft = "";
+        discardPending();
+        msgInput.value = "";
+        palette.hide();
         qosCommands.clear();   // old controllers hold the previous identity
         goalStore = null; goalStoreAnchor = "";   // personal goals are identity-scoped
+        refreshSuccessPanel();
         saveDyncap();
         if (typeof parsed.name === "string" && parsed.name.trim()) {
           myName = parsed.name.trim();
@@ -9114,6 +9328,13 @@ function send(): void {
   if (!text) { discardPending(); return; }
   if (!qpeer) return;
   discardPending();
+  if (isPrivateGoalCommand(text)) {
+    msgInput.value = "";
+    palette.hide();
+    try { handleCommand(text, true); }
+    catch { showPrivateGoalOutput("Personal goal operation failed; inspect the private overview."); }
+    return;
+  }
   pushHistory(text);
   msgInput.value = "";
   // The box is empty now, so any open completion/usage menu is stale.
@@ -9248,6 +9469,12 @@ function toggleSidebar(open?: boolean): void {
 }
 toggleBtn.addEventListener("click", () => toggleSidebar());
 overlayEl.addEventListener("click", () => toggleSidebar(false));
+successOpenBtn.addEventListener("click", () => {
+  if (!successDialog.open) successDialog.showModal();
+  refreshSuccessPanel();
+  toggleSidebar(false);
+});
+successCloseBtn.addEventListener("click", () => successDialog.close());
 
 // ---------------------------------------------------------------------------
 // Rich text (safe Markdown subset) + persistent chat transcript
@@ -10841,6 +11068,7 @@ function renderMacros(): void {
 
 function renderGroups(): void {
   if (!isUiActive() || !govListEl || !govCountEl) return;
+  refreshSuccessPanel();
   govCountEl.textContent = String(groupStore.size);
   govListEl.innerHTML = "";
   for (const g of [...groupStore.values()].sort((a, b) => b.createdAt - a.createdAt)) {
