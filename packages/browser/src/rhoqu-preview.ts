@@ -94,3 +94,13 @@ export class RhoQuPreviewStore<H> {
     return [...this.drafts.values()].filter(p => p.roomId === roomId).length;
   }
 }
+
+
+// Conservative interoperability boundary until typed approval is implemented.
+// Flattening either runtime branches or parallel effects changes their meaning.
+export function flatPreviewCommands(node: import("./rhoqu-process.js").RhoProcessNode): string[] {
+  if (node.kind === "sequence") return node.steps.flatMap(flatPreviewCommands);
+  if (node.kind !== "command" || node.bind || /\$(?:LAST_ID|[A-Za-z_][A-Za-z0-9_-]*)/.test(node.command))
+    throw new Error("typed runtime effects are not supported by flat approval");
+  return [node.command];
+}

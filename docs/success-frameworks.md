@@ -139,20 +139,22 @@ The starter library lives in `packages/browser/src/success-recipes.ts` and is
 documented in [rhoqu-success-recipes.md](rhoqu-success-recipes.md). Every recipe
 is transpiled by `packages/browser/test/rhoqu-success-recipes.test.mjs`.
 
-Current RhoQu limits are real and tested:
+Current RhoQu runtime semantics and recipe limitations are:
 
-- `parallel` is **sequential** expansion today; no concurrency.
-- No `$LAST_ID` / output binding; ids must be copied manually.
-- `if` is evaluated at **transpile time**, not execution time.
-- No formal RhoProcess IR; Lean RhoQuCalc is the verified design layer, not the
-  runtime.
+- Runtime `parallel` runs concurrent local branches, not distributed execution;
+  cross-branch mutation ordering is not guaranteed.
+- `$LAST_ID` and named bindings use structured results or unique authoritative-store
+  ID deltas; display output is never parsed to invent IDs.
+- Runtime `when` evaluates at execution time against a fresh room-state snapshot;
+  this is not immutable event-log replay.
+- Typed RhoProcess IR is the runtime representation; Lean is a separate
+  verification/design layer, not a runtime dependency.
 - Raw commands end at `|`, so `/poll` options are added with `/poll add`, not
   seeded with `|`.
 - `on` syntax is `on <channel>(<binding>) { … }`, not `on channel(<name>)`.
 
-These are tracked in
-[#290](https://github.com/rhovision-org/quantum-os/issues/290). Recipes in this
-slice use only the shipped subset and do not imply the missing features.
+The recipes intentionally use a conservative compatibility subset; runtime behavior
+and package limits are documented in [rhoqu-v2-runtime.md](rhoqu-v2-runtime.md).
 
 ## AI integration
 
@@ -206,6 +208,5 @@ preflight state machine, not browser confirmation UX.
 ## What remains
 
 - chain handoff/status and cross-repo RhoGov work (#291);
-- RhoQu v2: output binding, exec-time control flow, real parallelism, and
-  RhoProcess IR (#290);
-- AI-assisted authoring with preview/approval (see #132).
+- typed IR approval for runtime branches, parallel effects and bindings (#290);
+- full end-to-end human approval and chain handoff evidence (#291, #132).
