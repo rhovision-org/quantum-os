@@ -82,6 +82,19 @@ try {
   const nudgeText = await none.advise("stimulate", { transcript: [] });
   ok("NONE on a nudge stays silent", nudgeText === null);
   ok("NONE on a nudge is not an error", none.lastError === null, none.lastError);
+
+  // Generic complete() is for an external controller, not the room modes.
+  const generic = makeAdvisor({
+    ai: true,
+    backend: "claude-code",
+    claudeBin: fake("fake-claude-complete.sh", 'cat >/dev/null; echo "GENERIC"'),
+    log: () => {},
+  });
+  const genericText = await generic.complete({ system: "be terse", prompt: "hello", maxTokens: 64 });
+  ok("complete returns text", genericText === "GENERIC", String(genericText));
+  ok("complete leaves no error", generic.lastError === null, generic.lastError);
+  const disabled = makeAdvisor({ ai: false });
+  ok("complete is null when disabled", (await disabled.complete({ prompt: "hello" })) === null);
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

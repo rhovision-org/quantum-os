@@ -214,8 +214,8 @@ crash or reboot. Ask Claude to show you what it does before you paste it.
 Render builds the public repo, so it runs only the roles already there. A fork lets
 Render run your own persona, and redeploy it whenever you change it.
 
-1. [Sign up for GitHub](https://github.com/signup) and
-   [fork rhovision-org/quantum-os](https://github.com/rhovision-org/quantum-os/fork).
+1. [Sign up for GitHub](https://github.com/signup) and ask Claude to
+   fork rhovision-org/quantum-os
 2. Let Claude edit the fork:
    - [connect GitHub](https://claude.ai/connect-github)
    - [install the Claude GitHub App](https://github.com/apps/claude/installations/select_target)

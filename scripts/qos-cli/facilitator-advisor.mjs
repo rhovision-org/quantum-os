@@ -260,6 +260,51 @@ export function makeAdvisor({ ai = false, backend = "api", apiKey = process.env.
     /// failed. The caller can surface this instead of a generic fallback.
     get lastError() { return lastError; },
     clearError() { lastError = null; },
+    /**
+     * Generic one-shot completion for an external controller.  This is the
+     * same backend/model as the room advisor, but without the room-specific
+     * modes, token caps, or NONE filtering.  The caller owns the budget and
+     * must not treat a null as a model answer.
+     */
+    async complete({ system = "", prompt = "", maxTokens = 512, timeoutMs = 45_000 } = {}) {
+      lastError = null;
+      if (!enabled) { lastError = "advisor disabled"; return null; }
+      if (!String(prompt ?? "").trim()) { lastError = "empty prompt"; return null; }
+      const max_tokens = Math.max(1, Math.min(Number(maxTokens) || 512, 4096));
+      if (backend === "claude-code") {
+        const out = await callClaudeCLI({ claudeBin, model: cliModel, system, prompt, log, timeoutMs });
+        if (out.error) { lastError = out.error; return null; }
+        return out.text;
+      }
+      try {
+        const body = {
+          model: apiModel,
+          max_tokens,
+          messages: [{ role: "user", content: prompt }],
+        };
+        if (String(system ?? "").trim()) body.system = system;
+        const res = await fetch(ANTHROPIC_URL, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          let text = "";
+          try { text = (await res.text()).slice(0, 300); } catch { /* body is optional */ }
+          lastError = `advisor HTTP ${res.status}${text ? `: ${text}` : ""}`;
+          log(`[facil] ${lastError}`);
+          return null;
+        }
+        const j = await res.json();
+        const text = (j?.content?.[0]?.text ?? "").trim();
+        if (!text) { lastError = "advisor returned no text"; return null; }
+        return text;
+      } catch (e) {
+        lastError = `advisor error: ${e?.message ?? e}`;
+        log(`[facil] ${lastError}`);
+        return null;
+      }
+    },
     /** mode: "ask" | "stimulate" | "synthesize" | "optimize" | "chair" | "gamesummary". Returns a short string, or null. */
     async advise(mode, ctx) {
       lastError = null;
