@@ -493,19 +493,29 @@ function substitute(text: string, env: Map<string, string>): string {
 /// Conditions in `if` statements are evaluated at transpile time against
 /// `ctx`, so the chosen branch's commands are what gets emitted.
 /// Throws RhoQuError on parse or expansion failure.
-export function transpileProcess(source: string, ctx?: RhoQuContext): RhoFlatProcess {
+/** Stage registrations until the requested compilation path has succeeded. */
+function compileProcess(source: string, ctx?: RhoQuContext): { process: RhoFlatProcess; handlers: OnHandler[] } {
   const program = new Parser(tokenize(source)).parseProgram();
-  return { kind: "sequence", steps: lowerStmts(program.top, program, new Map(), ctx) };
+  const handlers: OnHandler[] = [];
+  const process: RhoFlatProcess = { kind: "sequence", steps: lowerStmts(program.top, program, new Map(), handlers, false, ctx) };
+  return { process, handlers };
+}
+export function transpileProcess(source: string, ctx?: RhoQuContext): RhoFlatProcess {
+  const { process, handlers } = compileProcess(source, ctx);
+  for (const handler of handlers) ctx?.registerOnHandler?.(handler);
+  return process;
 }
 export function transpile(source: string, ctx?: RhoQuContext): string[] {
-  const process = transpileProcess(source, ctx);
+  const { process, handlers } = compileProcess(source, ctx);
   const flatten = (nodes: readonly RhoProcessNode[]): string[] => nodes.flatMap((node) => {
     if (node.kind === "command") return [node.command];
     if (node.kind === "sequence") return flatten(node.steps);
     if (node.kind === "parallel") return node.branches.flatMap((branch) => flatten([branch]));
     throw new RhoQuError("runtime when cannot be flattened by legacy transpile; use transpileProcess", 0, 0);
   });
-  return flatten(process.steps);
+  const commands = flatten(process.steps);
+  for (const handler of handlers) ctx?.registerOnHandler?.(handler);
+  return commands;
 }
 function emitStmts(stmts: Stmt[], program: Program, env: Map<string, string>, out: string[], ctx?: RhoQuContext, bindings?: Map<number, string>): void {
   for (const s of stmts) emitStmt(s, program, env, out, ctx, bindings);
@@ -582,22 +592,23 @@ function emitStmt(s: Stmt, program: Program, env: Map<string, string>, out: stri
 }
 
 /** Lower AST to typed IR. Compile-time if stays folded; when keeps both branches. */
-function lowerStmts(stmts: Stmt[], program: Program, env: Map<string, string>, ctx?: RhoQuContext): RhoProcessNode[] {
+function lowerStmts(stmts: Stmt[], program: Program, env: Map<string, string>, handlers: OnHandler[], runtimeBranch: boolean, ctx?: RhoQuContext): RhoProcessNode[] {
   const out: RhoProcessNode[] = [];
   for (const s of stmts) {
     if (s.kind === "new") { for (const name of s.names) out.push({ kind: "command", command: "/grant " + name }); continue; }
-    if (s.kind === "parallel") { out.push({ kind: "parallel", branches: s.body.map((branch) => ({ kind: "sequence", steps: lowerStmts([branch], program, env, ctx) })) }); continue; }
+    if (s.kind === "parallel") { out.push({ kind: "parallel", branches: s.body.map((branch) => ({ kind: "sequence", steps: lowerStmts([branch], program, env, handlers, runtimeBranch, ctx) })) }); continue; }
     if (s.kind === "cmd") { out.push({ kind: "command", command: substitute(s.text, env), ...(s.bind ? { bind: s.bind } : {}) }); continue; }
-    if (s.kind === "if") { out.push(...lowerStmts(truthy(evalExpr(s.cond, env, ctx)) ? s.then : s.else, program, env, ctx)); continue; }
+    if (s.kind === "if") { out.push(...lowerStmts(truthy(evalExpr(s.cond, env, ctx)) ? s.then : s.else, program, env, handlers, runtimeBranch, ctx)); continue; }
     if (s.kind === "when") {
       const node: RhoRuntimeWhenNode = {
         kind: "when", condition: s.cond, env: Object.fromEntries(env),
-        then: { kind: "sequence", steps: lowerStmts(s.then, program, env, ctx) },
-        ...(s.else.length ? { else: { kind: "sequence", steps: lowerStmts(s.else, program, env, ctx) } } : {}),
+        then: { kind: "sequence", steps: lowerStmts(s.then, program, env, handlers, true, ctx) },
+        ...(s.else.length ? { else: { kind: "sequence", steps: lowerStmts(s.else, program, env, handlers, true, ctx) } } : {}),
       };
       out.push(node); continue;
     }
     if (s.kind === "on") {
+      if (runtimeBranch) throw new RhoQuError("on-handler inside runtime when is unsupported; register outside the branch", 0, 0);
       if (containsRuntimeWhen(s.body)) throw new RhoQuError("runtime when inside on-handler is unsupported; move it to the enclosing process", 0, 0);
       if (!ctx?.registerOnHandler) continue;
       const capturedEnv = new Map(env);
@@ -608,7 +619,7 @@ function lowerStmts(stmts: Stmt[], program: Program, env: Map<string, string>, c
           const cmds: string[] = []; emitStmts(s.body, program, childEnv, cmds, ctx); return cmds;
         },
       };
-      ctx.registerOnHandler(handler); continue;
+      handlers.push(handler); continue;
     }
     if (s.kind === "call") {
       const def = program.defs.get(s.name);
@@ -620,7 +631,7 @@ function lowerStmts(stmts: Stmt[], program: Program, env: Map<string, string>, c
         const stripped = ((argVal.startsWith('"') && argVal.endsWith('"')) || (argVal.startsWith("'") && argVal.endsWith("'"))) ? argVal.slice(1, -1) : argVal;
         childEnv.set(def.params[k], stripped);
       }
-      out.push(...lowerStmts(def.body, program, childEnv, ctx));
+      out.push(...lowerStmts(def.body, program, childEnv, handlers, runtimeBranch, ctx));
     }
   }
   return out;

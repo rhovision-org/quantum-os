@@ -189,5 +189,21 @@ const strict = await executeRhoProcessAsync({kind: "sequence", steps: [
 ok("strict mode refuses bind without correlated receipt", strict[0].ok === false);
 ok("strict unresolved references never dispatch", !strictSeen.includes("/use $item") && !strictSeen.includes("/use $LAST_ID"));
 ok("strict mode does not reinterpret unrelated native macro", strictSeen.includes("/unrelated $nativeMacro"));
+// Registration must not escape failed lowering or an unevaluated runtime branch.
+for (const [name, compile, source] of [
+  ["failed lowering", transpileProcess, "on feedback(msg) { /qucalc ^v; } Missing();"],
+  ["runtime branch", transpileProcess, "when connected() { on a(msg) { /qucalc ^v; } } else { on b(msg) { /qucalc ^v; } }"],
+  ["runtime branch via process", transpileProcess, "process Subscribe() { on a(msg) { /qucalc ^v; } } when connected() { Subscribe(); }"],
+  ["failed legacy flatten", transpile, "on feedback(msg) { /qucalc ^v; } when connected() { /qucalc ^v; }"],
+]) {
+  const handlers = [];
+  let rejected = false;
+  try { compile(source, {...compileContext, registerOnHandler: h => handlers.push(h)}); }
+  catch { rejected = true; }
+  ok(name + " rejects without registering any handler", rejected && handlers.length === 0, "handlers=" + handlers.length);
+}
+const stagedHandlers = [];
+transpileProcess("on feedback(msg) { /qucalc ^v; }", {...compileContext, registerOnHandler: h => stagedHandlers.push(h)});
+ok("successful lowering registers exactly once", stagedHandlers.length === 1 && stagedHandlers[0].trigger("x")[0] === "/qucalc ^v");
 console.log("\n" + (fail === 0 ? "PASS" : "FAIL") + ": rhoqu-process.test.mjs — " + pass + " passed, " + fail + " failed");
 process.exit(fail === 0 ? 0 : 1);

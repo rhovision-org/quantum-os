@@ -32,6 +32,14 @@ note balances, declared currencies, peer count, connection state, and sequence.
 Both branches are retained in the IR; only the selected branch executes.
 A missing evaluator fails closed with a structured error.
 
+Channel `on` declarations register after successful lowering (and after
+flattening for legacy callers), never during a failed compilation. Registration
+inside a runtime `when` branch, including through expanded process calls, is
+rejected: handlers are not runtime IR nodes, so lowering both branches cannot
+safely choose which registration belongs to the selected path. Register outside
+the runtime branch. This does not introduce transactional command execution or
+a full capability/effect calculus.
+
 A parallel branch can read mutable room state when its runtime condition is
 evaluated; this is execution-time state, not a deterministic replay of an
 immutable room event log. Cross-branch mutation ordering is not guaranteed.
