@@ -90,3 +90,6 @@ export type {
 // RhoQu success recipes using only the shipped subset (see #290 for gaps).
 export { SUCCESS_RECIPES, recipeById } from "./success-recipes.js";
 export type { SuccessRecipe } from "./success-recipes.js";
+
+export {QosVfs,VFS_OPS,vfsPath} from "./qos-vfs.js";
+export type {VfsOp,VfsEntry,VfsNamespace} from "./qos-vfs.js";

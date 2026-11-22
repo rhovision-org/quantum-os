@@ -552,10 +552,12 @@ export class QosEventLog {
     const verified = await verifyEnvelope(prior, this.roomId, event as unknown as Record<string, unknown>, event.dyncap);
     if (verified.kind === "invalid") return this.reject(event, verified.reason);
     if (verified.kind === "anchor-mismatch") {
+      this.forkEvidence.set(event.hash + ":" + event.dyncap.witness, event);
       this.quarantined.add(event.source);
       return { ok: false, fork: true, reason: "anchor mismatch" };
     }
     if (verified.kind === "fork") {
+      this.forkEvidence.set(event.hash + ":" + event.dyncap.witness, event);
       this.quarantined.add(event.source);
       return { ok: false, fork: true, reason: `fork at seq ${verified.seq}` };
     }
@@ -592,6 +594,12 @@ export class QosEventLog {
     return JSON.parse(JSON.stringify(canonicalEventOrder(accepted).ordered)) as QosEvent[];
   }
 
+  /** Full admission evidence, including quarantined branches and partial dependencies.
+   * Preserve insertion order of accepted events before fork evidence. */
+  checkpointEvents():QosEvent[]{
+    return JSON.parse(JSON.stringify([...this.eventsByHash.values(),...this.forkEvidence.values()])) as QosEvent[];
+  }
+
   eventsFor(process: string): QosEvent[] {
     return this.events().filter((event) => event.process === process);
   }
@@ -621,7 +629,7 @@ export function compareEvents(a: QosEvent, b: QosEvent): number {
     compareStrings(a.hash, b.hash);
 }
 
-export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier" | "memory-frontier";
+export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier" | "memory-frontier" | "vfs-version";
 export interface QosDependency { hash: string; kind: QosDependencyKind }
 /** Only schema-defined references are causal, never arbitrary payload strings. */
 export function eventDependencies(event: QosEvent): QosDependency[] {
@@ -658,6 +666,14 @@ export function eventDependencies(event: QosEvent): QosDependency[] {
       for(const hash of args.memoryFrontier)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"memory-frontier"});
     if((event.payload.op==="mem_link"||event.payload.op==="mem_unlink")&&typeof args.targetHandleVersion==="string"&&HEX64.test(args.targetHandleVersion))
       refs.push({hash:args.targetHandleVersion,kind:"handle-version"});
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&
+     typeof event.payload.op==="string"&&["fs_init","fs_stat","fs_ls","fs_open","fs_put","fs_mkdir","fs_unlink","fs_rename","fs_mount","fs_unmount","fs_grant"].includes(event.payload.op)&&isRecord(event.payload.args)){
+    const args=event.payload.args;
+    for(const key of ["handleVersion","targetHandleVersion","targetVersion","rootVersion","sourceVersion"]){
+      const hash=args[key];
+      if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:key==="targetVersion"?"process-version":key.endsWith("Version")&&(key==="rootVersion"||key==="sourceVersion")?"vfs-version":"handle-version"});
+    }
   }
   return refs;
 }
