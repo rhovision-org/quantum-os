@@ -1,0 +1,112 @@
+name: Omega isolated integration acceptance
+
+on:
+  push:
+    branches: [audit/omega-integration-20261122]
+
+permissions:
+  contents: read
+
+jobs:
+  real-disposable-rholo:
+    name: Integrated WASM and disposable governance fixture
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: rhovision-org/rhogov
+          ref: 4948c416f7de336d80381294b8ef8fcbbacc7537
+          path: audit-rhogov
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: rhovision-org/quantum-logical-framework
+          ref: df6dc5304f627fd741ce55e9b142814ebe50df06
+          path: audit-qlf
+          persist-credentials: false
+      - name: Install Rust+WASM
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - name: Set up Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Verify source and install dependencies
+        run: |
+          set -euo pipefail
+          node --check scripts/localnet/integration-g4-live.mjs
+          node --check packages/browser/src/charter-chain.js
+          node --check packages/browser/src/charter-rhogov.js
+          pnpm build:wasm
+          pnpm install --frozen-lockfile
+          npm install --prefix scripts/qos-cli --ignore-scripts --no-audit --no-fund
+          pnpm --filter @quantum-os/browser typecheck
+          node packages/browser/test/integration-acceptance.test.mjs
+          node packages/browser/test/success-panel.test.mjs
+          node packages/browser/test/success-charter.test.mjs
+          node packages/browser/test/charter-chain.test.mjs
+          cargo test --workspace
+          npm ci --prefix audit-rhogov --ignore-scripts --no-audit --no-fund
+          RHOGOV_ROOT="$PWD/audit-rhogov" node packages/browser/test/integration-charter-crossrepo.test.mjs
+          (cd audit-qlf && python3 perspective_causal_identity.py | cmp - data/perspective_causal_identity.json)
+          (cd audit-qlf && python3 scripts/validate_claim_records.py)
+      - name: Launch REAL disposable Rholo and submit the signed charter
+        env:
+          QOS_291_DATA: ${{ runner.temp }}/qos291-rnode
+          QOS_291_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$QOS_291_DATA"
+          bin/rnode --version > qos291-rnode-version.txt
+          export QOS_291_RNODE_VERSION="$(head -1 qos291-rnode-version.txt)"
+          export QOS_291_RNODE_HASH="$(sha256sum bin/rnode | cut -d' ' -f1)"
+          echo "RNode source: $QOS_291_RNODE_VERSION"
+          echo "RNode executable SHA-256: $QOS_291_RNODE_HASH"
+          QOS_RNODE_DATA="$QOS_291_DATA" bash scripts/localnet/run-node.sh             > "$RUNNER_TEMP/qos291-node.private.log" 2>&1 &
+          NODE_PID=$!
+          cleanup() {
+            kill "$NODE_PID" 2>/dev/null || true
+            wait "$NODE_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          ready=no
+          for attempt in $(seq 1 80); do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:40403/api/status                  | python3 -c 'import json,sys; assert json.load(sys.stdin)["shardId"]' 2>/dev/null; then
+              ready=yes
+              break
+            fi
+            if ! kill -0 "$NODE_PID" 2>/dev/null; then
+              echo "Disposable node exited early"; exit 1
+            fi
+            sleep 2
+          done
+          test "$ready" = yes
+          echo "Real disposable node API ready; running chain writes on THIS isolated node only"
+          node scripts/localnet/integration-g4-live.mjs
+          sha256sum -c omega-g4-real-chain.SHA256SUMS
+      - name: Preserve sanitized chain evidence even after an incomplete run
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: omega-integration-g4-evidence
+          path: |
+            omega-g4-real-chain.json
+            omega-g4-real-chain.SHA256SUMS
+            qos291-rnode-version.txt
+          if-no-files-found: ignore
+          retention-days: 30
+
+# This job runs a real disposable node in a GitHub runner. It never contacts
+# or modifies the four public testnet validators; Issue/4 read-back is not a
+# production council ratification, independently finalized settlement, or UI approval.
