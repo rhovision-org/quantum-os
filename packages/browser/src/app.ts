@@ -1493,6 +1493,28 @@ function renderChatLine(line: ChatLine): void {
   messagesEl.appendChild(div);
 }
 
+// Private goal output is deliberately ephemeral and plain text. It is never
+// a room ChatLine, and is discarded on room replay or identity restoration.
+function isPrivateGoalCommand(text: string): boolean {
+  return /^\/\s*goal(?:\s|$)/i.test(text.trim());
+}
+function clearPrivateGoalOutput(): void {
+  messagesEl.querySelectorAll(".private-goal-output").forEach(el => el.remove());
+}
+function showPrivateGoalOutput(text: string): void {
+  if (!isUiActive()) return;
+  const line = document.createElement("div");
+  line.className = "msg system-line private-goal-output";
+  const label = document.createElement("span");
+  label.className = "text";
+  label.textContent = text;
+  line.appendChild(label);
+  messagesEl.appendChild(line);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  const entries = messagesEl.querySelectorAll(".private-goal-output");
+  if (entries.length > 100) entries[0].remove();
+}
+
 function addMessage(from: string, text: string, kind: "peer" | "self" | "system" = "peer", label?: string): void {
   const line: ChatLine = { from, text, kind, label };
   activeRoom.chatLog.push(line);
@@ -3602,7 +3624,7 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
   }
 }
 
-function handleCommand(raw: string): string[] {
+function handleCommand(raw: string, directUserInput = false): string[] {
   const body = raw.slice(1).trim();
   const parts = body.split(/\s+/);
   const cmd = parts[0].toLowerCase();
@@ -3614,7 +3636,13 @@ function handleCommand(raw: string): string[] {
     ? body.slice(cmd.length).replace(/^[^\S\n]+/, "")
     : parts.slice(1).join(" ");
   const lines: string[] = [];
-  const sys = (text: string) => { addMessage("", text, "system"); lines.push(text); };
+  const sys = (text: string) => {
+    if (cmd === "goal") {
+      showPrivateGoalOutput(text);
+      return; // Don't return private results to room automation callers.
+    }
+    addMessage("", text, "system"); lines.push(text);
+  };
 
   switch (cmd) {
     case "help": {
@@ -6054,6 +6082,7 @@ function handleCommand(raw: string): string[] {
         break;
       }
       if (sub === "share") {
+        if (!directUserInput) { sys("share requires direct /goal share input; automation cannot publish private goals"); break; }
         if (!rest) { sys("usage: /goal share <id>"); break; }
         const shared = goals.share(rest);
         if (!shared) { sys(`no goal ${rest} — /goal list`); break; }
@@ -6776,6 +6805,13 @@ function handleCommand(raw: string): string[] {
         const restored = await deserializeState(parsed.state, activeRoom.roomId);
         if (!restored) { addMessage("", "recovery string is corrupt (bad seed)", "system"); return; }
         dyncapState = restored;
+        clearPrivateGoalOutput();
+        inputHistory.length = 0;
+        histIdx = -1;
+        histDraft = "";
+        discardPending();
+        msgInput.value = "";
+        palette.hide();
         qosCommands.clear();   // old controllers hold the previous identity
         goalStore = null; goalStoreAnchor = "";   // personal goals are identity-scoped
         refreshSuccessPanel();
@@ -9133,6 +9169,13 @@ function send(): void {
   if (!text) { discardPending(); return; }
   if (!qpeer) return;
   discardPending();
+  if (isPrivateGoalCommand(text)) {
+    msgInput.value = "";
+    palette.hide();
+    try { handleCommand(text, true); }
+    catch { showPrivateGoalOutput("Personal goal operation failed; inspect the private overview."); }
+    return;
+  }
   pushHistory(text);
   msgInput.value = "";
   // The box is empty now, so any open completion/usage menu is stale.

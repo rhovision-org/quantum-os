@@ -95,3 +95,17 @@ reviewForm.children.find(n=>n.tag==="input").value=" Reflect ";
 reviewForm.events.submit({preventDefault(){}});
 assert.deepEqual(actions2.pop(),["review","Reflect"]);
 console.log("PASS: #289 success panel model, privacy, safe DOM, and actions");
+
+// Integration contract: direct private goal input bypasses shared room/history
+// sinks; dispatcher output uses the private, nonpersisted DOM path.
+const {readFileSync}=await import("node:fs");
+const app=readFileSync(join(here,"../src/app.ts"),"utf8");
+const sendBody=app.slice(app.indexOf("function send(): void"),app.indexOf("// Share link",app.indexOf("function send(): void")));
+assert.match(sendBody,/if \(isPrivateGoalCommand\(text\)\) \{[\s\S]*?handleCommand\(text, true\);[\s\S]*?return;[\s\S]*?pushHistory\(text\)/);
+assert.match(app,/if \(cmd === "goal"\) \{[\s\S]*?showPrivateGoalOutput\(text\);[\s\S]*?return;[\s\S]*?addMessage\("", text, "system"\)/);
+const privateOutput=app.slice(app.indexOf("function showPrivateGoalOutput"),app.indexOf("function addMessage("));
+assert.ok(privateOutput.includes("textContent = text"));
+assert.ok(!/chatLog|saveChat|innerHTML|sessionLog|broadcast/.test(privateOutput));
+assert.match(app,/if \(!directUserInput\) \{ sys\("share requires direct \/goal share/);
+assert.match(app,/dyncapState = restored;[\s\S]*?clearPrivateGoalOutput\(\)/);
+console.log("PASS: private command routing, ephemeral output, direct-only share and identity-switch cleanup integration");

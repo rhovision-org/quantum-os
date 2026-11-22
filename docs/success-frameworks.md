@@ -27,6 +27,14 @@ Goals are **local to the dyncap identity** and private by default.
   private habit ticks.
 - `/goal share <id>` is the only network path. It sends one goal as a signed
   `goal-share` envelope; the receiving peer verifies the dyncap and displays it.
+- Direct `/goal` commands bypass room chat persistence, command recall, and
+  the shared session dump. Results use ephemeral plain-text UI, not a room
+  transcript entry, and are cleared on identity restoration or room replay.
+  Only direct user input may invoke `/goal share`; scripts, macros and
+  automatic handlers cannot publish a goal through that path. Do not embed
+  private text in room-visible scripts, macros, or RhoQu source. This change
+  does not erase copies in pre-existing room logs or backups, nor encrypt
+  same-origin localStorage.
 - A corrupt or refused local store starts empty for the session; it does not
   break the room.
 
