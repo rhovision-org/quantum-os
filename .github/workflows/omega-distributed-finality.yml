@@ -43,8 +43,11 @@ jobs:
           test "$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)" -ge 8388608
           node --check scripts/localnet/integration-g4-distributed.mjs
           node scripts/localnet/finality-witness.mjs --selftest | tee finality-evidence/negative-controls.log
-          pnpm install --frozen-lockfile
-          npm ci --prefix scripts/qos-cli --ignore-scripts --no-audit --no-fund
+          npm ci --prefix scripts/localnet --ignore-scripts --no-audit --no-fund
+          ln -s "$PWD/scripts/localnet/node_modules" packages/browser/node_modules
+          ln -s "$PWD/scripts/localnet/node_modules" scripts/qos-cli/node_modules
+          sha256sum scripts/localnet/package-lock.json > finality-evidence/crypto-lock.sha256
+          node --input-type=module -e 'await import("./packages/browser/src/charter-chain.js"); await import("./scripts/qos-cli/rholang-client.mjs"); console.log("locked imports PASS")'
       - name: Build Rholo from exact pinned source
         run: |
           set -euo pipefail
