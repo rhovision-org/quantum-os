@@ -1,0 +1,105 @@
+name: Omega distributed finality witness
+on:
+  push:
+    branches: [audit/omega-finality-20261122]
+permissions:
+  contents: read
+jobs:
+  witness:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    env:
+      DEVNET_PREFIX: omega-finality
+      DEVNET_NETWORK: omega-finality
+      DEVNET_NODE_MEMORY: 1536m
+      DEVNET_THREAD_POOL_SIZE: "2"
+      DEVNET_SKIP_JOINER_GRPC_PUBLISH: "1"
+      DEVNET_EXTRA_FLAGS: "--network-id omega-g4-isolated --no-upnp"
+      RNODE_IMAGE: omega-finality-rnode:local
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v6
+        with:
+          repository: rhovision-org/rholo
+          ref: 2770ef69e3e27fe291e2b36003ddee402fb9c95a
+          path: audit-rholo
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Freeze dependencies and negative controls
+        run: |
+          set -euo pipefail
+          mkdir -p finality-evidence
+          git rev-parse HEAD > finality-evidence/qos-sha.txt
+          git -C audit-rholo rev-parse HEAD > finality-evidence/rholo-sha.txt
+          free -h > finality-evidence/runner-memory.txt
+          df -h > finality-evidence/runner-disk.txt
+          test "$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)" -ge 8388608
+          node --check scripts/localnet/integration-g4-distributed.mjs
+          node scripts/localnet/finality-witness.mjs --selftest | tee finality-evidence/negative-controls.log
+          pnpm install --frozen-lockfile
+          npm ci --prefix scripts/qos-cli --ignore-scripts --no-audit --no-fund
+      - name: Build Rholo from exact pinned source
+        run: |
+          set -euo pipefail
+          (cd audit-rholo && tools/devnet.sh build) 2>&1 | tee finality-evidence/build.log
+          docker run --rm "$RNODE_IMAGE" --version > finality-evidence/rnode-version.txt
+          docker run --rm --entrypoint sha256sum "$RNODE_IMAGE" /usr/local/bin/rnode > finality-evidence/rnode-sha256.txt
+          docker image inspect --format '{{.Id}}' "$RNODE_IMAGE" > finality-evidence/image-id.txt
+      - name: Start isolated four-validator network
+        run: |
+          set -euo pipefail
+          export OMEGA_FIXTURE_WALLETS="$PWD/scripts/localnet/wallet.txt"
+          python3 scripts/localnet/prepare-isolated-finality.py audit-rholo/tools/devnet.sh
+          git -C audit-rholo diff -- tools/devnet.sh > finality-evidence/devnet-harness.patch
+          sha256sum "$OMEGA_FIXTURE_WALLETS" > finality-evidence/fixture-wallets.sha256
+          docker network create --internal "$DEVNET_NETWORK"
+          (cd audit-rholo && tools/devnet.sh up --validators 4 --fresh --autopropose --epoch-length 10) 2>&1 | tee finality-evidence/start.log
+          test "$(docker network inspect --format '{{.Internal}}' "$DEVNET_NETWORK")" = true
+          for i in 0 1 2 3; do
+            name="$DEVNET_PREFIX-validator-$i"
+            if [ "$i" = 0 ]; then name="$DEVNET_PREFIX-bootstrap"; fi
+            test "$(docker inspect --format '{{.State.Running}}' "$name")" = true
+            test "$(docker inspect --format '{{.HostConfig.NetworkMode}}' "$name")" = "$DEVNET_NETWORK"
+            docker inspect --format '{{.Name}} {{.Id}} {{range .Mounts}}{{if eq .Destination "/var/lib/rnode"}}{{.Name}}{{end}}{{end}}' "$name"
+          done | tee finality-evidence/validator-identities.txt
+          test "$(awk '{print $3}' finality-evidence/validator-identities.txt | sort -u | wc -l)" -eq 4
+      - name: Signed charter and fixed-anchor finality
+        env:
+          QOS_291_DATA: ${{ runner.temp }}/omega-finality
+          QOS_291_HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          export QOS_291_RNODE_VERSION="$(head -1 finality-evidence/rnode-version.txt)"
+          export QOS_291_RNODE_HASH="$(cut -d' ' -f1 finality-evidence/rnode-sha256.txt)"
+          mkdir -p "$QOS_291_DATA"
+          node scripts/localnet/integration-g4-distributed.mjs
+          sha256sum -c omega-g4-distributed.SHA256SUMS
+      - name: Archive diagnostics
+        if: always()
+        run: |
+          mkdir -p finality-evidence
+          cp omega-g4-distributed.json omega-g4-distributed.SHA256SUMS finality-evidence/ 2>/dev/null || true
+          for i in 0 1 2 3; do
+            name="$DEVNET_PREFIX-validator-$i"
+            if [ "$i" = 0 ]; then name="$DEVNET_PREFIX-bootstrap"; fi
+            docker logs "$name" > "finality-evidence/$name.log" 2>&1 || true
+            curl --max-time 5 -fsS "http://127.0.0.1:$((40403+i*1000))/health" > "finality-evidence/$name-health.json" || true
+          done
+          (cd finality-evidence && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - name: Tear down disposable network
+        if: always()
+        run: |
+          if test -x audit-rholo/tools/devnet.sh; then (cd audit-rholo && tools/devnet.sh down -v); fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: omega-distributed-finality-evidence
+          path: finality-evidence/
+          retention-days: 30
