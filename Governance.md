@@ -7,7 +7,7 @@ delegated voting — using quantum-os's own primitives, rather than running rgov
 delegate their vote, delegation flows transitively, and a non-voter's weight is
 cast by their delegate.
 
-This is the same ZFA substrate as everything else: dyncap-attributed envelopes plus a
+This is the same ZFA substrate as everything else: dyncap-signed envelopes plus a
 **deterministic, joiner-local tally** (every peer resolves the same delegation
 graph from the signed delegations + ballots it holds — no central counter). See
 [`Group_Decisions.md`](Group_Decisions.md) for the broader family of decision
@@ -38,7 +38,7 @@ stakeholders through interlinked autonomous teams.
 | RGOV principle | How quantum-os realizes it |
 |---|---|
 | **Liquid democracy** (affirmative trust delegation) | `/gov delegate` — standing, transitive, revocable; direct vote overrides |
-| **Self-governance by peer-to-peer agreements** | dyncap-attributed envelopes; each group sets its own roster, delegates, currencies — no central authority |
+| **Self-governance by peer-to-peer agreements** | dyncap-signed envelopes; each group sets its own roster, delegates, currencies — no central authority |
 | **Exchange of capabilities (property)** | unforgeable capability tokens (`/cap`/`/grant`), `/note` currencies (treasury, kudos) |
 | **Asset pools** — budgets, crowdfunds, staking | `/gov treasury`; *"budgets awarded to teams divided how they decide"* = sub-group autonomy |
 | **Chat channels distributing communications & capabilities** | `/channel`, `/gov say` (membership-scoped) |
@@ -128,7 +128,7 @@ at the admins** (`level = 5`). A rating `v` from rater `r` confers
 `min(v, level(r) − 1)` on the ratee — **strictly below the rater's own level** —
 and a member's level is the highest conferred on them, computed as a deterministic
 least fixed point (a monotone relaxation every peer reproduces from the signed
-`gov-trust` envelopes it holds). Ratings are self-attributed (you set only your own
+`gov-trust` envelopes it holds). Ratings are self-signed (you set only your own
 outgoing ratings, like delegation); self-ratings and non-member ratings are ignored.
 
 Because each hop *strictly decreases*, **two untrusted members cannot bootstrap
@@ -159,7 +159,7 @@ admin.** A lone admin's censure is one vote short of the floor of 2; and because
 disagreeing admin is counted in the eligible *body* (the quorum denominator) but
 not in the censuring *set*, **a quorum of the others discredits over that admin's
 objection** — admin opinion carries no veto and no unilateral power here. Censures
-are self-attributed (`gov-censure`), so a member below `m`'s standing can record one
+are self-signed (`gov-censure`), so a member below `m`'s standing can record one
 but it is not counted toward the quorum.
 
 Example: members A, B, C; B delegates A; C delegates B. If only **A** votes, A
@@ -182,14 +182,14 @@ clicking it in the Governance sidebar, or implicitly when there's only one group
 | `/gov member add <peer> [admin]` · `member remove <peer>` | Manage roster (admin only); membership is capability-backed |
 | `/gov issue <title>` · `/gov issue list` | Record / list issues to decide. Each issue gets its own **issue card** (title, group, weighted result, open-vote/vote) that persists in the transcript and replays on reload, like a poll card |
 | `/gov delegate <member> [on <issue>]` · `/gov undelegate [on <issue>]` | Set / clear your **standing delegate**, or a **per-issue** delegate that overrides it for one issue |
-| `/gov trust <member> <0–5>` | Set / clear (`0`) your **affirmative trust rating** of a member; confers a level **below your own**, raising their base voting weight (liquid *trust*). Self-attributed |
-| `/gov censure <member>` · `/gov uncensure <member>` | Flag / unflag a member for **undeserved trust**; a **⅔ quorum** of eligible censurers (min 2, even over an admin) discredits them and **slashes their vouchers** (accountability). Self-attributed |
+| `/gov trust <member> <0–5>` | Set / clear (`0`) your **affirmative trust rating** of a member; confers a level **below your own**, raising their base voting weight (liquid *trust*). Self-signed |
+| `/gov censure <member>` · `/gov uncensure <member>` | Flag / unflag a member for **undeserved trust**; a **⅔ quorum** of eligible censurers (min 2, even over an admin) discredits them and **slashes their vouchers** (accountability). Self-signed |
 | `/gov vote <issue> \| opt1, opt2 [ranked]` | Open a poll bound to the issue (find-or-create the issue) |
 | `/gov treasury declare \| grant <member> <n> \| balance` | Group funds — a per-group `/note` currency (admin declares + funds; balances are bearer-private) |
 | `/gov kudos <member> <n> \| balance` | Award reputation — a per-group kudos `/note` currency (admin issues; members re-gift what they hold) |
 | `/gov say <message>` | Post to the group's inbox — a `group-msg` only fellow members see |
 | `/gov status` | Group overview: members, delegations, issue results |
-| `/forget group <name>` | Disband (creator) / hide (others) — tombstoned, dyncap-attributed |
+| `/forget group <name>` | Disband (creator) / hide (others) — tombstoned, dyncap-signed |
 
 The **group card** (sidebar → click) shows members with roles and their delegate,
 each member's **trust weight** `[wt N]` and a `⚠` on any discredited member, a
@@ -198,11 +198,11 @@ winner, and per-member controls — **delegate**, a **trust** dropdown (confer a
 level 0…*below your own*), and a **censure** toggle — plus buttons to open a vote,
 vote, add a member / issue, set up treasury, or disband.
 
-Wire envelopes (all dyncap-attributed, synced on join via `sync-gov`, tombstone-aware):
+Wire envelopes (all dyncap-signed, synced on join via `sync-gov`, tombstone-aware):
 `group-open`, `group-member` (admin-gated), `group-issue`, `group-vote`,
-`gov-delegate`, `gov-trust`, `gov-censure` (all self-attributed — only you set
+`gov-delegate`, `gov-trust`, `gov-censure` (all self-signed — only you set
 your own delegate / trust ratings / censures), and `gov-vault` (a member's
-password-encrypted identity for `/login <handle>` recovery — self-attributed,
+password-encrypted identity for `/login <handle>` recovery — self-signed,
 first-write-wins by handle; see [Security](SECURITY.md)). Votes themselves are
 plain `/poll` envelopes. The headless memory daemon persists `group-*` and the
 member `anchor` / `vaults` fields, so membership and recovery survive when every
@@ -273,12 +273,12 @@ has the measurements.
 **Push is per-member by construction, not by policy.** `delegate`, `rate` and `censure` are `self`
 verbs on the contract: the caller's identity is *derived* inside it from their deployer id, so an
 admin cannot write a member's row and a member needs no admin to write their own. That is the same
-rule the room already follows for `gov-delegate`/`gov-trust`/`gov-censure` — self-attributed only —
+rule the room already follows for `gov-delegate`/`gov-trust`/`gov-censure` — self-signed only —
 arriving at the chain by a different road.
 
 **A member has to publish a chain address first.** The contracts key every row by REV address; a
 room knows peerIds and dyncap anchors. So `/gov chain push` publishes yours to the group as a
-self-attributed `gov-chain` envelope, and skips — out loud — any delegation or rating whose *target*
+self-signed `gov-chain` envelope, and skips — out loud — any delegation or rating whose *target*
 has not published one. Nothing is guessed: a delegation pointed at the wrong address would be a
 silent misdirection of a vote.
 
@@ -313,11 +313,11 @@ every browser leaves; it also honors a creator's group disband (`retract` /
 tombstone) and won't resurrect it.
 
 **Phase 2d (shipped):** **trust-rating weights + accountability** — the RGOV
-liquid-*trust* extension. `/gov trust <member> <0–5>` (self-attributed `gov-trust`)
+liquid-*trust* extension. `/gov trust <member> <0–5>` (self-signed `gov-trust`)
 confers a trust level **below the rater's own** in an admin-rooted hierarchy
 (`trustLevels`); base voting weight is `1 + level`, fed into the same
 deterministic `resolveWeights` tally. **Accountability:** `/gov censure <member>`
-(self-attributed `gov-censure`) flags undeserved trust; a **⅔ quorum of eligible
+(self-signed `gov-censure`) flags undeserved trust; a **⅔ quorum of eligible
 censurers (min 2)** discredits the target and **slashes their vouchers** by the
 level they staked (phase 2 of `trustLevels`) — no single member, admin included,
 acts alone, and a disagreeing admin can't block a real quorum. Opt-in and

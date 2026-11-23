@@ -98,7 +98,7 @@ one-person-one-vote. See [Governance.md](../Governance.md), and [Room_Best_Pract
 for the collective-intelligence practices behind it.
 
 **Notes with terms** — `/note grant USD 5 | redeemable for one coffee` mints a
-**terms-stamped** note (`cap:note-USD~<hash>`); the issuer's terms are dyncap-attributed and
+**terms-stamped** note (`cap:note-USD~<hash>`); the issuer's terms are dyncap-signed and
 travel with the note. `/note terms` reads them and `/note accept` is required before redeeming.
 Different terms for the same currency are simply different stamped series.
 
@@ -540,7 +540,7 @@ rdv-abort    proposer    → each participant   (releases locks)
 
 **Atomicity caveat**: best-effort, same trust model as `/note pass`. If a commit message is lost in flight, the recipient who got it diverges from the one who didn't. True multi-party atomicity needs a consensus layer, which is out of scope.
 
-See [AtomicSwapDemo.md](../AtomicSwapDemo.md) for a full Alice/Bob walkthrough — proposal lifecycle, locking, failure modes. The N-of-N multisig discussion lives in its own demo: [MultisigDemo.md](../MultisigDemo.md) shows 2-of-2 cosignature using `/dyncap` + `/rdv` (atomic exchange of dyncap-attributed attestation tokens). K-of-N threshold multisig needs either a threshold conservation predicate or signature-strength identity beyond what hash-only dyncap provides.
+See [AtomicSwapDemo.md](../AtomicSwapDemo.md) for a full Alice/Bob walkthrough — proposal lifecycle, locking, failure modes. The N-of-N multisig discussion lives in its own demo: [MultisigDemo.md](../MultisigDemo.md) shows 2-of-2 cosignature using `/dyncap` + `/rdv` (atomic exchange of dyncap-signed attestation tokens). K-of-N threshold multisig needs either a threshold conservation predicate or signature-strength identity beyond what hash-only dyncap provides.
 
 ### `/dyncap [sub]`
 
@@ -589,7 +589,7 @@ breaking the room. See [success-frameworks.md](success-frameworks.md) and
 
 ### `/qos [sub]`
 
-Named QOS processes over the finite `qos.event/1` contract. A process is a capability-guarded continuation; start, suspend, resume and terminate are dyncap-attributed events, and every peer recomputes the same deterministic `stateDigest` from the same envelopes. No chain RPC is involved.
+Named QOS processes over the finite `qos.event/1` contract. A process is a capability-guarded continuation; start, suspend, resume and terminate are signed events, and every peer recomputes the same deterministic `stateDigest` from the same envelopes. No chain RPC is involved.
 
 | Subcommand | Effect |
 |---|---|
@@ -671,7 +671,7 @@ A peer in N rooms has the same dyncap *anchor* across rooms (it's `H(seed)` wher
 
 ### `/share <selector> to <room-prefix>`
 
-Bridge selected state from the active tab into another joined tab. The bridge is application-level: `/share` briefly swaps the active room context to the target room and runs the existing dispatcher commands there. The target room sees the action as if the user typed it locally — including the bridge peer's dyncap attribution in *that* room's chain. No new wire kinds; no infrastructure relay.
+Bridge selected state from the active tab into another joined tab. The bridge is application-level: `/share` briefly swaps the active room context to the target room and runs the existing dispatcher commands there. The target room sees the action as if the user typed it locally — including the bridge peer's dyncap signature in *that* room's chain. No new wire kinds; no infrastructure relay.
 
 | Selector | Effect in target |
 |---|---|
@@ -686,8 +686,8 @@ Target resolution: `<room-prefix>` prefix-matches against joined room IDs. Ambig
 Each room is its own Markov blanket — a self-consistent **perspective**. Information crosses between rooms only through something that stands in both. Multi-room cooperation happens at three levels:
 
 - **Many rooms, one session** — `/room` opens each room as its own tab, each an independent blanket (its own peers, lemmas, currencies, dyncap chain). Holding several tabs makes *you* the link between them.
-- **Move an item between your own tabs** — `/share <selector> to <room>` re-enacts a lemma / note / message in another of your joined rooms, attributed into *that* room's chain.
-- **Link separate rooms** — the headless **room bridge** ([`scripts/qos-cli/bridge.mjs`](../scripts/qos-cli/bridge.mjs)) is one perspective that stands in two or more rooms and relays each room's outputs as the others' inputs: channels and chat, plus (opt-in) durable **lemma** and **governance** state relayed verbatim so attribution carries through. That shared membership *is* the shared closure between the rooms — **ER=EPR at the collaboration layer**. See [`Room_Bridges.md`](../Room_Bridges.md).
+- **Move an item between your own tabs** — `/share <selector> to <room>` re-enacts a lemma / note / message in another of your joined rooms, signed into *that* room's chain.
+- **Link separate rooms** — the headless **room bridge** ([`scripts/qos-cli/bridge.mjs`](../scripts/qos-cli/bridge.mjs)) is one perspective that stands in two or more rooms and relays each room's outputs as the others' inputs: channels and chat, plus (opt-in) durable **lemma** and **governance** state relayed verbatim so signatures carry through. That shared membership *is* the shared closure between the rooms — **ER=EPR at the collaboration layer**. See [`Room_Bridges.md`](../Room_Bridges.md).
 
 ### `/channel [sub]`
 
@@ -752,9 +752,7 @@ The "persistence" is "as long as one of the replicating peers is online" — the
 
 ### `/rhoqu <text>`
 
-RhoQu macro language — a thin syntactic surface that compiles to the shipped slash commands. The body is parsed by `packages/browser/src/rhoqu.ts` into an AST and transpiled to a `string[]` of `/commands`, each dispatched in order through the regular handler.
-
-**RhoQu v2 runtime:** typed process IR, runtime when, local parallel execution, structured results, and binding semantics are documented in [RhoQu v2 runtime semantics](rhoqu-v2-runtime.md). This describes v2; legacy behavior below remains for compatibility.
+RhoQu macro language — a thin syntactic surface that compiles to the shipped slash commands. The browser lowers source to a typed process IR. See [RhoQu v2 runtime semantics](rhoqu-v2-runtime.md) for runtime branches, local parallelism, and output bindings. The legacy library can still flatten source into a list of commands.
 
 | Construct | Meaning |
 |---|---|

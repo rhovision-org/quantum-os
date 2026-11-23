@@ -74,7 +74,7 @@ function tokenize(src: string): Token[] {
     // captured verbatim and dispatched as a /command, with $arg substitution
     // applied at interpret time. `|` is RhoQu's parallel-composition operator
     // (rho-calculus convention), so commands can't contain a literal `|`;
-    // use /script as an escape hatch if you need one.
+    // type slash commands with literal pipes directly in the chat input.
     if (ch === "/") {
       const startL = line, startC = col;
       let buf = "";

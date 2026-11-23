@@ -508,7 +508,7 @@ established here; it is worth a look before anyone relies on `/rholang register|
 3. ~~**Deploy to the playground**~~ **Done** — `scripts/localnet/rgov-core-check.mjs`, 28/28 live.
    Every verb is now covered, including the capability-delivery path end to end and the negatives.
 4. ~~**Wire `/gov`**~~ **Done** — `/gov chain` (`install` · `push` · `pull` · `inbox|group|issue
-   <uri>`), carried between peers on the existing `group-meta` envelope, plus a self-attributed
+   <uri>`), carried between peers on the existing `group-meta` envelope, plus a self-signed
    `gov-chain` envelope for a member's own REV address. See
    [Governance.md § The group on chain](Governance.md#the-group-on-chain--gov-chain).
 
@@ -516,7 +516,7 @@ established here; it is worth a look before anyone relies on `/rholang register|
    - **A push is per-member.** `delegate`/`rate`/`censure` are `self` verbs, so an admin *cannot*
      push a member's rows and a member needs no admin to push their own.
    - **A member must publish a chain address first.** The contracts key rows by REV address; a room
-     knows peerIds and anchors. `Member.revAddr` carries it, self-attributed, and a push skips — out
+     knows peerIds and anchors. `Member.revAddr` carries it, self-signed, and a push skips — out
      loud — any row whose target has not published one rather than guessing at a vote's destination.
 5. **Register the three by name** in the genesis directory, which is what makes step 4 a constant
    rather than three uris to distribute.

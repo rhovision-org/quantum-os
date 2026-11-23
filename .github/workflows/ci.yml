@@ -204,6 +204,9 @@ jobs:
       - name: RhoQu binding integration test
         run: node packages/browser/test/rhoqu-binding.test.mjs
 
+      - name: RhoQu process package test
+        run: node packages/browser/test/rhoqu-package.test.mjs
+
       # The browser peer against a stubbed clock, socket and RTCPeerConnection:
       # the retry sweep (wrong twice from live rooms), and the relayed control
       # plane — sealed frames, in-order queueing through a socket blip,

@@ -112,7 +112,7 @@ If at least one resolved discrepancy applied locally, the lemma/note stores are 
 }
 ```
 
-The envelope is dyncap-attributed by the joiner (the peer running the probe). Receivers verify the joiner's dyncap on receipt; the *inner* observations carry peer IDs but not the original peers' dyncap attributions — those are still trusted on the joiner's word.
+The envelope is dyncap-signed by the joiner (the peer running the probe). Receivers verify the joiner's dyncap on receipt; the *inner* observations carry peer IDs but not the original peers' dyncap signatures — those are still trusted on the joiner's word.
 
 ---
 

@@ -377,7 +377,7 @@ already has the three properties an introduction needs:
 | need | the room already has |
 |---|---|
 | admission | holding the room capability *is* being in the room |
-| identity | every envelope is dyncap-attributed and anchor-pinned; a fork is flagged |
+| identity | every envelope is dyncap-signed and anchor-pinned; a fork is flagged |
 | standing | `/gov trust` levels, admin-rooted, with ⅔-quorum censure that slashes vouchers |
 
 So sharing a capability is `/macro define ballot` with the uri as its body,
@@ -720,7 +720,7 @@ across deploys.
 | `%tally(ballots, weights, mode)` | `rho:gov:tally` — weighted IRV or approval |
 | `%censure(censures, levels, vouchers)` | `rho:gov:censure` — ⅔-quorum accountability. Censures are `(censor, target)` tuples and vouchers `(rater, ratee, level)` tuples; returns `(discredited, newLevels)` |
 | `%ballot(issue, options)` | a ranked tally, for the common case |
-| `%delegate(to)` | a self-attributed delegation |
+| `%delegate(to)` | a self-signed delegation |
 
 These four take rholang maps, so they are program-form only. Composed, they are
 [`liquid_democracy.rho`](https://github.com/rhovision-org/rholo/blob/dev/qucalc/examples/liquid_democracy.rho):

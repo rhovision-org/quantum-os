@@ -185,10 +185,10 @@ ALICE                                  BOB
 Each peer now holds the *other's* attestation token. The cosignature is real because:
 
 - **Both anchors were TOFU-pinned** before any of this happened. The room's record of who is "Alice" and who is "Bob" was established at name-handshake.
-- **Both declarations and grants were dyncap-attributed** by their respective issuers. Bob's `attest-bob` traces back to Bob's anchor; Alice's `attest-alice` traces to Alice's.
+- **Both declarations and grants were dyncap-signed** by their respective issuers. Bob's `attest-bob` traces back to Bob's anchor; Alice's `attest-alice` traces to Alice's.
 - **The rendezvous committed only after both explicit accepts**. Either party could have rejected; either party could have timed out. The atomic commit means both signed.
 
-The fact that Alice now holds `attest-bob 1` is unforgeable proof that Bob participated in this specific rendezvous — Bob's bearer authority over `attest-bob` was established by his dyncap-attributed `note-declare`, and only Bob's wallet could supply the denomination-1 piece. Same argument symmetrically.
+The fact that Alice now holds `attest-bob 1` is unforgeable proof that Bob participated in this specific rendezvous — Bob's bearer authority over `attest-bob` was established by his dyncap-signed `note-declare`, and only Bob's wallet could supply the denomination-1 piece. Same argument symmetrically.
 
 ---
 
@@ -235,13 +235,13 @@ Each peer's `/dyncap status` reflects the total seq count of their signed envelo
 
 ## Why this is a real multisig
 
-The standard multisig primitive in cryptography binds K signatures to a single payload. quantum-os does it differently — the *primitive* is atomic agreement, and the *attributions* come from the dyncap chains that authenticate participation. The properties match:
+The standard multisig primitive in cryptography binds K signatures to a single payload. quantum-os does it differently — the *primitive* is atomic agreement, and the *signatures* come from the dyncap chains that authenticate participation. The properties match:
 
 | Multisig property | How this demo provides it |
 |---|---|
 | Both parties must agree | `/rdv` does not commit unless both `rdv-accept` envelopes arrive |
-| Each party's dyncap attribution is verifiable | Each party's `note-declare` and earlier envelopes are dyncap-attributed; receivers TOFU-pinned and verified each chain step |
-| The attributed artifact is tamper-evident | The atomic swap produces specific bearer tokens; any later modification (e.g., copying a token) doesn't reproduce the chain-of-custody back to the original dyncap-attributed declaration |
+| Each party's signature is verifiable | Each party's `note-declare` and earlier envelopes are dyncap-signed; receivers TOFU-pinned and verified each chain step |
+| The signed artifact is tamper-evident | The atomic swap produces specific bearer tokens; any later modification (e.g., copying a token) doesn't reproduce the chain-of-custody back to the original dyncap-signed declaration |
 | One party cannot forge the cosignature alone | A rogue Alice can't produce `attest-bob 1` without Bob's wallet supplying it; Bob's wallet only releases it through `/rdv accept` |
 
 The trust ceiling is the dyncap ceiling: TOFU at first contact, race conditions if a clone broadcasts before the real holder, no cross-room continuity.

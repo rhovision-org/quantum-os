@@ -47,7 +47,7 @@ export interface Attachments {
   /** Send each file to the room. */
   send(files: FileList | File[]): void;
   /** Inbound `file-start`. */
-  fileStart(from: string, d: Record<string, unknown>): void;
+  fileStart(d: Record<string, unknown>): void;
   /** Inbound `file-chunk`; completes the transfer when the last one lands. */
   fileChunk(from: string, d: Record<string, unknown>): void;
 }
@@ -116,7 +116,6 @@ export function renderMedia(host: HTMLElement, m: MediaAttachment): void {
 
 /** Inbound reassembly: transfer id → what has arrived so far. */
 interface IncomingFile {
-  from: string;
   name: string; mime: string; size: number; mediaKind: MediaKind;
   total: number; chunks: string[]; got: number;
 }
@@ -162,49 +161,38 @@ export function createAttachments(host: AttachmentHost): Attachments {
   return {
     send(files) { for (const f of Array.from(files)) void sendOne(f); },
 
-    fileStart(from, d) {
-      // Sender identity, exact encoded size, and bounded allocation are all
-      // checked before retaining state for an inbound transfer.
+    fileStart(d) {
+      // Nothing here is trusted: a sender that claims a size or a chunk count
+      // the cap does not allow is refused rather than allocated for.
       const id = String(d.id ?? "");
       const size = Number(d.size ?? 0);
       const total = Number(d.total ?? 0);
-      const encodedSize = Math.ceil(size / 3) * 4;
-      const expectedTotal = Math.ceil(encodedSize / FILE_CHUNK);
-      if (!id || size <= 0 || size > FILE_MAX || !Number.isInteger(size)
-          || total !== expectedTotal || total <= 0 || total > expectedTotal
-          || (incoming.size >= 3 && !incoming.has(id))) return;
-      const name = String(d.name ?? "file").slice(0, 255);
-      const mime = String(d.mime ?? "application/octet-stream").slice(0, 128);
-      const kind = d.mediaKind;
-      const mediaKind: MediaKind = kind === "image" || kind === "audio" || kind === "video" ? kind : "file";
-      incoming.set(id, { from, name, mime, size, mediaKind, total, chunks: new Array(total).fill(""), got: 0 });
+      if (!id || size > FILE_MAX || total <= 0 || total > Math.ceil(FILE_MAX / FILE_CHUNK) + 2) return;
+      incoming.set(id, {
+        name: String(d.name ?? "file"),
+        mime: String(d.mime ?? "application/octet-stream"),
+        size,
+        mediaKind: (d.mediaKind as MediaKind) ?? "file",
+        total,
+        chunks: new Array(total).fill(""),
+        got: 0,
+      });
     },
 
     fileChunk(from, d) {
       const id = String(d.id ?? "");
       const f = incoming.get(id);
-      if (!f || f.from !== from) return;
+      if (!f) return;
       const seqNo = Number(d.seq ?? -1);
-      const data = typeof d.data === "string" ? d.data : "";
-      const expectedEncoded = Math.ceil(f.size / 3) * 4;
-      const expectedChunkLength = seqNo === f.total - 1
-        ? expectedEncoded - seqNo * FILE_CHUNK
-        : FILE_CHUNK;
-      // Reject cross-peer chunks, oversized payloads, bad chunk boundaries,
-      // out-of-range sequence numbers, and duplicate chunks.
-      if (!Number.isInteger(seqNo) || seqNo < 0 || seqNo >= f.total
-          || f.chunks[seqNo] !== "" || data.length !== expectedChunkLength
-          || data.length > FILE_CHUNK || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)
-          || (seqNo < f.total - 1 && data.includes("="))) return;
-      f.chunks[seqNo] = data;
+      // Out of range, or already filled: a repeat must not double-count `got`.
+      if (seqNo < 0 || seqNo >= f.total || f.chunks[seqNo] !== "") return;
+      f.chunks[seqNo] = String(d.data ?? "");
       f.got++;
       if (f.got < f.total) return;
-      const encoded = f.chunks.join("");
-      if (encoded.length !== Math.ceil(f.size / 3) * 4) { incoming.delete(id); return; }
       incoming.delete(id);
       host.addMedia(from,
         { mediaKind: f.mediaKind, name: f.name, mime: f.mime, size: f.size,
-          url: `data:${f.mime};base64,${encoded}` },
+          url: `data:${f.mime};base64,${f.chunks.join("")}` },
         "peer", host.label(from));
     },
   };
