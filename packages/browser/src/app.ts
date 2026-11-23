@@ -19,8 +19,8 @@ import { findDiscrepancies, losingPeersIn, normalizeValue,
          SAMPLE_SIZE, PROBE_WINDOW_MS,
          type Observation } from "./probe.js";
 import { transpile as rhoquTranspile, RhoQuError, type RhoQuContext, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
-import { tally, tallyApproval, liveCounts, summarizeWinners, optionId, sortedOptions,
-         type Poll, type PollMethod, type PollOption } from "./polls.js";
+import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
+         tallyApproval, type Poll, type PollMethod, type PollOption } from "./polls.js";
 import { canonLemma, parseRefTokens, parseLemmaDecl, splitLemmaNameArg } from "./lemma-parse.js";
 import { issueId, isMember, isAdmin, memberLabel, findIssue, resolveWeights, delegatorsOf,
          delegationMapFor, trustWeightsFor, trustLevels, discreditedMembers, TRUST_MAX, govCurrency,
