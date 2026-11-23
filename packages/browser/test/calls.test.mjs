@@ -406,6 +406,18 @@ permission = "prompt";
   t.drop("b");
   check("a speaker who leaves is forgotten", t.current() === null, String(t.current()));
 
+  // The `speaking` highlight: held through pauses, gone after the hold.
+  const h = mod.speakingHold(3000);
+  const ids = (s) => [...s].sort().join(",");
+  check("nobody heard, nobody speaking", ids(h.update(null, 0)) === "", "");
+  check("a voice lights its tile", ids(h.update("a", 1000)) === "a", "");
+  check("a pause keeps it lit", ids(h.update(null, 3500)) === "a", "");
+  check("someone else talking lights theirs too", ids(h.update("b", 3600)) === "a,b", "");
+  check("three seconds of silence turns it off", ids(h.update(null, 4000)) === "b", "");
+  h.drop("b");
+  check("a peer who leaves is dropped", ids(h.update(null, 4100)) === "", "");
+  check("the default hold is three seconds", mod.SPEAKING_HOLD_MS === 3000, String(mod.SPEAKING_HOLD_MS));
+
   // Through the tiles.
   const bar = el(), tilesS = el(), viewBtn = el(), fullBtn = el();
   const sPeer = {
