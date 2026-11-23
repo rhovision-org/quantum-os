@@ -39,38 +39,69 @@ const MAX_PACKAGE_BYTES = 1_048_576;
 const MAX_NODE_DEPTH = 64;
 const MAX_SEQUENCE_STEPS = 1024;
 const MAX_EXPR_ARGS = 64;
+function onlyKeys(value: Record<string, unknown>, ...keys: string[]): boolean {
+  return Object.keys(value).every(key => keys.includes(key));
+}
 function validExpr(expr: unknown, depth = 0): expr is RhoRuntimeExpr {
   if (depth > MAX_NODE_DEPTH || !isRecord(expr) || typeof expr.kind !== "string") return false;
   switch (expr.kind) {
-    case "num": return typeof expr.value === "number" && Number.isFinite(expr.value);
-    case "str": return typeof expr.value === "string" && expr.value.length <= 8192;
-    case "var": return typeof expr.name === "string" && expr.name.length <= 128;
-    case "lemma": return typeof expr.name === "string" && expr.name.length <= 128;
-    case "call": return typeof expr.name === "string" && expr.name.length <= 128 && Array.isArray(expr.args) && expr.args.length <= MAX_EXPR_ARGS && expr.args.every(arg => validExpr(arg, depth + 1));
-    case "binop": return ["and","or","eq","ne","lt","le","gt","ge"].includes(String(expr.op)) && validExpr(expr.left, depth + 1) && validExpr(expr.right, depth + 1);
-    case "unop": return expr.op === "not" && validExpr(expr.expr, depth + 1);
-    default: return false;
+    case "num":
+      return onlyKeys(expr, "kind", "value") && typeof expr.value === "number" && Number.isFinite(expr.value);
+    case "str":
+      return onlyKeys(expr, "kind", "value") && typeof expr.value === "string" && expr.value.length <= 8192;
+    case "var":
+    case "lemma":
+      return onlyKeys(expr, "kind", "name") && typeof expr.name === "string" && expr.name.length <= 128;
+    case "call":
+      return onlyKeys(expr, "kind", "name", "args") && typeof expr.name === "string" && expr.name.length <= 128
+        && Array.isArray(expr.args) && expr.args.length <= MAX_EXPR_ARGS
+        && expr.args.every(arg => validExpr(arg, depth + 1));
+    case "binop":
+      return onlyKeys(expr, "kind", "op", "left", "right") && typeof expr.op === "string"
+        && ["and", "or", "eq", "ne", "lt", "le", "gt", "ge"].includes(expr.op)
+        && validExpr(expr.left, depth + 1) && validExpr(expr.right, depth + 1);
+    case "unop":
+      return onlyKeys(expr, "kind", "op", "expr") && expr.op === "not" && validExpr(expr.expr, depth + 1);
+    default:
+      return false;
   }
 }
 function validSequence(value: unknown, depth = 0): value is RhoSequenceNode {
-  return depth <= MAX_NODE_DEPTH && isRecord(value) && value.kind === "sequence" && Array.isArray(value.steps) && value.steps.length <= MAX_SEQUENCE_STEPS && value.steps.every(node => validNode(node, depth + 1));
+  return depth <= MAX_NODE_DEPTH && isRecord(value) && value.kind === "sequence" && onlyKeys(value, "kind", "steps")
+    && Array.isArray(value.steps) && value.steps.length <= MAX_SEQUENCE_STEPS
+    && value.steps.every(node => validNode(node, depth + 1));
 }
 function validNode(value: unknown, depth = 0): value is RhoProcessNode {
   if (depth > MAX_NODE_DEPTH || !isRecord(value) || typeof value.kind !== "string") return false;
   if (value.kind === "command") {
-    return typeof value.command === "string" && value.command.trim().length > 0 && value.command.length <= 8192 && (value.bind === undefined || (typeof value.bind === "string" && /^[A-Za-z_][A-Za-z0-9_-]*$/.test(value.bind) && value.bind.toUpperCase() !== "LAST_ID"));
+    return onlyKeys(value, "kind", "command", "bind") && typeof value.command === "string"
+      && value.command.trim().startsWith("/") && value.command.trim().length > 1 && value.command.length <= 8192
+      && (value.bind === undefined || (typeof value.bind === "string"
+        && /^[A-Za-z_][A-Za-z0-9_-]{0,127}$/.test(value.bind) && value.bind.toUpperCase() !== "LAST_ID"));
   }
-  if (value.kind === "sequence") return validSequence(value, depth + 1);
-  if (value.kind === "parallel") return Array.isArray(value.branches) && value.branches.length >= 2 && value.branches.length <= 64 && value.branches.every(branch => validNode(branch, depth + 1));
+  if (value.kind === "sequence") return validSequence(value, depth);
+  if (value.kind === "parallel") {
+    return onlyKeys(value, "kind", "branches") && Array.isArray(value.branches)
+      && value.branches.length >= 2 && value.branches.length <= 64
+      && value.branches.every(branch => validNode(branch, depth + 1));
+  }
   if (value.kind === "when") {
-    return validExpr(value.condition) && isRecord(value.env) && Object.keys(value.env).length <= 128 && Object.entries(value.env).every(([key, v]) => /^[A-Za-z_][A-Za-z0-9_-]{0,127}$/.test(key) && key.toUpperCase() !== "LAST_ID" && typeof v === "string" && v.length <= 8192) && validSequence(value.then, depth + 1) && (value.else === undefined || validSequence(value.else, depth + 1));
+    return onlyKeys(value, "kind", "condition", "env", "then", "else")
+      && validExpr(value.condition) && isRecord(value.env) && Object.keys(value.env).length <= 128
+      && Object.entries(value.env).every(([key, v]) => /^[A-Za-z_][A-Za-z0-9_-]{0,127}$/.test(key)
+        && typeof v === "string" && v.length <= 8192)
+      && validSequence(value.then, depth + 1)
+      && (value.else === undefined || validSequence(value.else, depth + 1));
   }
   return false;
 }
 function validPackageBase(value: unknown): boolean {
-  return isRecord(value) && value.format === "rho-process-package" && value.version === 1
-    && isRecord(value.provenance) && typeof value.provenance.authorAnchor === "string" && /^[0-9a-f]{64}$/i.test(value.provenance.authorAnchor)
-    && typeof value.provenance.exportedAt === "string" && Number.isFinite(Date.parse(value.provenance.exportedAt))
+  return isRecord(value) && onlyKeys(value, "format", "version", "provenance", "process")
+    && value.format === "rho-process-package" && value.version === 1
+    && isRecord(value.provenance) && onlyKeys(value.provenance, "authorAnchor", "exportedAt", "source")
+    && typeof value.provenance.authorAnchor === "string" && /^[0-9a-f]{64}$/i.test(value.provenance.authorAnchor)
+    && typeof value.provenance.exportedAt === "string" && value.provenance.exportedAt.length <= 64
+    && Number.isFinite(Date.parse(value.provenance.exportedAt))
     && (value.provenance.source === undefined || (typeof value.provenance.source === "string" && value.provenance.source.length <= 8192))
     && validSequence(value.process);
 }
@@ -105,7 +136,9 @@ export async function importRhoProcessPackage(raw: string | unknown): Promise<Im
     if (new TextEncoder().encode(raw).length > MAX_PACKAGE_BYTES) throw new Error("invalid process package: size limit exceeded");
     try { value = JSON.parse(raw); } catch { throw new Error("invalid process package JSON"); }
   }
-  if (!isRecord(value) || typeof value.contentHash !== "string" || !validPackageBase(value)) throw new Error("invalid process package: schema validation failed");
+  if (!isRecord(value) || typeof value.contentHash !== "string" || !/^[0-9a-f]{64}$/.test(value.contentHash)) {
+    throw new Error("invalid process package: schema validation failed");
+  }
   const { contentHash, ...base } = value;
   const { canonical, snapshot } = checkedBaseSnapshot(base);
   const expected = await sha256(canonical);

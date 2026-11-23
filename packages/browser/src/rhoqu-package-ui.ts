@@ -1,14 +1,13 @@
-import { createRhoProcessPackage, importRhoProcessPackage, serializeRhoProcessPackage, type RhoProcessProvenance } from "./rhoqu-package.js";
+import { importRhoProcessPackage, serializeRhoProcessPackage, type RhoProcessProvenance } from "./rhoqu-package.js";
 import type { RhoProcessNode, RhoSequenceNode } from "./rhoqu-process.js";
-import { transpileProcess } from "./rhoqu.js";
+import { transpilePackageProcess } from "./rhoqu.js";
 
-const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-function preview(node: RhoProcessNode, depth = 0): string {
+export function formatRhoQuProcess(node: RhoProcessNode, depth = 0): string {
   const pad = "  ".repeat(depth);
   if (node.kind === "command") return `${pad}${node.bind ? `bind ${node.bind} ` : ""}${node.command}`;
-  if (node.kind === "sequence") return node.steps.map((n) => preview(n, depth)).join("\n");
-  if (node.kind === "parallel") return `${pad}parallel {\n${node.branches.map((b) => preview(b, depth + 1)).join("\n\n")}\n${pad}}`;
-  return `${pad}when ${JSON.stringify(node.condition)} {\n${preview(node.then, depth + 1)}\n${pad}}${node.else ? ` else {\n${preview(node.else, depth + 1)}\n${pad}}` : ""}`;
+  if (node.kind === "sequence") return node.steps.map((n) => formatRhoQuProcess(n, depth)).join("\n");
+  if (node.kind === "parallel") return `${pad}parallel {\n${node.branches.map((b) => formatRhoQuProcess(b, depth + 1)).join("\n\n")}\n${pad}}`;
+  return `${pad}when ${JSON.stringify(node.condition)} {\n${formatRhoQuProcess(node.then, depth + 1)}\n${pad}}${node.else ? ` else {\n${formatRhoQuProcess(node.else, depth + 1)}\n${pad}}` : ""}`;
 }
 function download(text: string, name: string): void {
   const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
@@ -28,18 +27,78 @@ export function openRhoQuPackageUI(authorAnchor?: string): void {
   anchor.style.cssText = "width:100%;box-sizing:border-box;background:#111318;color:#eee;border:1px solid #444;border-radius:6px;padding:8px;margin:0 0 8px;font:12px monospace";
   const source = document.createElement("textarea"); source.placeholder = "process Example() { /poll new Decision; }\nExample();"; source.style.cssText = "width:100%;min-height:130px;box-sizing:border-box;background:#111318;color:#eee;border:1px solid #444;border-radius:6px;padding:8px;font:12px/1.5 monospace;resize:vertical";
   const file = document.createElement("input"); file.type = "file"; file.accept = ".json,application/json"; file.style.display = "none";
-  source.addEventListener("input",()=>{ imported=null; });
   const previewBox = document.createElement("pre"); previewBox.style.cssText = "white-space:pre-wrap;max-height:220px;overflow:auto;background:#111318;border:1px solid #444;border-radius:6px;padding:8px;font:12px/1.5 monospace"; previewBox.textContent = "Process preview will appear here.";
-  const status = document.createElement("div"); status.style.cssText = "min-height:18px;margin:6px 0;font:12px monospace";
+  const status = document.createElement("div"); status.style.cssText = "min-height:18px;margin:6px 0;font:12px monospace;white-space:pre-wrap";
   const buttons = document.createElement("div"); buttons.style.cssText = "display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end;margin-top:8px";
   const mk = (label: string): HTMLButtonElement => { const b=document.createElement("button"); b.textContent=label; b.style.cssText="background:#292c34;color:#eee;border:1px solid #444;border-radius:6px;padding:7px 10px;cursor:pointer"; return b; };
   const importBtn=mk("Import package…"), previewBtn=mk("Preview source"), exportBtn=mk("Export package"), closeBtn=mk("Close");
   buttons.append(importBtn,previewBtn,exportBtn,closeBtn);
   card.append(heading,help,anchor,source,previewBox,status,buttons,file); overlay.append(card); document.body.appendChild(overlay);
-  let imported: {process:RhoSequenceNode; provenance:RhoProcessProvenance} | null = null;
-  const close=()=>overlay.remove(); closeBtn.onclick=close; overlay.addEventListener("click",e=>{if(e.target===overlay)close();});
-  importBtn.onclick=()=>file.click();
-  previewBtn.onclick=()=>{ try { const p=imported?.process ?? transpileProcess(source.value); if (!imported) previewBox.textContent=preview(p); status.textContent=`Preview ready: ${p.steps.length} top-level steps. Preview only.`; status.style.color="#8bd49a"; } catch(e) { status.textContent=String(e); status.style.color="#f87171"; } };
-  exportBtn.onclick=async()=>{ try { const p=imported?.process ?? transpileProcess(source.value); const provenance=imported?.provenance ?? {authorAnchor:anchor.value.trim(),exportedAt:new Date().toISOString(),source:"RhoQu source editor"}; const pkg=await createRhoProcessPackage(p,provenance); const serialized=await serializeRhoProcessPackage(p,provenance); download(serialized,"rhoqu-process-package.json"); status.textContent=`Exported package · SHA-256 ${pkg.contentHash}`; status.style.color="#8bd49a"; } catch(e) { status.textContent=String(e); status.style.color="#f87171"; } };
-  file.onchange=()=>{ const f=file.files?.[0]; file.value=""; if(!f)return; if(f.size>1_048_576){imported=null;status.textContent="Package exceeds size limit.";status.style.color="#f87171";return;} const reader=new FileReader(); reader.onload=async()=>{ try { const pkg=await importRhoProcessPackage(String(reader.result??"")); imported={process:pkg.process,provenance:pkg.provenance}; source.value=""; previewBox.textContent=preview(pkg.process); status.textContent=`Import validated · SHA-256 ${pkg.contentHash}\nClaimed author anchor (not authenticated): ${pkg.provenance.authorAnchor}\nExported: ${pkg.provenance.exportedAt}${pkg.provenance.source?`\nSource: ${pkg.provenance.source}`:""}\nPreview only — not executed.`; status.style.color="#8bd49a"; } catch(e) { imported=null; status.textContent=String(e); status.style.color="#f87171"; } }; reader.onerror=()=>{status.textContent="Unable to read package file.";status.style.color="#f87171";}; reader.readAsText(f); };
+  let imported: { process: RhoSequenceNode; provenance: RhoProcessProvenance } | null = null;
+  let revision = 0;
+  const setStatus = (message: string, ok: boolean): void => {
+    status.textContent = message;
+    status.style.color = ok ? "#8bd49a" : "#f87171";
+  };
+  const close = (): void => { revision++; overlay.remove(); };
+  closeBtn.onclick = close;
+  overlay.addEventListener("click", (event) => { if (event.target === overlay) close(); });
+  source.addEventListener("input", () => {
+    revision++;
+    imported = null;
+    previewBox.textContent = "Preview the edited source.";
+    status.textContent = "";
+  });
+  importBtn.onclick = () => file.click();
+  previewBtn.onclick = () => {
+    try {
+      const process = imported?.process ?? transpilePackageProcess(source.value);
+      if (!imported) previewBox.textContent = formatRhoQuProcess(process);
+      setStatus("Preview ready: " + process.steps.length + " top-level steps.", true);
+    } catch (error) {
+      previewBox.textContent = "";
+      setStatus(String(error), false);
+    }
+  };
+  exportBtn.onclick = async () => {
+    const current = revision;
+    try {
+      const process = imported?.process ?? transpilePackageProcess(source.value);
+      const provenance = imported?.provenance ?? {
+        authorAnchor: anchor.value.trim(), exportedAt: new Date().toISOString(), source: "RhoQu source editor",
+      };
+      const serialized = await serializeRhoProcessPackage(process, provenance);
+      if (current !== revision) return;
+      download(serialized, "rhoqu-process-package.json");
+      setStatus("Exported package · SHA-256 " + JSON.parse(serialized).contentHash, true);
+    } catch (error) {
+      if (current === revision) setStatus(String(error), false);
+    }
+  };
+  file.onchange = async () => {
+    const selected = file.files?.[0];
+    file.value = "";
+    if (!selected) return;
+    const current = ++revision;
+    imported = null;
+    previewBox.textContent = "";
+    setStatus("Validating package…", true);
+    try {
+      if (selected.size > 1_048_576) throw new Error("Package exceeds size limit.");
+      const pkg = await importRhoProcessPackage(await selected.text());
+      if (current !== revision) return;
+      imported = pkg;
+      source.value = "";
+      previewBox.textContent = formatRhoQuProcess(pkg.process);
+      const lines = [
+        "Import validated · SHA-256 " + pkg.contentHash,
+        "Claimed author anchor (unverified): " + pkg.provenance.authorAnchor,
+        "Exported: " + pkg.provenance.exportedAt,
+      ];
+      if (pkg.provenance.source) lines.push("Source: " + pkg.provenance.source);
+      setStatus(lines.join("\n"), true);
+    } catch (error) {
+      if (current === revision) setStatus(String(error), false);
+    }
+  };
 }

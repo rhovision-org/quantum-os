@@ -53,6 +53,12 @@ ok("import rejects content tampering", tamperRejected);
 let schemaRejected = false;
 try { await importRhoProcessPackage(JSON.stringify({ format: "rho-process-package", version: 99 })); } catch (error) { schemaRejected = String(error).includes("schema validation"); }
 ok("import rejects unsupported schema", schemaRejected);
+const unknownField = JSON.parse(serialized);
+unknownField.process.steps[0].extra = { label: "unsupported" };
+let rejectedUnknownField = false;
+try { await importRhoProcessPackage(unknownField); }
+catch (error) { rejectedUnknownField = String(error).includes("schema validation"); }
+ok("package rejects undeclared IR extension fields before hashing", rejectedUnknownField);
 let anchorRejected = false;
 try { await createRhoProcessPackage(process, { authorAnchor: "not-a-dyncap-anchor", exportedAt: provenance.exportedAt }); } catch (error) { anchorRejected = String(error).includes("schema validation"); }
 ok("package rejects malformed dyncap anchor", anchorRejected);

@@ -20,7 +20,8 @@ import { findDiscrepancies, losingPeersIn, normalizeValue,
          type Observation } from "./probe.js";
 import { transpileProcess as rhoquTranspileProcess, evaluateRhoQuRuntimeCondition, RhoQuError, type RhoQuContext, type RhoQuRuntimeSnapshot, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
 import { executeRhoProcessAsync, countRhoProcessCommands, type RhoFlatProcess } from "./rhoqu-process.js";
-import { openRhoQuPackageUI } from "./rhoqu-package-ui.js";
+import { formatRhoQuProcess, openRhoQuPackageUI } from "./rhoqu-package-ui.js";
+import { allowsRhoQuCommand, rhoquCommandProducesId } from "./rhoqu-dispatch.js";
 import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
          type Poll, type PollMethod, type PollOption } from "./polls.js";
 import { canonLemma, parseRefTokens, parseLemmaDecl, splitLemmaNameArg } from "./lemma-parse.js";
@@ -2309,7 +2310,7 @@ function confirmDialog(title: string, body: string, okLabel = "OK"): Promise<boo
     h.style.cssText = "font-weight:600;font-size:15px;margin-bottom:8px";
     const p = document.createElement("div");
     p.textContent = body;
-    p.style.cssText = "font-size:13px;opacity:.85;white-space:pre-wrap;margin-bottom:14px";
+    p.style.cssText = "font-size:13px;opacity:.85;white-space:pre-wrap;margin-bottom:14px;max-height:55vh;overflow:auto";
     const row = document.createElement("div");
     row.style.cssText = "display:flex;gap:8px;justify-content:flex-end";
     const cancel = document.createElement("button");
@@ -3132,25 +3133,6 @@ function forgetMacro(name: string): void {
 const MACRO_RUN_DEPTH = 8;
 let macroDepth = 0;
 
-const RHOQU_DIRECT_INPUT_COMMANDS = new Set([
-  "cap", "channel", "forget", "goal", "gov", "grant", "lemma", "login",
-  "macro", "name", "note", "pass", "password", "persist", "poll", "rdv",
-  "remove", "reset", "retract", "rhoqu", "rm", "room", "script", "share",
-]);
-
-function rhoquRequiresDirectInput(command: string): boolean {
-  const normalized = command.trim().replace(/^\/+/, "").trimStart().toLowerCase();
-  // Macro sigils and /script can dispatch nested commands outside this check.
-  if (normalized.startsWith("$") || normalized.startsWith("+")) return true;
-  const [verb = "", subcommand = "", argument = ""] = normalized.split(/\s+/, 3);
-  if (RHOQU_DIRECT_INPUT_COMMANDS.has(verb)) return true;
-  if (verb === "socket") return subcommand === "listen" || subcommand === "connect";
-  if (verb !== "rholang") return false;
-  if (subcommand === "locker") return argument === "install";
-  if (subcommand === "key") return /^(?:generate|forget|[0-9a-f]{64})$/.test(argument);
-  return /^(?:deploy|macro|register|bind|record|grant)$/.test(subcommand);
-}
-
 /**
  * Run `+name args`. Returns the lines it printed, so /script and a body can
  * carry it the way they carry a slash command.
@@ -3577,7 +3559,7 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
   }
 }
 
-function handleCommand(raw: string): string[] {
+function handleCommand(raw: string, commandOptions: { directInput?: boolean; recordId?: (id: string) => void } = {}): string[] {
   const body = raw.slice(1).trim();
   const parts = body.split(/\s+/);
   const cmd = parts[0].toLowerCase();
@@ -3649,7 +3631,6 @@ function handleCommand(raw: string): string[] {
         "  /macro [sub]     — write a +command: define · list · show · find · echo (a body of / commands, or of rholang)",
         "  +name <args>     — run a command somebody here defined (++text to send a literal + line)",
         "  /rhoqu <src>     — RhoQu macro: process/new/parallel/call → /commands",
-        "  /rhoqu package    — import/export validated process packages (preview only)",
         "  /rholang <sub>   — run rholang on rnode: eval · deploy · echo · read · status · config (multi-line, end with a blank line)",
         "  @name in args    — expand named lemma (e.g. /qucalc @major @minor)",
         "  [multi word]      — a spaced name: /lemma [all men are mortal]  ·  cite as @[all men are mortal]",
@@ -3738,7 +3719,8 @@ function handleCommand(raw: string): string[] {
         const question = (bar < 0 ? rest : rest.slice(0, bar)).trim();
         const options = bar < 0 ? [] : rest.slice(bar + 1).split(",").map((s) => s.trim()).filter(Boolean);
         if (!question) { sys("a poll needs a question: /poll new <question> [| seed options] [ranked]"); break; }
-        createPoll(question, options, method);
+        const poll = createPoll(question, options, method);
+        commandOptions.recordId?.(poll.id);
         sys(`poll created: "${question}" [${method}]${options.length ? ` — ${options.length} seed options` : " — open for nominations (use /poll add … or the card's add box)"}`);
         break;
       }
@@ -4584,6 +4566,7 @@ function handleCommand(raw: string): string[] {
       signedBroadcast({ kind: "lemma", name: lemmaName, twists: resolvedTwistsStr, cap: lemCap, who: lemWho, text: lemText });
       saveLemmas();
       renderLemmas();
+      commandOptions.recordId?.(lemmaRefStr(lemmaName));
       break;
     }
 
@@ -5466,6 +5449,7 @@ function handleCommand(raw: string): string[] {
           sys(`  ${note}`);
           if (gTerms) sys(`  terms: ${gTerms}`);
           if (qpeer) qpeer.broadcast({ kind: "note-grant", currency: unit, denomination: N, who });
+          commandOptions.recordId?.(note);
           break;
         }
 
@@ -5574,6 +5558,7 @@ function handleCommand(raw: string): string[] {
           renderNotes();
           sys(`merged ${h1.currency}: ${h1.denomination} + ${h2.denomination} = ${h1.denomination + h2.denomination}`);
           sys(`  ${merged}`);
+          commandOptions.recordId?.(merged);
           break;
         }
 
@@ -5719,6 +5704,7 @@ function handleCommand(raw: string): string[] {
             sys(`cannot reach ${targetName} — data channel not open`);
             break;
           }
+          commandOptions.recordId?.(id);
           sys(`· proposed rendezvous ${shortRdvId(id)} to ${targetName}`);
           sys(`  you give ${giveCur} ${giveN}, get ${getCur} ${getN}`);
           sys(`  expires in ${Math.round(RDV_TIMEOUT_MS / 1000)}s — /rdv abort ${shortRdvId(id)} to cancel`);
@@ -6288,13 +6274,20 @@ function handleCommand(raw: string): string[] {
         sys("usage: /rhoqu <source>");
         sys("  /rhoqu list                          — show registered on-handlers");
         sys("  /rhoqu clear                         — drop all on-handlers in this room");
+        sys("  /rhoqu package                       — preview, import, or export a process package");
         sys("  process P(lemma) { /qucalc $lemma; } P(@alice);");
         sys("  bind pid /qos start Decision; /qos status $pid;");
         sys("  if has(@met-bob) { /qucalc @met-bob; } else { /qucalc ^v; }");
         sys("  when peers() >= 2 { /qucalc @shared; } else { /qucalc ^v; } — runtime branch");
+        sys("  concurrent { /qucalc ^v; /qucalc <>; } — concurrent local branches");
         sys("  on forks(msg) { /qucalc @msg; }      — register a channel-msg handler");
         break;
       }
+      if (!commandOptions.directInput) {
+        sys("Enter the RhoQu program directly to review and approve it.");
+        break;
+      }
+      const pendingHandlers: RhoQuOnHandler[] = [];
       const rhoCtx: RhoQuContext = {
         hasLemma:  (name) => lemmaStore.has(canonLemma(name)),
         balance:   (currency) => {
@@ -6309,7 +6302,7 @@ function handleCommand(raw: string): string[] {
         peerCount:    () => peers.size,
         isConnected:  () => qpeer !== null,
         myCurrentSeq: () => dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
-        registerOnHandler: (h) => { rhoquHandlers.push(h); },
+        registerOnHandler: (h) => { pendingHandlers.push(h); },
       };
       let process: RhoFlatProcess;
       try {
@@ -6319,11 +6312,10 @@ function handleCommand(raw: string): string[] {
         else sys(`· rhoqu parse error: ${String(e)}`);
         break;
       }
-      const handlersAfter = rhoquHandlers.length;
       const commandCount = countRhoProcessCommands(process);
       sys("RhoQu IR contains " + commandCount + " commands; runtime branches evaluate at execution.");
       const runtimeSnapshot = (): RhoQuRuntimeSnapshot => {
-        const balances: Record<string, number> = {};
+        const balances: Record<string, number> = Object.create(null);
         for (const note of noteStore.values()) balances[note.currency] = (balances[note.currency] ?? 0) + note.denomination;
         return {
           lemmaNames: [...lemmaStore.keys()].map(canonLemma),
@@ -6339,31 +6331,48 @@ function handleCommand(raw: string): string[] {
       const executionPeer = qpeer;
       const canDispatch = () =>
         activeRoom === executionRoom && dyncapState?.anchor === executionAnchor && qpeer === executionPeer;
-      void executeRhoProcessAsync(process, async (command) => {
+      const report = (text: string): void => {
+        if (rooms.get(executionRoom.roomId) !== executionRoom) return;
+        const visibleRoom = activeRoom;
+        setActiveRoom(executionRoom);
+        try { addMessage("", text, "system"); } finally { setActiveRoom(visibleRoom); }
+      };
+      const run = async (): Promise<void> => {
+        const plan = formatRhoQuProcess(process);
+        const handlerSource = pendingHandlers.length ? "\n\nChannel handler source:\n" + src : "";
+        if (!(await confirmDialog("Review RhoQu program", plan + handlerSource, "Run program"))) return;
         if (!canDispatch()) throw new Error("RhoQu execution context changed");
-        if (rhoquRequiresDirectInput(command)) {
-          throw new Error(`blocked '${command}': this operation requires interactive approval; invoke it directly outside RhoQu`);
-        }
-        // The QOS dispatcher returns the ID of the exact start it published,
-        // after its queued operation completes. No store-delta inference.
-        if (/^\/qos(?:\s|$)/i.test(command)) {
-          const id = await runQosCommand(command.slice(4).trim(), "/qos", canDispatch);
-          return { lines: [], ...(id ? { id } : {}) };
-        }
-        return runInput(command);
-      }, {
-        strictBindings: true,
-        evaluateWhen: (condition, env) => {
+        rhoquHandlers.push(...pendingHandlers);
+        const results = await executeRhoProcessAsync(process, async (command, { binding }) => {
           if (!canDispatch()) throw new Error("RhoQu execution context changed");
-          return evaluateRhoQuRuntimeCondition(condition, env, runtimeSnapshot());
-        },
-      }).then((results) => {
-        const executed = results.filter((result) => result.ok).length;
+          if (!allowsRhoQuCommand(command, "approved")) {
+            throw new Error("command requires direct entry outside RhoQu");
+          }
+          if (binding && !rhoquCommandProducesId(command)) {
+            throw new Error("this command does not return a bindable ID");
+          }
+          if (/^\/\s*qos(?:\s|$)/i.test(command)) {
+            const id = await runQosCommand(command.replace(/^\/\s*qos\s*/i, ""), "/qos", canDispatch);
+            return id ? { lines: [], id } : { lines: [] };
+          }
+          let id: string | undefined;
+          const lines = handleCommand(command.trim(), { recordId: (value) => { id = value; } });
+          return id ? { lines, id } : { lines };
+        }, {
+          strictBindings: true,
+          evaluateWhen: (condition, env) => {
+            if (!canDispatch()) throw new Error("RhoQu execution context changed");
+            return evaluateRhoQuRuntimeCondition(condition, env, runtimeSnapshot());
+          },
+        });
+        const dispatched = results.filter((result) => result.ok).length;
         for (const result of results) {
-          if (!result.ok) sys(`· rhoqu error on '${result.command}': ${result.error}`);
+          if (!result.ok) report("· RhoQu: " + result.error);
         }
-        sys(`· rhoqu: ${executed}/${results.length} executed${handlersAfter > 0 ? `, ${handlersAfter} on-handler${handlersAfter === 1 ? "" : "s"} active` : ""}`);
-      }).catch((error) => sys(`· rhoqu execution error: ${String(error)}`));
+        report("· RhoQu: " + dispatched + "/" + results.length + " dispatched"
+          + (pendingHandlers.length ? ", " + pendingHandlers.length + " channel handlers registered" : ""));
+      };
+      void run().catch((error) => report("· RhoQu: " + String(error)));
       break;
     }
 
@@ -8260,7 +8269,7 @@ async function connect(): Promise<void> {
           // RhoQu `on channel(x) { … }` handlers fire on every matching
           // channel-msg regardless of subscription. Each fires once per
           // delivery; the body runs with `x` bound to the payload.
-          for (const h of rhoquHandlers) {
+          for (const h of [...rhoquHandlers]) {
             if (h.channel !== ch) continue;
             try {
               const cmds = h.trigger(payload);
@@ -8270,8 +8279,8 @@ async function connect(): Promise<void> {
                 // Channel handlers are automatic/asynchronous and have no approval
                 // UI context. Never let inbound messages trigger approval-gated
                 // operations (deploys, key changes, claims, resets, sockets).
-                if (rhoquRequiresDirectInput(c)) {
-                  addMessage("", `  · rhoqu on-handler blocked '${c}': requires direct interactive approval`, "system");
+                if (!allowsRhoQuCommand(c, "channel")) {
+                  addMessage("", `  · rhoqu on-handler blocked '${c}': requires approved local execution`, "system");
                   continue;
                 }
                 try { handleCommand(c); }
@@ -9072,7 +9081,7 @@ function send(): void {
     const cmd = parts[0].toLowerCase();
     const arg = parts.slice(1).join(" ");
     addMessage("", text, "self");
-    const lines = handleCommand(text);
+    const lines = handleCommand(text, { directInput: true });
     if (cmd !== "help" && cmd !== "dump") {
       sessionLog.push({ who: myName || "you", cmd, arg, summary: lines[0] ?? "" });
     }

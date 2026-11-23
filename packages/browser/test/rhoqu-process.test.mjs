@@ -4,10 +4,10 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const bundle = await build({
-  stdin: { contents: 'export { processFromCommands, executeRhoProcess, executeRhoProcessAsync, executeRhoProcessWithPollBindings, executeRhoProcessWithStoreBindingsAsync, countRhoProcessCommands } from "./src/rhoqu-process.ts"; export { transpile, transpileProcess, evaluateRhoQuRuntimeCondition } from "./src/rhoqu.ts";', resolveDir: root, loader: "ts", sourcefile: "rhoqu-process-test-entry.ts" },
+  stdin: { contents: 'export { processFromCommands, executeRhoProcess, executeRhoProcessAsync, executeRhoProcessWithPollBindings, executeRhoProcessWithStoreBindingsAsync, countRhoProcessCommands } from "./src/rhoqu-process.ts"; export { transpile, transpileProcess, transpilePackageProcess, evaluateRhoQuRuntimeCondition } from "./src/rhoqu.ts";', resolveDir: root, loader: "ts", sourcefile: "rhoqu-process-test-entry.ts" },
   bundle: true, format: "esm", platform: "node", write: false,
 });
-const { processFromCommands, executeRhoProcess, executeRhoProcessAsync, executeRhoProcessWithPollBindings, executeRhoProcessWithStoreBindingsAsync, countRhoProcessCommands, transpile, transpileProcess, evaluateRhoQuRuntimeCondition } = await import(
+const { processFromCommands, executeRhoProcess, executeRhoProcessAsync, executeRhoProcessWithPollBindings, executeRhoProcessWithStoreBindingsAsync, countRhoProcessCommands, transpile, transpileProcess, transpilePackageProcess, evaluateRhoQuRuntimeCondition } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
 let pass = 0, fail = 0;
@@ -113,8 +113,8 @@ const parameterCommands = [];
 executeRhoProcess(parameterProcess, command => { parameterCommands.push(command); return []; }, { evaluateWhen: (condition, env) => evaluateRhoQuRuntimeCondition(condition, env, { lemmaNames: [], balances: {}, declaredCurrencies: [], peerCount: 3, connected: true, currentSeq: 4 }) });
 ok("runtime branch keeps process parameters", parameterCommands.join() === "/grant threshold-met");
 // Parallel is a distinct IR node and async branches overlap.
-const parallelIR = transpileProcess("parallel { /async one; /async two; }");
-ok("parallel source lowers to parallel IR", parallelIR.steps.length === 1 && parallelIR.steps[0].kind === "parallel" && parallelIR.steps[0].branches.length === 2);
+const parallelIR = transpileProcess("concurrent { /async one; /async two; }");
+ok("explicit concurrent source lowers to parallel IR", parallelIR.steps.length === 1 && parallelIR.steps[0].kind === "parallel" && parallelIR.steps[0].branches.length === 2);
 let activeAsync = 0, maxAsync = 0;
 const asyncCommands = [];
 const asyncResults = await executeRhoProcessAsync(parallelIR, async command => {
@@ -125,6 +125,12 @@ ok("parallel branches overlap execution", maxAsync === 2);
 ok("parallel results preserve source order", asyncResults.map(r => r.command).join("|") === "/async one|/async two");
 ok("parallel commands dispatched successfully", asyncCommands.length === 2 && asyncResults.every(r => r.ok));
 // Failure semantics: sibling branches and following sequence commands still run; errors stay structured.
+const ordered = await executeRhoProcessAsync(
+  transpileProcess("parallel { /first; /second; }; /third | /fourth;"),
+  command => [command],
+);
+ok("both legacy parallel spellings retain sequential IR", ordered.map(r => r.command).join() === "/first,/second,/third,/fourth" &&
+  transpileProcess("parallel { /first; /second; }; /third | /fourth;").steps.every(node => node.kind === "command"));
 const parallelFailureIR = processFromCommands(["/parallel before"]).steps;
 const failureParallel = { kind: "parallel", branches: [
   { kind: "command", command: "/branch fail" },
@@ -189,11 +195,31 @@ const strict = await executeRhoProcessAsync({kind: "sequence", steps: [
 ok("strict mode refuses bind without correlated receipt", strict[0].ok === false);
 ok("strict unresolved references never dispatch", !strictSeen.includes("/use $item") && !strictSeen.includes("/use $LAST_ID"));
 ok("strict mode does not reinterpret unrelated native macro", strictSeen.includes("/unrelated $nativeMacro"));
+const strictProgram = transpileProcess(
+  "bind item /create ok; bind item /create missing; /use $item; /use $LAST_ID; /literal $$item $$LAST_ID;",
+);
+for (const execute of [executeRhoProcess, executeRhoProcessAsync]) {
+  const seen = [];
+  const results = await execute(strictProgram, command => {
+    seen.push(command);
+    return command === "/create ok" ? { lines: [], id: "exact-1" } : [];
+  }, { strictBindings: true });
+  ok("failed rebind invalidates both references and preserves escaped dollars",
+    seen.join() === "/create ok,/create missing,/literal $item $LAST_ID" &&
+      results[2]?.ok === false && results[3]?.ok === false);
+}
+const lexicalLiteral = transpileProcess('process Literal(x) { /show $x; } Literal("$$LAST_ID");');
+const literal = await executeRhoProcessAsync(lexicalLiteral, command => [command], { strictBindings: true });
+ok("lexical text is not interpreted as a result binding", literal[0]?.ok && literal[0].command === "/show $LAST_ID");
 // Registration must not escape failed lowering or an unevaluated runtime branch.
 for (const [name, compile, source] of [
   ["failed lowering", transpileProcess, "on feedback(msg) { /qucalc ^v; } Missing();"],
   ["runtime branch", transpileProcess, "when connected() { on a(msg) { /qucalc ^v; } } else { on b(msg) { /qucalc ^v; } }"],
   ["runtime branch via process", transpileProcess, "process Subscribe() { on a(msg) { /qucalc ^v; } } when connected() { Subscribe(); }"],
+  ["nested registration", transpileProcess, "on a(x) { on b(y) { /qucalc ^v; }; }"],
+  ["runtime when in handler via process", transpileProcess, "process Check() { when connected() { /qucalc ^v; } } on a(x) { Check(); }"],
+  ["recursive lowering", transpileProcess, "process Again() { Again(); } on a(x) { /qucalc ^v; } Again();"],
+  ["handler lost during package export", transpilePackageProcess, "on a(x) { /qucalc ^v; }"],
   ["failed legacy flatten", transpile, "on feedback(msg) { /qucalc ^v; } when connected() { /qucalc ^v; }"],
 ]) {
   const handlers = [];

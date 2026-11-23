@@ -13,9 +13,9 @@ transpiled by `packages/browser/test/rhoqu-success-recipes.test.mjs`.
 | Limit | Today | Consequence |
 |---|---|---|
 | recipe coverage | recipes use simple ordered commands and handlers | runtime IR features are not demonstrated by these recipes |
-| runtime `parallel` | concurrent local branches | not remote/distributed execution; cross-branch mutation order is undefined |
+| runtime concurrency | explicit `concurrent` blocks | cross-branch mutation order is undefined |
 | runtime `when` | evaluated at execution against a fresh snapshot | not a replay of an immutable event log |
-| bindings | unique IDs from structured results or authoritative-store deltas | display output is never parsed to invent IDs |
+| bindings | IDs returned by the dispatched commands | display output is never parsed to invent IDs |
 | raw pipe operator | ends a raw command | `/poll` options use `/poll add`, not pipe seeds |
 | process packages | validated JSON, canonical hash, provenance, size/depth limits | package import/export does not itself grant execution authority |
 
@@ -134,9 +134,8 @@ channel is `feedback`; the payload binds to `msg`. The old illustrative form
 /rhoqu process weekly-prioritize(goal) { /goal add $goal; /goal review; } weekly-prioritize("Ship docs");
 ```
 
-The dispatcher prints how many commands were transpiled and executes them in
-order. A failed command does not stop later commands. `on` handlers are
-registered instead of executed.
+Review the expanded commands and select **Run program**. The browser dispatches
+these recipes in order and registers `on` handlers after approval.
 
 ## What these recipes do not do
 

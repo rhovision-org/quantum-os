@@ -758,7 +758,8 @@ RhoQu macro language — a thin syntactic surface that compiles to the shipped s
 |---|---|
 | `process name(args…) { body }` | Define a parameterized macro. Calls inline at call site with substituted `$arg`s. |
 | `name(…); name(…);` | Sequential calls (or any sequence of `/commands` separated by `;`). |
-| `s1 \| s2 \| s3` | Parallel composition — each statement is grouped as a parallel block; on a single peer the group still executes sequentially, but the `\|` records "no ordering dependency." |
+| `s1 \| s2 \| s3` or `parallel { s1; s2; }` | Legacy grouping with sequential execution in source order. |
+| `concurrent { s1; s2; }` | Run branches concurrently on this browser and join their results. |
 | `if cond { … } else { … }` | Transpile-time branch. Conditions evaluate against current room state: `bal(@name)`, `peers`, `connected`, `seq`, `hasLemma(@name)`, plus `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `not`. |
 | `on channel(payload) { body }` | Register a `/channel` dispatcher: when an inbound `channel-msg` on `channel` arrives, bind `payload` to its text and execute `body`. Survives across messages until `/rhoqu clear`. |
 | `new name in { body }` | Mint a fresh `cap` named `name`, bind for the lexical body, broadcast as a lemma. |
