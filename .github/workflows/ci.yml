@@ -207,9 +207,6 @@ jobs:
       - name: Success charter test
         run: node packages/browser/test/success-charter.test.mjs
 
-      - name: Charter chain test
-        run: node packages/browser/test/charter-chain.test.mjs
-
       # The success recipes use only the shipped RhoQu subset. This also pins the
       # honest limits: parallel is sequential, $LAST_ID is not bound, and a raw
       # pipe ends a command.

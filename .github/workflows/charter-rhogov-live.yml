@@ -9,6 +9,9 @@ on:
       - "packages/browser/src/charter-chain.js"
       - "packages/browser/src/charter-rhogov.js"
       - "packages/browser/src/success-charter.ts"
+      - "packages/browser/test/charter-chain.test.mjs"
+      - "scripts/qos-cli/rholang-client.mjs"
+      - "scripts/qos-cli/package.json"
       - "scripts/localnet/charter-handoff-live.mjs"
       - "contract/success-charter-1-vector.json"
       - ".github/workflows/charter-rhogov-live.yml"
@@ -47,7 +50,8 @@ jobs:
           pnpm build:wasm
           pnpm install --frozen-lockfile
           npm install --prefix scripts/qos-cli --ignore-scripts --no-audit --no-fund
-          node packages/browser/test/charter-chain.test.mjs
+      - name: Charter chain test
+        run: node packages/browser/test/charter-chain.test.mjs
       - name: Launch REAL disposable Rholo and submit the signed charter
         env:
           QOS_291_DATA: ${{ runner.temp }}/qos291-rnode
