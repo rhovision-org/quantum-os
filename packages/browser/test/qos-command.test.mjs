@@ -18,6 +18,7 @@ const bundle = await build({
   stdin: {
     contents: `
       export { QosCommand } from "./src/qos-command.ts";
+      export { executeRhoProcessAsync } from "./src/rhoqu-process.ts";
       export { newDynCapState } from "./src/dyncap.ts";
     `,
     resolveDir: root,
@@ -29,7 +30,7 @@ const bundle = await build({
   platform: "node",
   write: false,
 });
-const { QosCommand, newDynCapState } = await import(
+const { QosCommand, newDynCapState, executeRhoProcessAsync } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
 
@@ -67,10 +68,12 @@ const alice = await peer("Alice");
 const bob = await peer("Bob");
 
 // --- start -----------------------------------------------------------------
-await alice.cmd.handle("start Alpha | Should we ship?");
+const startReceipt = await alice.cmd.handle("start Alpha | Should we ship?");
 ok("start announces the process", alice.said.some((l) => l.includes("started") && l.includes("Alpha")));
 const id = alice.cmd.list()[0]?.id;
 ok("start tracks a process id", typeof id === "string" && id.startsWith("qos:proc:"), String(id));
+
+ok("the queued command returns the exact process ID", startReceipt === id && typeof startReceipt === "string");
 
 await drain(alice, bob);
 ok("the peer sees the start", bob.said.some((l) => l.includes("started") && l.includes("Alpha")));
@@ -94,6 +97,21 @@ ok("ps names the process and owner", alice.said.some((l) => l.includes("Alpha") 
 await bob.cmd.handle("ps");
 ok("a peer sees the signed owner label", bob.said.some((l) => l.includes("Alpha") && l.includes("Alice")), JSON.stringify(bob.said.slice(-3)));
 
+// --- embedded canonical syscall --------------------------------------------
+await alice.cmd.handle("syscall Alpha | getpid | {}");
+ok("owner syscall emits request and result", alice.outbox.length === 2 && alice.outbox[0].type === "syscall-request" && alice.outbox[1].type === "syscall-result");
+ok("owner syscall reports canonical outcome", alice.said.some(line => line.includes("syscall getpid OK") && line.includes(id)));
+await drain(alice, bob);
+await bob.cmd.handle("syscall Alpha | getpid | {}");
+ok("non-owner syscall refused before emission", bob.outbox.length === 0 && bob.said.some(line => line.includes("only the process owner can issue")));
+await alice.cmd.handle('syscall Alpha | cap_close | {"handle":"h:unknown"}');
+ok("refused syscall is broadcast and reports errno", alice.outbox.length === 2 && alice.outbox[1].payload.outcome.errno === "EBADF" && alice.said.some(line => line.includes("cap_close EBADF")));
+await drain(alice, bob);
+await alice.cmd.handle("status Alpha");
+await bob.cmd.handle("status Alpha");
+ok("both peers display same replayed kernel digest", alice.said.filter(l => l.includes("kernel digest:")).at(-1) === bob.said.filter(l => l.includes("kernel digest:")).at(-1));
+ok("both peers report the two canonical syscall outcomes", bob.said.some(l => l.includes("canonical syscalls: 2")));
+
 // --- suspend ---------------------------------------------------------------
 await alice.cmd.handle("suspend Alpha | resting");
 ok("suspend says so", alice.said.some((l) => l.includes("suspended")));
@@ -102,6 +120,8 @@ await drain(alice, bob);
 av = await alice.cmd.room.view(id);
 bv = await bob.cmd.room.view(id);
 ok("status is suspended", av.status === "suspended", av.status);
+await alice.cmd.handle("ps");
+ok("kernel-replayed ps reflects suspended state", alice.said.some((l) => l.includes("Alpha") && l.includes("suspended")));
 ok("both peers agree after suspend", av.stateDigest === bv.stateDigest, `${av.stateDigest} != ${bv.stateDigest}`);
 
 // --- only the owner can drive it ------------------------------------------
@@ -116,6 +136,8 @@ await drain(alice, bob);
 av = await alice.cmd.room.view(id);
 bv = await bob.cmd.room.view(id);
 ok("status is running again", av.status === "running", av.status);
+await alice.cmd.handle("ps");
+ok("kernel-replayed ps reflects resumed state", alice.said.some((l) => l.includes("Alpha") && l.includes("running")));
 ok("both peers agree after resume", av.stateDigest === bv.stateDigest, `${av.stateDigest} != ${bv.stateDigest}`);
 
 // --- kill alias ------------------------------------------------------------
@@ -147,5 +169,22 @@ ok("resume from terminated is refused", alice.said.some((l) => l.includes("canno
 await alice.cmd.handle("suspend Nope");
 ok("unknown process is named", alice.said.some((l) => l.includes("no process") && l.includes("Nope")));
 
+// Actual QOS dispatcher, two concurrent branch-local bindings; no store diffs.
+const rhoquPeer = await peer("RhoQu");
+let queue = Promise.resolve();
+const correlated = await executeRhoProcessAsync({kind: "parallel", branches: [
+  {kind: "sequence", steps: [{kind:"command", command:"/qos start One", bind:"one"}, {kind:"command", command:"/qos status $one"}]},
+  {kind: "sequence", steps: [{kind:"command", command:"/qos start Two", bind:"two"}, {kind:"command", command:"/qos status $two"}]},
+]}, async command => {
+  // Same serialization as the browser per-room sign queue.
+  const run = queue.then(() => rhoquPeer.cmd.handle(command.slice(4).trim()));
+  queue = run.then(() => undefined, () => undefined);
+  const id = await run;
+  return {lines: [], ...(id ? {id} : {})};
+}, {strictBindings:true});
+const idOne = rhoquPeer.cmd.list().find(p => p.name === "One")?.id;
+const idTwo = rhoquPeer.cmd.list().find(p => p.name === "Two")?.id;
+ok("parallel QOS starts return distinct exact dispatcher receipts", !!idOne && !!idTwo && idOne !== idTwo && correlated[0].id === idOne && correlated[2].id === idTwo);
+ok("branch-local references resolve to own QOS process", correlated[1].command === "/qos status " + idOne && correlated[3].command === "/qos status " + idTwo);
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"}: qos-command.test.mjs — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

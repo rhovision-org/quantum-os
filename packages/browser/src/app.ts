@@ -1,5 +1,5 @@
 import { loadZfa, generateCapability, validateCapability,
-         spectralGap, achievesZfa, isPauliClosed,
+         spectralGap, achievesZfa, achievesZfaPairwise, isPauliClosed,
          classifyCoupling, isPairwiseBalanced, signedAction,
          foldsToScalar, COUPLED_BASELINE } from "./zfa.js";
 import { QOSPeer, DEFAULT_ICE } from "./peer.js";
@@ -18,7 +18,10 @@ import { encryptVault, decryptVault, looksLikeVault } from "./vault.js";
 import { findDiscrepancies, losingPeersIn, normalizeValue,
          SAMPLE_SIZE, PROBE_WINDOW_MS,
          type Observation } from "./probe.js";
-import { transpile as rhoquTranspile, RhoQuError, type RhoQuContext, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
+import { transpileProcess as rhoquTranspileProcess, evaluateRhoQuRuntimeCondition, RhoQuError, type RhoQuContext, type RhoQuRuntimeSnapshot, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
+import { executeRhoProcessAsync, countRhoProcessCommands, type RhoFlatProcess } from "./rhoqu-process.js";
+import { formatRhoQuProcess, openRhoQuPackageUI } from "./rhoqu-package-ui.js";
+import { allowsRhoQuCommand, rhoquCommandProducesId } from "./rhoqu-dispatch.js";
 import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
          tallyApproval, type Poll, type PollMethod, type PollOption } from "./polls.js";
 import { canonLemma, parseRefTokens, parseLemmaDecl, splitLemmaNameArg } from "./lemma-parse.js";
@@ -62,6 +65,10 @@ import { loadConfig as loadNodeConfig, saveConfig as saveNodeConfig, describeCon
          registryUriOf, powerboxUsed, DEFAULT_CONFIG as DEFAULT_NODE_CONFIG,
          readResult, readResultRecord, syncResultNonce, deployAnswer, deployVerdict,
          type NodeConfig } from "./rholang.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { QosMemoryBytes, OpfsMemoryCache, RoomByteCache, objectIdentity } from "./qos-memory-bytes.js";
+import { RholoRegistryMemory } from "./qos-memory-rholo.js";
+import { opfsBlockDriver, zfaDriver, rholoStatusDriver, meshSocketDriver } from "./qos-device-host.js";
 import { qucalcSearch, qucalcSolve,
          type SearchDone as QucalcSearchDone } from "./qucalc-search.js";
 
@@ -895,7 +902,34 @@ function qosCommandFor(ctx: RoomContext): QosCommand | null {
   if (!dyncapState) return null;
   const existing = qosCommands.get(ctx.roomId);
   if (existing) return existing;
+  const journalScope=Array.from(sha256(new TextEncoder().encode(ctx.roomId)),b=>b.toString(16).padStart(2,"0")).join("");
+  const journalKey="qos-journal-v1:"+dyncapState.anchor+":"+journalScope;
+  // The room-scoped origin-private byte cache is independent of the journal.
+  const volatileCache=new RoomByteCache();
   const cmd = new QosCommand({
+    loadJournal:()=>{const saved=localStorage.getItem(journalKey);return saved===null?null:JSON.parse(saved);},
+    loadSnapshot:name=>{const raw=localStorage.getItem(journalKey+":snapshot:"+name);return raw===null?null:JSON.parse(raw);},
+    saveSnapshot:(name,snapshot)=>{localStorage.setItem(journalKey+":snapshot:"+name,JSON.stringify(snapshot));},
+    saveJournal:events=>{
+      const encoded=JSON.stringify(events);
+      if(encoded.length>2*1024*1024)throw new Error("local journal checkpoint limit");
+      localStorage.setItem(journalKey,encoded);
+    },
+    memory:async()=>{
+      const scope=await objectIdentity(new TextEncoder().encode(ctx.roomId));
+      const cache=typeof navigator.storage?.getDirectory==="function"?new OpfsMemoryCache(scope):volatileCache;
+      const config=loadNodeConfig();
+      const network="node/"+await objectIdentity(new TextEncoder().encode(config.url.replace(/\/+$/,"")));
+      const backend=new RholoRegistryMemory(network,config);
+      return {service:new QosMemoryBytes(cache,[backend]),network};
+    },
+    deviceDriver:async descriptor=>{
+      if(descriptor.kind==="opfs-block"&&typeof navigator.storage?.getDirectory==="function")return opfsBlockDriver(journalScope,descriptor.id);
+      if(descriptor.kind==="zfa")return zfaDriver(achievesZfaPairwise,"qos-zfa-pairwise-wrapper");
+      if(descriptor.kind==="rholo-status")return rholoStatusDriver(loadNodeConfig().url);
+      // Never seize an active chat data channel, media track or socket.
+      return null;
+    },
     roomId: ctx.roomId,
     identity: dyncapState,
     transport: {
@@ -920,13 +954,18 @@ function qosCommandFor(ctx: RoomContext): QosCommand | null {
 
 /// Run one QOS command through the signing queue. `/qos`, `/ps`, and `/kill`
 /// share this path so they cannot race a chat broadcast for a dyncap seq.
-function runQosCommand(text: string, label = "/qos"): void {
-  if (!qpeer) { addMessage("", "not connected — connect first", "system"); return; }
-  const qos = qosCommandFor(activeRoom);
-  if (!qos) { addMessage("", "identity not ready yet — try again in a moment", "system"); return; }
-  const run = signQueue.then(() => qos.handle(text));
+function runQosCommand(text: string, label = "/qos", canDispatch?: () => boolean): Promise<string | void> {
+  const room = activeRoom;
+  if (!qpeer) { addMessage("", "not connected — connect first", "system"); return Promise.resolve(); }
+  const qos = qosCommandFor(room);
+  if (!qos) { addMessage("", "identity not ready yet — try again in a moment", "system"); return Promise.resolve(); }
+  const run = signQueue.then(() => {
+    if (canDispatch && !canDispatch()) throw new Error("RhoQu execution context changed before QOS dispatch");
+    return qos.handle(text);
+  });
   signQueue = run.then(() => undefined, () => undefined);
   void run.catch((e) => addMessage("", `⚠ ${label}: ${(e as Error)?.message ?? e}`, "system"));
+  return run;
 }
 
 /// Lazily bind the personal goal store to the current dyncap identity. A
@@ -1604,6 +1643,7 @@ function closeRoomTab(roomId: string): void {
   if (rooms.size <= 1) return;   // never close the last tab
   const ctx = rooms.get(roomId)!;
   // Tear down the connection if any.
+  void qosCommands.get(roomId)?.releaseDevices();
   if (ctx.qpeer) { ctx.qpeer.disconnect(); ctx.qpeer = null; }
   if (ctx.posixNet) { ctx.posixNet.close(); ctx.posixNet = null; }
   rooms.delete(roomId);
@@ -2308,7 +2348,7 @@ function confirmDialog(title: string, body: string, okLabel = "OK"): Promise<boo
     h.style.cssText = "font-weight:600;font-size:15px;margin-bottom:8px";
     const p = document.createElement("div");
     p.textContent = body;
-    p.style.cssText = "font-size:13px;opacity:.85;white-space:pre-wrap;margin-bottom:14px";
+    p.style.cssText = "font-size:13px;opacity:.85;white-space:pre-wrap;margin-bottom:14px;max-height:55vh;overflow:auto";
     const row = document.createElement("div");
     row.style.cssText = "display:flex;gap:8px;justify-content:flex-end";
     const cancel = document.createElement("button");
@@ -3557,7 +3597,7 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
   }
 }
 
-function handleCommand(raw: string): string[] {
+function handleCommand(raw: string, commandOptions: { directInput?: boolean; recordId?: (id: string) => void } = {}): string[] {
   const body = raw.slice(1).trim();
   const parts = body.split(/\s+/);
   const cmd = parts[0].toLowerCase();
@@ -3565,7 +3605,8 @@ function handleCommand(raw: string): string[] {
   // collapsed to single spaces. A multi-line one keeps its lines: joining them
   // would put a rholang `//` comment and the rest of the program on one line,
   // commenting out everything after it.
-  const arg = body.includes("\n")
+  // Shell quoting is semantic: do not collapse internal spaces before lexing.
+  const arg = body.includes("\n") || cmd === "sh" || cmd === "spawn" || cmd === "pkg" || cmd === "svc"
     ? body.slice(cmd.length).replace(/^[^\S\n]+/, "")
     : parts.slice(1).join(" ");
   const lines: string[] = [];
@@ -3629,6 +3670,7 @@ function handleCommand(raw: string): string[] {
         "  /macro [sub]     — write a +command: define · list · show · find · echo (a body of / commands, or of rholang)",
         "  +name <args>     — run a command somebody here defined (++text to send a literal + line)",
         "  /rhoqu <src>     — RhoQu macro: process/new/parallel/call → /commands",
+        "  /fs              — capability-rooted filesystems; /help fs for commands",
         "  /rholang <sub>   — run rholang on rnode: eval · deploy · echo · read · status · config (multi-line, end with a blank line)",
         "  @name in args    — expand named lemma (e.g. /qucalc @major @minor)",
         "  [multi word]      — a spaced name: /lemma [all men are mortal]  ·  cite as @[all men are mortal]",
@@ -3717,7 +3759,8 @@ function handleCommand(raw: string): string[] {
         const question = (bar < 0 ? rest : rest.slice(0, bar)).trim();
         const options = bar < 0 ? [] : rest.slice(bar + 1).split(",").map((s) => s.trim()).filter(Boolean);
         if (!question) { sys("a poll needs a question: /poll new <question> [| seed options] [ranked]"); break; }
-        createPoll(question, options, method);
+        const poll = createPoll(question, options, method);
+        commandOptions.recordId?.(poll.id);
         sys(`poll created: "${question}" [${method}]${options.length ? ` — ${options.length} seed options` : " — open for nominations (use /poll add … or the card's add box)"}`);
         break;
       }
@@ -4716,6 +4759,7 @@ function handleCommand(raw: string): string[] {
       signedBroadcast({ kind: "lemma", name: lemmaName, twists: resolvedTwistsStr, cap: lemCap, who: lemWho, text: lemText });
       saveLemmas();
       renderLemmas();
+      commandOptions.recordId?.(lemmaRefStr(lemmaName));
       break;
     }
 
@@ -5598,6 +5642,7 @@ function handleCommand(raw: string): string[] {
           sys(`  ${note}`);
           if (gTerms) sys(`  terms: ${gTerms}`);
           if (qpeer) qpeer.broadcast({ kind: "note-grant", currency: unit, denomination: N, who });
+          commandOptions.recordId?.(note);
           break;
         }
 
@@ -5706,6 +5751,7 @@ function handleCommand(raw: string): string[] {
           renderNotes();
           sys(`merged ${h1.currency}: ${h1.denomination} + ${h2.denomination} = ${h1.denomination + h2.denomination}`);
           sys(`  ${merged}`);
+          commandOptions.recordId?.(merged);
           break;
         }
 
@@ -5851,6 +5897,7 @@ function handleCommand(raw: string): string[] {
             sys(`cannot reach ${targetName} — data channel not open`);
             break;
           }
+          commandOptions.recordId?.(id);
           sys(`· proposed rendezvous ${shortRdvId(id)} to ${targetName}`);
           sys(`  you give ${giveCur} ${giveN}, get ${getCur} ${getN}`);
           sys(`  expires in ${Math.round(RDV_TIMEOUT_MS / 1000)}s — /rdv abort ${shortRdvId(id)} to cancel`);
@@ -6204,6 +6251,30 @@ function handleCommand(raw: string): string[] {
       break;
     }
 
+    case "top":case "dmesg":case "trace":case "stat":case "snapshot":case "restore":case "branch":
+      runQosCommand(cmd+" "+arg,"/"+cmd);
+      break;
+
+    case "pkg":case "svc":
+      runQosCommand(cmd+" "+arg,"/"+cmd);
+      break;
+
+    case "dev":
+      runQosCommand("dev "+arg,"/dev");
+      break;
+
+    case "fs":
+      runQosCommand("fs "+arg,"/fs");
+      break;
+
+    case "whoami": case "chmod": case "chown":
+      runQosCommand(cmd+" "+arg,"/"+cmd);
+      break;
+
+    case "sh": case "spawn": case "exec": case "wait": case "jobs": case "fg": case "bg":
+      runQosCommand(cmd+" "+arg,"/"+cmd);
+      break;
+
     case "qos":
       runQosCommand(arg);
       break;
@@ -6398,6 +6469,7 @@ function handleCommand(raw: string): string[] {
 
     case "rhoqu": {
       const src = arg.trim();
+      if (src === "package") { openRhoQuPackageUI(dyncapState?.anchor); break; }
       // Subcommands for managing registered on-handlers.
       if (src === "list") {
         if (rhoquHandlers.length === 0) {
@@ -6419,11 +6491,20 @@ function handleCommand(raw: string): string[] {
         sys("usage: /rhoqu <source>");
         sys("  /rhoqu list                          — show registered on-handlers");
         sys("  /rhoqu clear                         — drop all on-handlers in this room");
-        sys("  process P(a, b) { /grant $a; /lemma $b; } P(fork-a, alice);");
-        sys("  if has(@met-bob) { /qucalc @met-bob; } else { /lemma met-bob ^v; }");
+        sys("  /rhoqu package                       — preview, import, or export a process package");
+        sys("  process P(lemma) { /qucalc $lemma; } P(@alice);");
+        sys("  bind pid /qos start Decision; /qos status $pid;");
+        sys("  if has(@met-bob) { /qucalc @met-bob; } else { /qucalc ^v; }");
+        sys("  when peers() >= 2 { /qucalc @shared; } else { /qucalc ^v; } — runtime branch");
+        sys("  concurrent { /qucalc ^v; /qucalc <>; } — concurrent local branches");
         sys("  on forks(msg) { /qucalc @msg; }      — register a channel-msg handler");
         break;
       }
+      if (!commandOptions.directInput) {
+        sys("Enter the RhoQu program directly to review and approve it.");
+        break;
+      }
+      const pendingHandlers: RhoQuOnHandler[] = [];
       const rhoCtx: RhoQuContext = {
         hasLemma:  (name) => lemmaStore.has(canonLemma(name)),
         balance:   (currency) => {
@@ -6438,24 +6519,77 @@ function handleCommand(raw: string): string[] {
         peerCount:    () => peers.size,
         isConnected:  () => qpeer !== null,
         myCurrentSeq: () => dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
-        registerOnHandler: (h) => { rhoquHandlers.push(h); },
+        registerOnHandler: (h) => { pendingHandlers.push(h); },
       };
-      let cmds: string[];
+      let process: RhoFlatProcess;
       try {
-        cmds = rhoquTranspile(src, rhoCtx);
+        process = rhoquTranspileProcess(src, rhoCtx);
       } catch (e) {
         if (e instanceof RhoQuError) sys(`· ${e.message}`);
         else sys(`· rhoqu parse error: ${String(e)}`);
         break;
       }
-      const handlersAfter = rhoquHandlers.length;
-      sys(`· rhoqu transpiled to ${cmds.length} command${cmds.length === 1 ? "" : "s"}`);
-      let executed = 0;
-      for (const c of cmds) {
-        try { runInput(c); executed++; }
-        catch (err) { sys(`· rhoqu error on '${c}': ${String(err)}`); }
-      }
-      sys(`· rhoqu: ${executed} executed${handlersAfter > 0 ? `, ${handlersAfter} on-handler${handlersAfter === 1 ? "" : "s"} active` : ""}`);
+      const commandCount = countRhoProcessCommands(process);
+      sys("RhoQu IR contains " + commandCount + " commands; runtime branches evaluate at execution.");
+      const runtimeSnapshot = (): RhoQuRuntimeSnapshot => {
+        const balances: Record<string, number> = Object.create(null);
+        for (const note of noteStore.values()) balances[note.currency] = (balances[note.currency] ?? 0) + note.denomination;
+        return {
+          lemmaNames: [...lemmaStore.keys()].map(canonLemma),
+          balances,
+          declaredCurrencies: [...knownCurrencies.values()].map((entry) => entry.currency),
+          peerCount: peers.size,
+          connected: qpeer !== null,
+          currentSeq: dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
+        };
+      };
+      const executionRoom = activeRoom;
+      const executionAnchor = dyncapState?.anchor;
+      const executionPeer = qpeer;
+      const canDispatch = () =>
+        activeRoom === executionRoom && dyncapState?.anchor === executionAnchor && qpeer === executionPeer;
+      const report = (text: string): void => {
+        if (rooms.get(executionRoom.roomId) !== executionRoom) return;
+        const visibleRoom = activeRoom;
+        setActiveRoom(executionRoom);
+        try { addMessage("", text, "system"); } finally { setActiveRoom(visibleRoom); }
+      };
+      const run = async (): Promise<void> => {
+        const plan = formatRhoQuProcess(process);
+        const handlerSource = pendingHandlers.length ? "\n\nChannel handler source:\n" + src : "";
+        if (!(await confirmDialog("Review RhoQu program", plan + handlerSource, "Run program"))) return;
+        if (!canDispatch()) throw new Error("RhoQu execution context changed");
+        rhoquHandlers.push(...pendingHandlers);
+        const results = await executeRhoProcessAsync(process, async (command, { binding }) => {
+          if (!canDispatch()) throw new Error("RhoQu execution context changed");
+          if (!allowsRhoQuCommand(command, "approved")) {
+            throw new Error("command requires direct entry outside RhoQu");
+          }
+          if (binding && !rhoquCommandProducesId(command)) {
+            throw new Error("this command does not return a bindable ID");
+          }
+          if (/^\/\s*qos(?:\s|$)/i.test(command)) {
+            const id = await runQosCommand(command.replace(/^\/\s*qos\s*/i, ""), "/qos", canDispatch);
+            return id ? { lines: [], id } : { lines: [] };
+          }
+          let id: string | undefined;
+          const lines = handleCommand(command.trim(), { recordId: (value) => { id = value; } });
+          return id ? { lines, id } : { lines };
+        }, {
+          strictBindings: true,
+          evaluateWhen: (condition, env) => {
+            if (!canDispatch()) throw new Error("RhoQu execution context changed");
+            return evaluateRhoQuRuntimeCondition(condition, env, runtimeSnapshot());
+          },
+        });
+        const dispatched = results.filter((result) => result.ok).length;
+        for (const result of results) {
+          if (!result.ok) report("· RhoQu: " + result.error);
+        }
+        report("· RhoQu: " + dispatched + "/" + results.length + " dispatched"
+          + (pendingHandlers.length ? ", " + pendingHandlers.length + " channel handlers registered" : ""));
+      };
+      void run().catch((error) => report("· RhoQu: " + String(error)));
       break;
     }
 
@@ -6758,6 +6892,7 @@ function handleCommand(raw: string): string[] {
         const restored = await deserializeState(parsed.state, activeRoom.roomId);
         if (!restored) { addMessage("", "recovery string is corrupt (bad seed)", "system"); return; }
         dyncapState = restored;
+        await Promise.all([...qosCommands.values()].map(q=>q.releaseDevices()));
         qosCommands.clear();   // old controllers hold the previous identity
         goalStore = null; goalStoreAnchor = "";   // personal goals are identity-scoped
         saveDyncap();
@@ -6953,6 +7088,27 @@ function handleCommand(raw: string): string[] {
           finally { setActiveRoom(prev); }
         };
       };
+
+      // Explicitly surrender a socket already created by the user, not an
+      // active chat transport. After adoption the legacy socket surface no
+      // longer retains access to it.
+      if(ssub==="device"){
+        const [_,conn,process,handle,...extra]=sParts;
+        const socket=socketConns.get(conn),controller=qosCommandFor(cmdCtx);
+        if(!socket||!controller||!process||!handle||extra.length){sys("usage: /socket device <connection-id> <process> <open-mesh-session>");break;}
+        const report=(message:string)=>{
+          const prev=activeRoom;setActiveRoom(cmdCtx);
+          try{addMessage("",message,"system");}finally{setActiveRoom(prev);}
+        };
+        const connections=socketConns;
+        void controller.attachDevice(process,handle,"mesh-socket",()=>{
+          if(connections.get(conn)!==socket)throw Error("socket no longer available");
+          connections.delete(conn);socket.onData=null;socket.onClose=null;
+          return meshSocketDriver(socket);
+        }).then(adopted=>report(adopted?"socket transferred to device session":"device transfer refused"),
+          ()=>report("device transfer failed"));
+        break;
+      }
 
       if (ssub === "listen") {
         const port = Number(sParts[1]);
@@ -7637,6 +7793,7 @@ async function connect(): Promise<void> {
     return;
   }
   if (qpeer) {
+    await qosCommands.get(activeRoom.roomId)?.releaseDevices();
     qpeer.disconnect();
     setQpeer(null);
     posixNet?.close();
@@ -8352,13 +8509,20 @@ async function connect(): Promise<void> {
           // RhoQu `on channel(x) { … }` handlers fire on every matching
           // channel-msg regardless of subscription. Each fires once per
           // delivery; the body runs with `x` bound to the payload.
-          for (const h of rhoquHandlers) {
+          for (const h of [...rhoquHandlers]) {
             if (h.channel !== ch) continue;
             try {
               const cmds = h.trigger(payload);
               if (cmds.length === 0) continue;
               addMessage("", `  · rhoqu on ${ch}(${h.binding}=${payload}) → ${cmds.length} cmd${cmds.length === 1 ? "" : "s"}`, "system");
               for (const c of cmds) {
+                // Channel handlers are automatic/asynchronous and have no approval
+                // UI context. Never let inbound messages trigger approval-gated
+                // operations (deploys, key changes, claims, resets, sockets).
+                if (!allowsRhoQuCommand(c, "channel")) {
+                  addMessage("", `  · rhoqu on-handler blocked '${c}': requires approved local execution`, "system");
+                  continue;
+                }
                 try { handleCommand(c); }
                 catch (err) { addMessage("", `  · rhoqu trigger error: ${String(err)}`, "system"); }
               }
@@ -9157,7 +9321,7 @@ function send(): void {
     const cmd = parts[0].toLowerCase();
     const arg = parts.slice(1).join(" ");
     addMessage("", text, "self");
-    const lines = handleCommand(text);
+    const lines = handleCommand(text, { directInput: true });
     if (cmd !== "help" && cmd !== "dump") {
       sessionLog.push({ who: myName || "you", cmd, arg, summary: lines[0] ?? "" });
     }

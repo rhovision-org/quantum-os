@@ -12,7 +12,9 @@ const root = join(here, "..");
 const bundle = await build({
   stdin: {
     contents: `
-      export { transpile, RhoQuError } from "./src/rhoqu.ts";
+      export { transpile, transpileProcess, RhoQuError } from "./src/rhoqu.ts";
+      export { executeRhoProcessAsync } from "./src/rhoqu-process.ts";
+      export { allowsRhoQuCommand } from "./src/rhoqu-dispatch.ts";
       export { SUCCESS_RECIPES, recipeById } from "./src/success-recipes.ts";
     `,
     resolveDir: root,
@@ -24,7 +26,7 @@ const bundle = await build({
   platform: "node",
   write: false,
 });
-const { transpile, RhoQuError, SUCCESS_RECIPES, recipeById } = await import(
+const { transpile, transpileProcess, executeRhoProcessAsync, allowsRhoQuCommand, RhoQuError, SUCCESS_RECIPES, recipeById } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
 
@@ -61,7 +63,13 @@ for (const recipe of SUCCESS_RECIPES) {
   catch (e) { ok(`${recipe.id} transpiles`, false, e?.message ?? String(e)); continue; }
   ok(`${recipe.id} transpiles`, cmds.length > 0, JSON.stringify(cmds));
   ok(`${recipe.id} emits only /commands`, cmds.every((x) => x.startsWith("/")), JSON.stringify(cmds));
-  ok(`${recipe.id} has a title and notes`, !!recipe.title && !!recipe.notes);
+  const typed = await executeRhoProcessAsync(transpileProcess(recipe.source, ctx(3).value), command => {
+    if (!allowsRhoQuCommand(command, "approved")) throw new Error("browser policy rejected recipe command");
+    return [];
+  }, { strictBindings: true });
+  ok(recipe.id + " runs in the browser's approved command path",
+    typed.every(result => result.ok) && JSON.stringify(typed.map(result => result.command)) === JSON.stringify(cmds));
+  ok(recipe.id + " has a title and notes", !!recipe.title && !!recipe.notes);
 }
 
 // --- personal prioritization ---------------------------------------------
@@ -105,6 +113,15 @@ ok("feedback loop binds the payload", fc.handlers[0]?.binding === "msg", JSON.st
 const triggered = fc.handlers[0]?.trigger("anything");
 ok("handler trigger emits its body", Array.isArray(triggered) && triggered.includes("/lemma feedback-received"), JSON.stringify(triggered));
 ok("feedback loop also sends a ready line", loop.some((c) => c.includes("Ready for feedback")));
+ok("authorized feedback declaration works in a channel handler",
+  triggered.every(command => allowsRhoQuCommand(command, "channel")));
+for (const command of ["/note pass", "/rdv accept", "/gov chain install", "/script /lemma name", "/qos start unauthorised", "/channel chain install"]) {
+  ok("channel handler refuses " + command.split(" ").slice(0, 2).join(" "), !allowsRhoQuCommand(command, "channel"));
+}
+ok("approved workflow keeps chain, transfers and wrapper commands outside RhoQu",
+  ["/gov chain install", "/channel chain install", "/note pass", "/script /lemma name", "/qos shell"].every(
+    command => !allowsRhoQuCommand(command, "approved"),
+  ));
 
 // --- honest documentation of current limits ------------------------------
 const parallel = transpile("parallel { /goal add A; /goal add B; }", ctx(1).value);

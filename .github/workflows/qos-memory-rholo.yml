@@ -1,0 +1,48 @@
+name: QOS real Rholo memory readback (#279)
+on:
+  push:
+    branches: [feat/qos-kernel-memory-279]
+  pull_request:
+    branches: [main, work, feat/qos-kernel-scheduler-278]
+    paths:
+      - "packages/browser/src/qos-memory*.ts"
+      - "packages/browser/test/qos-memory-rholo-ci.mjs"
+      - "scripts/localnet/qos-memory-ci.py"
+      - "scripts/localnet/run-node.sh"
+      - "bin/rnode"
+      - ".github/workflows/qos-memory-rholo.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-rholo-memory:
+    name: Disposable Rholo publish and independent cache-loss readback
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm build:wasm
+      - run: pnpm install --frozen-lockfile
+      - name: Real registry publication and readback
+        run: python3 scripts/localnet/qos-memory-ci.py
+      - name: Upload verified evidence
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qos279-real-rholo-evidence
+          path: |
+            qos279-rholo-evidence.json
+            qos279-rholo-evidence.SHA256SUMS
+          if-no-files-found: error
