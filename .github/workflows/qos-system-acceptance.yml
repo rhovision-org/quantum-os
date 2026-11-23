@@ -100,4 +100,3 @@ jobs:
             qos${{ matrix.issue }}-rholo-evidence.json
             qos${{ matrix.issue }}-rholo-evidence.SHA256SUMS
           if-no-files-found: error
-

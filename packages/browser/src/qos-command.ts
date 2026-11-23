@@ -150,14 +150,21 @@ export class QosCommand {
   }
 
   /** Handle the argument after `/qos` (no leading command). */
-  async handle(raw: string): Promise<void> {
-    const run = this.commandQueue.then(async () => {await this.restored;try{await this.dispatch(raw);}finally{await this.reconcileDevices();}});
+  async handle(raw: string): Promise<string | void> {
+    const text = raw.trim();
+    const run = this.commandQueue.then(async () => {
+      await this.restored;
+      try {
+        return await this.dispatch(text);
+      } finally {
+        await this.reconcileDevices();
+      }
+    });
     this.commandQueue = run.then(() => undefined, () => undefined);
     return run;
   }
 
-  private async dispatch(raw: string): Promise<void> {
-    const text = raw.trim();
+  private async dispatch(text: string): Promise<string | void> {
     const sub = (text.split(/\s+/, 1)[0] || "status").toLowerCase();
     const rest = text.slice(sub.length).trim();
 
@@ -206,7 +213,7 @@ export class QosCommand {
     }
   }
 
-  private async start(rest: string): Promise<void> {
+  private async start(rest: string): Promise<string | void> {
     const [namePart, ...questionParts] = rest.split("|");
     const name = namePart.trim();
     if (!name) {
@@ -224,6 +231,7 @@ export class QosCommand {
     this.saveJournal();
     const view = await this.room.view(started.processId);
     this.host.say(`🧩 started **${name}** — ${view.status} · ${started.processId} · digest ${short(view.stateDigest)}`);
+    return started.processId;
   }
 
   private async status(rest: string): Promise<void> {
