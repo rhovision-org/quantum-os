@@ -1,0 +1,54 @@
+name: QOS browser shell acceptance (#281)
+on:
+  push:
+    branches: [feat/qos-kernel-shell-281]
+  pull_request:
+    branches: [main, work, feat/qos-kernel-vfs-280]
+    paths:
+      - "packages/browser/src/qos-*.ts"
+      - "packages/browser/src/app.ts"
+      - "packages/browser/src/palette.ts"
+      - "packages/browser/test/qos-shell-opfs-ci.mjs"
+      - "scripts/localnet/qos-vfs-opfs-ci.py"
+      - ".github/workflows/qos-shell-browser.yml"
+permissions:
+  contents: read
+jobs:
+  browser-shell:
+    name: Chromium shell pipeline, OPFS and in-flight job reload
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm build:wasm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:signaling
+      - name: Install disposable Chromium
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qos281-playwright" --no-save --no-package-lock playwright@1.65.1
+          "$RUNNER_TEMP/qos281-playwright/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Actual browser shell and job reload
+        env:
+          QOS_PLAYWRIGHT_MODULE: ${{ runner.temp }}/qos281-playwright/node_modules/playwright/index.mjs
+        run: python3 scripts/localnet/qos-vfs-opfs-ci.py shell
+      - name: Upload verified browser evidence
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qos281-browser-shell
+          path: |
+            qos281-opfs-evidence.json
+            qos281-opfs-evidence.SHA256SUMS
+          if-no-files-found: error

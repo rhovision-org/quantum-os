@@ -1,0 +1,58 @@
+name: QOS cross-runtime boot acceptance (#286)
+on:
+  push:
+    branches: [feat/qos-native-boot-286]
+  pull_request:
+    branches: [main, work, feat/qos-kernel-recovery-285]
+    paths:
+      - "packages/browser/src/qos-*.ts"
+      - "packages/browser/src/app.ts"
+      - "packages/browser/src/zfa.ts"
+      - "scripts/qos-cli/**"
+      - "packages/browser/src/palette.ts"
+      - "packages/browser/test/qos-boot-opfs-ci.mjs"
+      - "scripts/localnet/qos-vfs-opfs-ci.py"
+      - ".github/workflows/qos-boot-browser.yml"
+permissions:
+  contents: read
+jobs:
+  cross-runtime:
+    name: Chromium and headless Node/WASM boot parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm build:wasm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:signaling
+      - name: Install disposable Chromium
+        run: |
+          npm install --prefix "$RUNNER_TEMP/qos286-playwright" --no-save --no-package-lock playwright@1.65.1
+          "$RUNNER_TEMP/qos286-playwright/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Install existing headless peer dependencies
+        run: npm install --prefix scripts/qos-cli --ignore-scripts --no-package-lock
+      - name: Actual browser and Node boot witness
+        env:
+          QOS_PLAYWRIGHT_MODULE: ${{ runner.temp }}/qos286-playwright/node_modules/playwright/index.mjs
+        run: python3 scripts/localnet/qos-vfs-opfs-ci.py boot
+      - name: Upload verified browser evidence
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qos286-cross-runtime
+          path: |
+            qos286-opfs-evidence.json
+            qos286-opfs-evidence.SHA256SUMS
+          if-no-files-found: error

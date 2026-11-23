@@ -2,7 +2,7 @@
 ///
 /// The gate's claim is that the room primitives are enough for long-lived,
 /// named processes: a process is a capability-guarded continuation over the
-/// room's ZFA process space, every lifecycle step is a signed event, and any
+/// room's ZFA process space, every lifecycle step is a dyncap-attributed event, and any
 /// peer can recompute the orchestration result from the same envelopes.
 ///
 /// This module is deliberately **pure and transport-free**:
@@ -44,7 +44,7 @@ export { optionId };
 export const QOS_EVENT_SCHEMA = "qos.event/1";
 
 /// The finite event vocabulary. There is no open-ended `kind` payload: every
-/// transition the gate names has a type here, and adding one is a schema bump.
+/// transition the gate names has a type here. The #317 extension requires coordinated client support; older decoders reject new types.
 export const QOS_EVENT_TYPES = [
   "process-start",
   "process-suspend",
@@ -57,6 +57,8 @@ export const QOS_EVENT_TYPES = [
   "poll-close",
   "lemma",
   "anchor",
+  "syscall-request",
+  "syscall-result",
 ] as const;
 
 export type QosEventType = (typeof QOS_EVENT_TYPES)[number];
@@ -130,7 +132,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function canonicalize(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map(canonicalize);
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = Object.create(null);
   for (const key of Object.keys(value as Record<string, unknown>).sort()) {
     out[key] = canonicalize((value as Record<string, unknown>)[key]);
   }
@@ -256,7 +258,7 @@ export function isCapabilityAttenuated(parentToken: string, childToken: string):
 export function newRootScope(process: string): QosCapabilityScope {
   return {
     process,
-    events: ["nomination", "ballot"],
+    events: ["nomination", "ballot", "syscall-request", "syscall-result"],
     canLifecycle: true,
     canGrant: true,
     canClose: true,
@@ -278,7 +280,7 @@ export function newParticipantScope(
   };
 }
 
-function parseScope(value: unknown): QosCapabilityScope | null {
+export function parseQosCapabilityScope(value: unknown): QosCapabilityScope | null {
   if (!isRecord(value)) return null;
   if (typeof value.process !== "string" || value.process.length === 0) return null;
   if (!Array.isArray(value.events)) return null;
@@ -415,6 +417,7 @@ export function decodeQosEvent(json: string): QosEvent | null {
 /// `(process, source)` so the hash chain is source-local and independent of
 /// arrival order: a peer that receives the whole set can verify every link.
 export class QosEventSigner {
+  private pending: Promise<unknown> = Promise.resolve();
   private readonly lastByProcess = new Map<string, string>();
 
   constructor(
@@ -430,6 +433,16 @@ export class QosEventSigner {
     capability: string,
     grant: string,
     type: QosEventType,
+    payload: Record<string, unknown>,
+  ): Promise<QosEvent> {
+    const snapshot = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+    const result = this.pending.then(() => this.signOne(process, capability, grant, type, snapshot));
+    this.pending = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private async signOne(
+    process: string, capability: string, grant: string, type: QosEventType,
     payload: Record<string, unknown>,
   ): Promise<QosEvent> {
     if (!validateCapability(capability)) throw new Error("sign: capability is not a valid ZFA token");
@@ -486,11 +499,25 @@ export class QosEventLog {
   private readonly hashBySourceSeq = new Map<string, string>();
   private readonly chains = new Map<string, ChainEntry>();
   private readonly rejected: { hash: string; type: string; reason: string }[] = [];
-  readonly forkedSources = new Set<string>();
+  private readonly quarantined = new Set<string>();
+  private readonly forkEvidence = new Map<string, QosEvent>();
+  private pending: Promise<unknown> = Promise.resolve();
+
+  get forkedSources(): ReadonlySet<string> { return new Set(this.quarantined); }
 
   constructor(readonly roomId: string) {}
 
   async ingest(event: QosEvent): Promise<IngestResult> {
+    // Capture the wire value before yielding; never retain caller-owned data.
+    let snapshot: QosEvent;
+    try { snapshot = JSON.parse(JSON.stringify(event)) as QosEvent; }
+    catch { return this.reject(event, "event is not JSON serializable"); }
+    const result = this.pending.then(() => this.ingestOne(snapshot));
+    this.pending = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private async ingestOne(event: QosEvent): Promise<IngestResult> {
     const shape = validateQosEventShape(event);
     if (!shape.ok) return this.reject(event, shape.reason ?? "invalid shape");
 
@@ -508,9 +535,12 @@ export class QosEventLog {
     const sourceSeq = `${event.source}\u0000${event.seq}`;
     const existing = this.hashBySourceSeq.get(sourceSeq);
     if (existing !== undefined) {
-      if (existing === event.hash) return { ok: true, duplicate: true };
-      this.forkedSources.add(event.source);
-      return { ok: false, fork: true, reason: "source+seq already carries a different event" };
+      const accepted = this.eventsByHash.get(existing)!;
+      if (existing === event.hash && accepted.dyncap.witness === event.dyncap.witness)
+        return { ok: true, duplicate: true };
+      this.quarantined.add(event.source);
+      this.forkEvidence.set(event.hash + ":" + event.dyncap.witness, event);
+      return { ok: false, fork: true, reason: "source+seq already carries a different event or witness" };
     }
 
     // Dyncap is a set of (seq, witness) links, not an ordered stream: an event
@@ -522,11 +552,13 @@ export class QosEventLog {
     const verified = await verifyEnvelope(prior, this.roomId, event as unknown as Record<string, unknown>, event.dyncap);
     if (verified.kind === "invalid") return this.reject(event, verified.reason);
     if (verified.kind === "anchor-mismatch") {
-      this.forkedSources.add(event.source);
+      this.forkEvidence.set(event.hash + ":" + event.dyncap.witness, event);
+      this.quarantined.add(event.source);
       return { ok: false, fork: true, reason: "anchor mismatch" };
     }
     if (verified.kind === "fork") {
-      this.forkedSources.add(event.source);
+      this.forkEvidence.set(event.hash + ":" + event.dyncap.witness, event);
+      this.quarantined.add(event.source);
       return { ok: false, fork: true, reason: `fork at seq ${verified.seq}` };
     }
     if (verified.kind === "replay") {
@@ -554,9 +586,18 @@ export class QosEventLog {
   /// Accepted events in canonical order. Events from a forked source remain
   /// out: `forkedSources` is the quarantine list.
   events(): QosEvent[] {
-    return [...this.eventsByHash.values()]
-      .filter((event) => !this.forkedSources.has(event.source))
-      .sort(compareEvents);
+    const accepted = [...this.eventsByHash.values()]
+      .filter((event) => !this.quarantined.has(event.source));
+    // The journal's public view is causal, not merely tuple-sorted. Consumers
+    // that need diagnostics must call canonicalEventOrder explicitly; this view
+    // remains total and deterministic for partial/offline logs.
+    return JSON.parse(JSON.stringify(canonicalEventOrder(accepted).ordered)) as QosEvent[];
+  }
+
+  /** Full admission evidence, including quarantined branches and partial dependencies.
+   * Preserve insertion order of accepted events before fork evidence. */
+  checkpointEvents():QosEvent[]{
+    return JSON.parse(JSON.stringify([...this.eventsByHash.values(),...this.forkEvidence.values()])) as QosEvent[];
   }
 
   eventsFor(process: string): QosEvent[] {
@@ -569,7 +610,11 @@ export class QosEventLog {
 
   async mergeFrom(other: QosEventLog): Promise<IngestResult[]> {
     const out: IngestResult[] = [];
-    for (const event of other.events()) out.push(await this.ingest(event));
+    if (other.roomId !== this.roomId) throw new Error("cannot merge a different room");
+    // Relay both verified-envelope branches, not an unauthenticated quarantine flag.
+    // The receiver independently detects the conflict under the same TOFU model.
+    const evidence = [...other.eventsByHash.values(), ...other.forkEvidence.values()];
+    for (const event of evidence.sort(compareEvents)) out.push(await this.ingest(event));
     return out;
   }
 }
@@ -584,10 +629,161 @@ export function compareEvents(a: QosEvent, b: QosEvent): number {
     compareStrings(a.hash, b.hash);
 }
 
-/// Canonical event order used by every deterministic consumer. Arrival order
-/// never matters; source/seq/hash do.
+export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier" | "memory-frontier" | "vfs-version" | "shell-version" | "proxy-version" | "observed-receipt" | "device-ticket" | "init-version";
+export interface QosDependency { hash: string; kind: QosDependencyKind }
+/** Only schema-defined references are causal, never arbitrary payload strings. */
+export function eventDependencies(event: QosEvent): QosDependency[] {
+  const refs: QosDependency[] = [];
+  if (event.prev !== "genesis") refs.push({ hash: event.prev, kind: "prev" });
+  if (event.grant !== "root") refs.push({ hash: event.grant, kind: "grant" });
+  if (event.type === "syscall-result" && event.payload?.schema === "qos.syscall/1" &&
+      typeof event.payload.requestHash === "string" && HEX64.test(event.payload.requestHash)) {
+    refs.push({ hash: event.payload.requestHash, kind: "request" });
+  }
+  if (event.type === "syscall-request" && event.payload?.schema === "qos.syscall/1" &&
+      typeof event.payload.op === "string" && ["cap_derive", "cap_close", "cap_revoke", "signal_grant", "signal", "proc_suspend", "proc_resume", "mem_put", "mem_get", "mem_stat", "mem_ref", "mem_drop", "mem_link", "mem_unlink"].includes(event.payload.op) &&
+      isRecord(event.payload.args) && typeof event.payload.args.handleVersion === "string" &&
+      HEX64.test(event.payload.args.handleVersion)) {
+    refs.push({ hash: event.payload.args.handleVersion, kind: "handle-version" });
+  }
+  if (event.type === "syscall-request" && event.payload?.schema === "qos.syscall/1" &&
+      (["signal","signal_grant","proc_suspend","proc_resume"].includes(event.payload.op as string)) &&
+      isRecord(event.payload.args) && typeof event.payload.args.targetVersion === "string" &&
+      HEX64.test(event.payload.args.targetVersion)) {
+    refs.push({ hash: event.payload.args.targetVersion, kind: "process-version" });
+  }
+  if (event.type === "syscall-request" && event.payload?.schema === "qos.syscall/1" &&
+      typeof event.payload.op === "string" && ["sched_step", "yield", "sleep", "sched_priority", "sched_wake"].includes(event.payload.op) &&
+      isRecord(event.payload.args) && Array.isArray(event.payload.args.scheduleFrontier) &&
+      event.payload.args.scheduleFrontier.length <= 4096) {
+    for (const hash of event.payload.args.scheduleFrontier) if (typeof hash === "string" && HEX64.test(hash))
+      refs.push({hash,kind:"scheduler-frontier"});
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&
+     typeof event.payload.op==="string"&&["mem_put","mem_get","mem_stat","mem_ref","mem_drop","mem_link","mem_unlink"].includes(event.payload.op)&&isRecord(event.payload.args)){
+    const args=event.payload.args;
+    if(Array.isArray(args.memoryFrontier)&&args.memoryFrontier.length<=4096)
+      for(const hash of args.memoryFrontier)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"memory-frontier"});
+    if((event.payload.op==="mem_link"||event.payload.op==="mem_unlink")&&typeof args.targetHandleVersion==="string"&&HEX64.test(args.targetHandleVersion))
+      refs.push({hash:args.targetHandleVersion,kind:"handle-version"});
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&
+     typeof event.payload.op==="string"&&["fs_init","fs_stat","fs_ls","fs_open","fs_put","fs_mkdir","fs_unlink","fs_rename","fs_mount","fs_unmount","fs_grant"].includes(event.payload.op)&&isRecord(event.payload.args)){
+    const args=event.payload.args;
+    for(const key of ["handleVersion","targetHandleVersion","targetVersion","rootVersion","sourceVersion"]){
+      const hash=args[key];
+      if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:key==="targetVersion"?"process-version":key.endsWith("Version")&&(key==="rootVersion"||key==="sourceVersion")?"vfs-version":"handle-version"});
+    }
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&
+     typeof event.payload.op==="string"&&["sh_config","sh_spawn","sh_control","sh_step","sh_finish","sh_wait"].includes(event.payload.op)&&isRecord(event.payload.args)){
+    const args=event.payload.args;
+    if(event.payload.op==="sh_finish"&&Array.isArray(args.memoryFrontier)&&args.memoryFrontier.length<=4096)
+      for(const hash of args.memoryFrontier)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"memory-frontier"});
+    for(const key of ["handleVersion","namespaceVersion","inputVersion","appendVersion","rootVersion","shellVersion","jobVersion","targetVersion"]){
+      const hash=args[key];if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:key==="rootVersion"?"vfs-version":key==="targetVersion"?"process-version":key==="shellVersion"||key==="jobVersion"?"shell-version":"handle-version"});
+    }
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&typeof event.payload.op==="string"&&
+     ["id_cap","id_chmod","id_chown","proxy_create","proxy_set","proxy_use"].includes(event.payload.op)&&isRecord(event.payload.args)){
+    const args=event.payload.args;
+    for(const key of ["authorityFrontier","observedUses"])
+      if(Array.isArray(args[key])&&args[key].length<=4096)for(const hash of args[key])if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:key==="observedUses"?"proxy-version":"handle-version"});
+    for(const key of ["handleVersion","targetVersion","proxyVersion","caretakerVersion","resourceVersion","rootVersion","targetProcessVersion","dataVersion"]){
+      const hash=args[key];if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:key==="proxyVersion"?"proxy-version":key==="rootVersion"?"vfs-version":["targetVersion","caretakerVersion","targetProcessVersion"].includes(key)?"process-version":"handle-version"});
+    }
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&
+    Array.isArray(event.payload.observed)&&event.payload.observed.length<=4096){
+    for(const hash of event.payload.observed)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"observed-receipt"});
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&typeof event.payload.op==="string"&&
+     ["dev_define","dev_grant","dev_open","dev_close","dev_list","dev_request","dev_observe"].includes(event.payload.op)&&isRecord(event.payload.args)){
+    const args=event.payload.args;
+    for(const key of ["handleVersion","targetVersion","ticketVersion"]){
+      const hash=args[key];if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:key==="ticketVersion"?"device-ticket":key==="targetVersion"?"process-version":"handle-version"});
+    }
+    if(Array.isArray(args.authorityFrontier)&&args.authorityFrontier.length<=4096)
+      for(const hash of args.authorityFrontier)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"handle-version"});
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&typeof event.payload.op==="string"&&
+     ["pkg_install","pkg_list","pkg_remove","svc_boot","svc_list","svc_status","svc_start","svc_stop","svc_restart","svc_health"].includes(event.payload.op)&&isRecord(event.payload.args)){
+    const a=event.payload.args;
+    for(const key of ["handleVersion","initVersion"])if(typeof a[key]==="string"&&HEX64.test(a[key] as string))refs.push({hash:a[key] as string,kind:key==="initVersion"?"init-version":"handle-version"});
+    if(Array.isArray(a.authorityFrontier)&&a.authorityFrontier.length<=4096)for(const hash of a.authorityFrontier)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"handle-version"});
+    if(Array.isArray(a.bindings)&&a.bindings.length<=8)for(const b of a.bindings)if(isRecord(b)&&typeof b.version==="string"&&HEX64.test(b.version))refs.push({hash:b.version,kind:"handle-version"});
+  }
+  return refs;
+}
+
+/**
+ * Causal canonicalization. `prev`, non-root `grant`, request and handle-version are explicit hash
+ * dependencies. They are topologically ordered before stable tie-breaking; the
+ * `(source, seq, hash)` tuple is used only among currently-ready events.
+ * Missing references and cycles are returned as deterministic diagnostics rather
+ * than silently being treated as causal edges. Other object kinds need their own schema-defined references.
+ */
+export function canonicalEventOrder(events: QosEvent[]): {
+  ordered: QosEvent[];
+  missingDependencies: { eventHash: string; dependencyHash: string; kind: QosDependencyKind }[];
+  cyclicHashes: string[];
+} {
+  const unique = new Map<string, QosEvent>();
+  for (const event of events) if (!unique.has(event.hash)) unique.set(event.hash, event);
+  const nodes = [...unique.values()];
+  const byHash = unique;
+  const deps = new Map<string, Set<string>>();
+  const children = new Map<string, Set<string>>();
+  const missingDependencies: { eventHash: string; dependencyHash: string; kind: QosDependencyKind }[] = [];
+  for (const event of nodes) {
+    const required = new Set<string>();
+    const refs = eventDependencies(event);
+    for (const ref of refs) {
+      if (!byHash.has(ref.hash)) {
+        missingDependencies.push({ eventHash: event.hash, dependencyHash: ref.hash, kind: ref.kind });
+        continue;
+      }
+      if (ref.hash === event.hash) { required.add(ref.hash); continue; }
+      required.add(ref.hash);
+      const childSet = children.get(ref.hash) ?? new Set<string>();
+      childSet.add(event.hash);
+      children.set(ref.hash, childSet);
+    }
+    deps.set(event.hash, required);
+  }
+  missingDependencies.sort((a, b) => compareEvents(byHash.get(a.eventHash)!, byHash.get(b.eventHash)!) || compareStrings(a.kind, b.kind) || compareStrings(a.dependencyHash, b.dependencyHash));
+  const ready = nodes.filter((e) => (deps.get(e.hash)?.size ?? 0) === 0).sort(compareEvents);
+  const ordered: QosEvent[] = [];
+  const emitted = new Set<string>();
+  while (ready.length) {
+    const event = ready.shift()!;
+    if (emitted.has(event.hash)) continue;
+    emitted.add(event.hash);
+    ordered.push(event);
+    for (const childHash of children.get(event.hash) ?? []) {
+      const childDeps = deps.get(childHash);
+      childDeps?.delete(event.hash);
+      if (childDeps && childDeps.size === 0) {
+        const child = byHash.get(childHash)!;
+        ready.push(child);
+        ready.sort(compareEvents);
+      }
+    }
+  }
+  const cyclicHashes = nodes.filter((event) => !emitted.has(event.hash)).map((event) => event.hash).sort(compareStrings);
+  // Keep the result total and deterministic for diagnostic consumers. Cyclic nodes
+  // are appended in stable order, but the returned cycle list marks the order
+  // as invalid; callers must not interpret it as a valid causal replay.
+  ordered.push(...nodes.filter((event) => !emitted.has(event.hash)).sort(compareEvents));
+  return { ordered, missingDependencies, cyclicHashes };
+}
+
+
+/// Canonical order is causal first, stable tuple order among ready events.
+/// This convenience view is total; use canonicalEventOrder diagnostics to detect
+/// incomplete or cyclic dependency graphs before accepting a replay.
 export function canonicalEvents(events: QosEvent[]): QosEvent[] {
-  return [...events].sort(compareEvents);
+  return canonicalEventOrder(events).ordered;
 }
 
 // ---------------------------------------------------------------------------
@@ -624,7 +820,7 @@ function resolveCapability(
     if (event.capability !== start.payload.rootCapability) {
       return { ok: false, reason: "process-start capability is not the declared root capability" };
     }
-    const scope = parseScope(start.payload.scope);
+    const scope = parseQosCapabilityScope(start.payload.scope);
     if (!scope || scope.process !== start.process) {
       return { ok: false, reason: "process-start scope does not name this process" };
     }
@@ -638,7 +834,7 @@ function resolveCapability(
     if (event.capability !== start.payload.rootCapability) {
       return { ok: false, reason: "root-granted event does not carry the root capability" };
     }
-    const scope = parseScope(start.payload.scope);
+    const scope = parseQosCapabilityScope(start.payload.scope);
     if (!scope || scope.process !== start.process) {
       return { ok: false, reason: "process-start scope does not name this process" };
     }
@@ -665,7 +861,7 @@ function resolveCapability(
 
   const to = grantEvent.payload.to;
   const childCapability = grantEvent.payload.childCapability;
-  const childScope = parseScope(grantEvent.payload.childScope);
+  const childScope = parseQosCapabilityScope(grantEvent.payload.childScope);
   if (typeof to !== "string" || to.length === 0) return { ok: false, reason: "grant target is missing" };
   if (typeof childCapability !== "string" || childCapability !== event.capability) {
     return { ok: false, reason: "grant child capability does not match the event capability" };
@@ -822,6 +1018,21 @@ export async function orchestrate(
   const conflictedSources = [...forked].sort(compareStrings);
   const rejected: { hash: string; type: string; reason: string }[] = [];
   const finish = (view: Omit<QosProcessView, "stateDigest" | "brokenChains">) => finishView(view, all);
+  const causalOrder = canonicalEventOrder(scoped);
+  if (causalOrder.cyclicHashes.length > 0) {
+    const cyclic = new Set(causalOrder.cyclicHashes);
+    const sources = all.filter((event) => cyclic.has(event.hash)).map((event) => event.source);
+    return finish({
+      process: "", name: "", question: "", status: "conflicted", phase: "conflicted",
+      blocked: "causal-dependency-cycle", quorum: { required: 1, sources: null, met: false, missing: [] },
+      participatingSources: [], nominations: [], poll: null, result: null,
+      winnerIds: [], winnerTexts: [], recordHash: null, finalDigest: null,
+      lemma: null, anchor: null, chainMode: "none", rejected: causalOrder.cyclicHashes.map((hash) => ({ hash, type: "?", reason: "event is part of a causal dependency cycle" })),
+      conflictedSources: [...new Set([...conflictedSources, ...sources])].sort(compareStrings),
+      invalidTransitions: [], eventCount: all.length,
+    });
+  }
+
 
   const starts = all.filter((event) => event.type === "process-start" && !forked.has(event.source));
   if (starts.length === 0) {
@@ -838,7 +1049,7 @@ export async function orchestrate(
   const start = starts[0];
   const process = start.process;
   const rootCapability = start.payload.rootCapability;
-  const rootScope = parseScope(start.payload.scope);
+  const rootScope = parseQosCapabilityScope(start.payload.scope);
   const name = typeof start.payload.name === "string" ? start.payload.name : process;
   const question = typeof start.payload.question === "string"
     ? start.payload.question
@@ -878,7 +1089,7 @@ export async function orchestrate(
 
   const byHash = new Map(all.map((event) => [event.hash, event]));
 
-  // Resolve every event's authority first. An event with a valid signature but
+  // Resolve every event's authority first. An event with a valid dyncap chain but
   // no valid grant is not orchestration input; it is reported, not guessed at.
   const resolved = new Map<string, ResolvedCapability>();
   for (const event of all) {
@@ -894,7 +1105,7 @@ export async function orchestrate(
   }
   rejected.sort((a, b) => compareStrings(a.hash, b.hash));
 
-  // Lifecycle transitions are root-signed. Invalid transitions are reported
+  // Lifecycle transitions must carry root-capability dyncap attribution. Invalid transitions are reported
   // and skipped; a later valid transition still applies.
   const lifecycle = all
     .filter((event) => LIFECYCLE_TYPES.has(event.type) && event.source === start.source && resolved.has(event.hash))
@@ -1267,8 +1478,8 @@ export class QosProcessRoom {
     if (parentEvent.process !== processId) throw new Error("grant: parent event belongs to a different process");
     const parentCapability = capabilityOfGrant(parentEvent);
     const parentScope = parentEvent.type === "process-start"
-      ? parseScope(parentEvent.payload.scope)
-      : parseScope(parentEvent.payload.childScope);
+      ? parseQosCapabilityScope(parentEvent.payload.scope)
+      : parseQosCapabilityScope(parentEvent.payload.childScope);
     if (!parentScope) throw new Error("grant: parent capability has no valid scope");
     const scope: QosCapabilityScope = { ...childScope, process: processId };
     const narrowed = attenuateScope(parentScope, scope);

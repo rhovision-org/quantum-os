@@ -53,12 +53,23 @@ export type { QosCommandHost } from "./qos-command.js";
 
 // QOS/1 kernel ABI v0 — pure capability-handle/process model (docs/os-abi.md).
 export {
-  QOS_ABI_VERSION, QOS_ALL_RIGHTS, QOS_RIGHTS, QOS_SIGNALS, QOS_SYSCALLS, QosKernel,
+  QOS_ABI_VERSION, QOS_ALL_RIGHTS, QOS_RIGHTS, QOS_SIGNALS, QOS_SYSCALLS, QosKernel, replayQosKernel,
 } from "./qos-kernel.js";
 export type {
   QosErrno, QosHandle, QosHandleInfo, QosProcess, QosProcessInfo, QosProcessState,
-  QosResult, QosRightName, QosSignal, QosSyscallName,
+  QosResult, QosRightName, QosSignal, QosSyscallName, QosKernelReplayResult,
 } from "./qos-kernel.js";
+
+// Cooperative logical scheduler (#278); canonical replay owns admission.
+export { QosScheduler, SCHEDULER_OPS, MAX_PRIORITY, MAX_SLEEP_TICKS } from "./qos-scheduler.js";
+export type { ScheduleView, SchedulerOp, SchedulerLifecycle } from "./qos-scheduler.js";
+
+// Content-addressed object metadata and optional availability adapters (#279).
+export { QosMemoryGraph, MEMORY_OPS, MAX_OBJECT_BYTES } from "./qos-memory.js";
+export type { ObjectDescriptor, ObjectLocator, MemoryObject, MemoryOp } from "./qos-memory.js";
+export { QosMemoryBytes, RoomByteCache, OpfsMemoryCache, objectIdentity } from "./qos-memory-bytes.js";
+export type { MemoryByteCache, MemoryDurableBackend } from "./qos-memory-bytes.js";
+export { RholoRegistryMemory } from "./qos-memory-rholo.js";
 
 // Personal success-framework goals — identity-scoped, local-only by default.
 export { GoalStore, GOAL_PRIORITIES, parseGoalAdd } from "./goal-store.js";
@@ -79,3 +90,21 @@ export type {
 // RhoQu success recipes using only the shipped subset (see #290 for gaps).
 export { SUCCESS_RECIPES, recipeById } from "./success-recipes.js";
 export type { SuccessRecipe } from "./success-recipes.js";
+
+export {QosVfs,VFS_OPS,vfsPath} from "./qos-vfs.js";
+export type {VfsOp,VfsEntry,VfsNamespace} from "./qos-vfs.js";
+
+export {SHELL_OPS,splitShell,parsePipeline,stageResult} from "./qos-shell.js";
+export type {ShellOp,ShellJob,ShellContext,Pipeline} from "./qos-shell.js";
+
+export {IDENTITY_OPS,PROXY_ACTIONS,isUid,isProxyToken} from "./qos-identity.js";
+export type {IdentityOp,AuthorityProxy} from "./qos-identity.js";
+
+export * from "./qos-device.js";
+export * from "./qos-device-host.js";
+
+export * from "./qos-init.js";
+
+export * from "./qos-observe.js";
+
+export * from "./qos-boot.js";

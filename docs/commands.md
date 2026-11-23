@@ -610,11 +610,11 @@ The command is a thin adapter (`qos-command.ts`); `QosProcessRoom` signs and bro
 
 ### `/ps`
 
-The OS-style process table over the same tracked QOS processes: pid (short), name, status, event count, and owner. It is the same view as `/qos ps`. A locally started process shows `you`; a peer sees the signed owner label it received. The kernel ABI underneath is described in [os-roadmap.md](os-roadmap.md) and [os-abi.md](os-abi.md).
+The OS-style process table over the same tracked QOS processes: pid (short), name, status, event count, and owner. It is the same view as `/qos ps`. A locally started process shows `you`; a peer sees the dyncap-attributed owner label it received. The kernel ABI underneath is described in [os-roadmap.md](os-roadmap.md) and [os-abi.md](os-abi.md).
 
 ### `/kill <name|id>`
 
-Owner-only alias for `/qos terminate`. It emits the same signed lifecycle event; a non-owner is refused, and a process that is already terminated cannot be killed again. It is not a remote DOS primitive: there is no ambient process namespace, only processes this peer has observed and for which it holds the owner grant.
+Owner-only alias for `/qos terminate`. It emits the same dyncap-attributed lifecycle event; a non-owner is refused, and a process that is already terminated cannot be killed again. It is not a remote DOS primitive: there is no ambient process namespace, only processes this peer has observed and for which it holds the owner grant.
 
 ### `/probe [sub]`
 
@@ -759,13 +759,14 @@ The "persistence" is "as long as one of the replicating peers is online" — the
 
 ### `/rhoqu <text>`
 
-RhoQu macro language — a thin syntactic surface that compiles to the shipped slash commands. The body is parsed by `packages/browser/src/rhoqu.ts` into an AST and transpiled to a `string[]` of `/commands`, each dispatched in order through the regular handler.
+RhoQu macro language — a thin syntactic surface that compiles to the shipped slash commands. The browser lowers source to a typed process IR. See [RhoQu v2 runtime semantics](rhoqu-v2-runtime.md) for runtime branches, local parallelism, and output bindings. The legacy library can still flatten source into a list of commands.
 
 | Construct | Meaning |
 |---|---|
 | `process name(args…) { body }` | Define a parameterized macro. Calls inline at call site with substituted `$arg`s. |
 | `name(…); name(…);` | Sequential calls (or any sequence of `/commands` separated by `;`). |
-| `s1 \| s2 \| s3` | Parallel composition — each statement is grouped as a parallel block; on a single peer the group still executes sequentially, but the `\|` records "no ordering dependency." |
+| `s1 \| s2 \| s3` or `parallel { s1; s2; }` | Legacy grouping with sequential execution in source order. |
+| `concurrent { s1; s2; }` | Run branches concurrently on this browser and join their results. |
 | `if cond { … } else { … }` | Transpile-time branch. Conditions evaluate against current room state: `bal(@name)`, `peers`, `connected`, `seq`, `hasLemma(@name)`, plus `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `not`. |
 | `on channel(payload) { body }` | Register a `/channel` dispatcher: when an inbound `channel-msg` on `channel` arrives, bind `payload` to its text and execute `body`. Survives across messages until `/rhoqu clear`. |
 | `new name in { body }` | Mint a fresh `cap` named `name`, bind for the lexical body, broadcast as a lemma. |
@@ -818,3 +819,293 @@ Rust source: [`crates/zfa-core/src/capability.rs`](../crates/zfa-core/src/capabi
 Sends a literal message that starts with `/` (escapes the command prefix).
 
 ---
+
+
+### `/fs` — capability-rooted filesystem (#280)
+
+Start a process with `/qos start workspace`, then `/fs init workspace`.
+Use the returned namespace handle on subsequent commands (paths are rooted
+inside that namespace, not host paths):
+
+| Command (after `/fs`) | Meaning |
+| --- | --- |
+| `ls <process> <handle> /` | List a directory and child content IDs |
+| `stat <process> <handle> /path` | Inspect metadata, including root and version |
+| `mkdir <process> <handle> /dir` | Create a directory |
+| `put <process> <handle> /dir/file \| text` | Write immutable UTF-8 file bytes to local cache |
+| `put-durable <process> <handle> /dir/file \| text` | Explicitly publish bytes to configured Rholo, verify pinned readback, then commit namespace |
+| `cat <process> <handle> /dir/file` | Open a READ-only file handle, verify bytes, close handle |
+| `rm <process> <handle> /path` | Unlink a file or empty directory |
+| `rename <process> <handle> /old /new` | Copy-on-write rename |
+| `mount <process> <handle> /mount <source-handle>` | Attach read-only snapshot of a READ+GRANT source |
+| `unmount <process> <handle> /mount` | Detach snapshot |
+| `grant <process> <handle> <recipient-pid> <rights-mask>` | Attenuated namespace grant (READ=1, WRITE=2, GRANT=16, REVOKE=32) |
+
+Writes require a live WRITE namespace handle and an observed root hash/version.
+File bytes are not journal payloads; the versioned, immutable directory
+manifest hashes are computed from sorted child names, kinds and content IDs.
+A conflicting speculative receipt is explicitly rejected by canonical replay.
+A mount is an explicit read-only snapshot copy, not a live/distributed mount.
+Unmount or close references before local collection. Browser checkpoints
+persist admission evidence in origin-local storage, scoped by room and identity;
+OPFS stores verified bytes, with volatile fallback where unavailable.
+Persistence failures are surfaced, not represented as successful durable saves.
+The current text command grammar uses whitespace-separated paths; generic binary
+I/O and live mounts are not asserted. No automatic Rholo writes.
+
+### `/sh` — bounded deterministic shell (#281)
+
+Create an owned QOS process and namespace using `/qos start workspace` and
+`/fs init workspace`, then select the namespace via
+`/sh use workspace <namespace-handle>`. The selection is local UI state; cwd,
+environment, child processes, stage receipts, and exit status are replayed
+from the single canonical journal. After reload re-select the shell.
+
+- `/sh set NAME=value; cd /docs; echo "$NAME" | upper > result.txt`
+- `/sh cat < result.txt | lower`; `/sh echo next >> result.txt`
+- Builtins: echo, cat (stdin), upper, lower, wc (UTF-8 bytes), pwd, env,
+  true, false. Standalone cd, set/export, unset, exit configure the shell.
+- `/spawn <pipeline>` queues a child and returns its explicit job capability.
+  `/bg <job-handle>` marks it runnable; `/exec <job-handle>` advances one
+  cooperative stage or finishes it. `/fg <job-handle>` runs remaining stages.
+  `/jobs` lists owned handles, `/wait <job-handle>` reaps an exited child,
+  `/kill <job-handle>` sends SIGTERM through the job SIGNAL capability.
+  The pre-existing /kill process-name lifecycle alias remains distinct.
+
+Single/double quotes, escapes, variable expansion, pipe, semicolon, and
+input/output/append redirection are supported. No globbing, substitution,
+dynamic evaluation, host execution, implicit Rholang, binary data, or
+arbitrary executables. All pipeline stages execute in source order; the first
+non-zero status wins (pipefail). Configuration commands cannot be piped.
+Background jobs are cooperatively stepped, not autonomous threads.
+Parent exit terminates its active children. Children have only a restricted
+EXEC image root, while their parent retains explicitly attenuated control.
+
+Input is read using a live file capability and verified against its content
+hash; the bytes (bounded UTF-8 text) become journal observations.
+Output redirection is an atomic COW namespace update against the root/version
+captured at spawn, with verified local-cache metadata, never an ambient host
+path. Append verifies the original bytes. If the root changes, the job exits
+non-zero without replacing the new root. Redirection is local-cache only;
+durable publication remains an explicit /fs put-durable operation.
+
+Limits: 4 KiB source/expanded pipeline/input/output, eight pipeline stages
+and eight semicolon segments, sixteen environment variables of at most
+256 UTF-8 bytes, 128 historical jobs per parent. **Shell source, environment,
+input observations and stage outputs are visible in room journal data.
+Do not put secrets or private file contents through this shell.**
+
+### QOS identity and capability control (#282 — individual/proxy slice)
+
+- `/whoami` reports the current dyncap anchor as UID. `/qos id <process>`
+  returns its canonical identity and trust ceiling. There is no superuser.
+- `/qos cap <process>` lists its handles. `/chmod <process> <handle> <mask>`
+  requires REVOKE and can only decrease rights, including all descendants.
+  `/chown <process> <handle> <recipient-pid>` moves a grantable non-root
+  filesystem or memory handle, not the object or the recipient's identity.
+  Existing descendants retain their own grants and ancestry.
+- `/qos proxy create <process> <handle> <holder-uid> <mask>` returns a stable
+  proxy token bound to the named UID. The holder gains no raw target handle.
+- `/qos proxy set <process> <token> <handle> <mask> on|off` changes the target,
+  narrows rights or disables the token. Off ignores the handle argument;
+  only the original caretaker process may change the table.
+- `/qos proxy use <process> <token> stat|ls|read|mkdir|unlink <path>`,
+  `... put <path> <own-memory-handle>`, or `... signal <signal>` checks
+  the currently observed proxy, caretaker, target handle and namespace/process
+  versions at the resource boundary. Read verifies bytes and rechecks after
+  asynchronous I/O. SIGKILL is never forwarded.
+
+Rights: READ=1, WRITE=2, EXEC=4, SIGNAL=8, GRANT=16, REVOKE=32. ADMIN is
+not an alternative to REVOKE. Raw kernel revocation invalidates handle
+descendants; proxy disable stops future mediated use of the unchanged token.
+Neither can retrieve bytes already delivered. Tokens and metadata appear in
+the room journal, not as confidential bearer secrets. Authorization is under
+the existing hash-only dyncap TOFU model, not asymmetric authentication.
+The proxy is enforced by clients that replay the current journal; an offline
+or noncompliant peer can have an obsolete view. This is not a global
+revocation proof or public Rholo access-control enforcement.
+
+Group ownership and group-controlled proxy transfer remain blocked on #103:
+`/qos groups <process>` returns only verified groups (none until the contract
+exists); group operations are explicitly ENOTSUP. A local roster, role,
+or a self-declared threshold is not group authority. #107's library/inbox/
+sync-consent and group-owner integration is outside this mediated OS slice.
+
+
+Permission commands preserve the causal receipts observed by the issuing
+client, including accepted tips on other process/source chains. Commands
+with an observed frontier depend on those exact receipt hashes in canonical
+order. Missing receipts fail closed. Older raw requests remain supported
+with their operation-specific version constraints; concurrent histories
+can still conflict. This is causal replay, not wall-clock finality.
+
+### `/dev` — capability devices (#283, independent slice)
+
+The logical descriptor + grant and the open handle are separate from a
+locally attached host resource. Registering a logical device grants no
+ambient hardware permission; no group UID, group role or ADMIN bit is
+required or recognized. Future verified group grants can issue the same
+attenuated device capability without changing request/observation schemas.
+
+- `/dev define <process> opfs-block 3` creates a scratch-device grant.
+- `/dev grant <process> <grant> <recipient-pid> <mask>` attenuates a grant.
+- `/dev open <process> <grant> <mask>` creates a logical open session;
+  `/dev bind <process> <session>` explicitly attaches the local adapter.
+- `/dev list <process>`, `/dev read <process> <session> <limit>`,
+  `/dev write <process> <session> | 00ff`, `/dev ioctl <process> <session> status`,
+  `/dev ioctl <process> <session> zfa | 0001`, `/dev close <process> <session>`.
+- `/dev abandon <process> <pending-ticket>` records EINTR/unknown after
+  loss of the executing host. It never retries an external operation.
+
+Rights: READ=1, WRITE=2, EXEC=4 (ZFA ioctl). A grant cannot be widened;
+open sessions do not grant additional handles. User commands require an
+owned process and a live explicit grant. A successful request receipt
+allocates one pending ticket. Its observation is a separate canonical
+receipt with strict request-bound byte count, bounded hex, optional opaque
+timestamp, or errno plus effect uncertainty. The pure replay engine never
+imports the host module or contacts a device. Observations are attributed
+claims under the existing dyncap trust model, not hardware attestations.
+The scheduler never consults device timestamps.
+
+A local broker dispatches only a newly committed request from the explicit
+command path; generic raw syscalls and replay cannot dispatch. Revocation,
+close, suspend, and process exit release live leases when the local
+client reconciles. Authority is checked before and after I/O; external
+effects already performed cannot be undone. Timeout/lost execution means
+unknown, not exactly-once delivery. Binding is not persisted.
+
+Built-in browser bindings: OPFS scratch block (room-scoped fixed file name,
+not arbitrary host paths; max 4 KiB), ZFA pairwise wrapper (WASM if loaded,
+TS fallback), and explicitly bound read-only Rholo status RPC. Donated
+dedicated RTC data channels, media tracks (metadata only, no capture), and
+existing mesh sockets have adapter constructors; automatic adoption of
+active application resources is deliberately not implemented. Native
+external POSIX sockets, full media capture and arbitrary RPC methods
+remain separate. No device operations are dispatched by journal replay,
+including a pending request after reload. Source/output bytes are room
+journal data; never pass secrets.
+
+This is not full #283 acceptance until actual browser/adapter and resource
+release witnesses are green. It does not resolve #103 or expand #107.
+
+
+Explicit host-resource adoption: an embedding host may call
+`QosCommand.attachDevice(process, session, kind, factory)` after obtaining a
+dedicated pre-authorized resource. The factory is not invoked for an
+invalid, foreign, closed, already-bound, or wrong-kind session.
+`/socket device <connection-id> <process> <open-mesh-session>` surrenders an
+existing user-created mesh connection to the device lease and removes it
+from the legacy socket command map. No active chat channel or physical
+capture is acquired implicitly. Disconnect, room close and identity
+replacement release live leases; journal state remains intact.
+Browser CI uses real dedicated RTC channels, PosixNet over a separate RTC
+channel, and a synthetic canvas MediaStreamTrack (metadata and stop only).
+Rholo device CI uses an owned disposable bundled node and GET /api/status
+only; replay is verified in a separate process forbidden to perform RPC.
+
+### Signed packages and init (#284)
+
+A supervisor is an owned running QOS process. `/pkg install <process> | JSON`
+accepts exactly `{package:{manifest,signature},publisher,bindings}`.
+The manifest schema is `qos.package/1`: name, version, publisher (32-byte
+Ed25519 public key hex), capabilities (name/kind/rights), entrypoint
+(kind/source), ordered dependencies, restart (never/on-failure), health
+(bounded builtin pipeline). Signature is 64-byte hex over UTF-8
+canonicalJson(manifest), verified against the explicitly pinned publisher.
+The user must obtain that pin independently; no publisher PKI is implied.
+Bindings are explicit `{name,handle,version?}` for live grantable fs,
+memory, or device-grant objects. The command fills omitted handle versions.
+No ambient room root, ADMIN, or implicit device acquisition.
+
+`/svc boot <process> | {"schema":"qos-init/1","services":["name"]}`
+resolves signed dependencies in declared order. Missing/failed dependencies
+and cycles block their dependents. `/svc list|status|start|stop|restart|health`
+and `/pkg list|remove` operate in the supervisor namespace. Stable service
+identity is separate from the generation-specific process identity.
+Restart stops dependents, creates a fresh restricted runtime and attenuated
+handles; failed health checks retry only on explicit health commands with
+a bounded retry budget. Removing a package stops its service and dependents.
+Losing supervisor or resource authority blocks/stops runtime processes.
+
+The builtin entrypoint and health pipeline execute bounded pure shell
+stages; no redirection, host I/O, arbitrary eval or npm. Signed agent,
+macro and contract entrypoints are installable inert data; starting them
+fails closed until an authorized execution runtime is implemented.
+This is the deterministic init/core slice, not autonomous daemon service
+execution or an agent execution host. Package source is room journal data.
+
+### Observability and isolated recovery (#285)
+
+`/top`, `/dmesg`, `/trace [process]` and `/stat [process]` inspect
+canonical replay without authoring events. The trace shows the canonical
+position, event hash, caller, handle, operation, result or errno and rejection
+diagnostic. Display is bounded (32 recent trace rows, 128 process rows).
+The digest is a logical state digest, not a claim of physical byte availability.
+
+`/snapshot <name>` saves a bounded (2 MiB) clean, complete causal cut with
+admitted event evidence, room identity, state digest and canonical envelope
+hash. Forked, unresolved or pending syscall cuts fail closed.
+`/restore <name>` verifies admission and both hashes, then creates a separate
+local continuation. `/branch <name> | <command>` explicitly routes a supported
+pure command into that continuation. Neither restore nor branch commands
+replace or truncate the original room journal. A branch uses the current
+monotonic identity counter, not a restored seed or counter. Branch effects
+are isolated from room broadcast, byte adapters and host drivers. Snapshots
+persist locally; branch continuation is in memory and is not mergeable into
+the original room. This is not distributed rollback or a live failover.
+Snapshot integrity is not independent authentication of its author.
+
+Deterministic quotas: per process, 128 live handles, 256 KiB of distinct
+objects directly referenced by live memory or namespace handles, and 512
+committed chargeable syscall operations. Shared namespace changes are
+checked for all affected holders. Read-only inspection and cleanup
+operations are exempt from the operation budget. Limit refusals return
+ENOSPC/EAGAIN without committing speculative state; refusal receipts remain
+auditable. The operation budget is not a raw network-event admission limit,
+and logical bytes are not physical cache or transitive memory-graph bytes.
+No production wire-rate, governance-event or global process quotas are
+claimed. No wall-clock dependency.
+
+### Boot manifest and native runtime (#286)
+
+A public `qos.boot/1` manifest contains the versioned kernel contract and
+ABI, hashed supervisor identifier, explicit init service list, sorted
+signed package identities/publisher pins, logical device descriptors
+(explicit host binding only), state root and private snapshot content ID.
+It contains no room capability, identity seed, event payloads, package
+source, endpoints or host credentials. Content address is SHA-256 of
+canonical JSON. Discovering a manifest requires no room authority.
+Package/service names and public keys are intentionally public metadata;
+publish only a manifest (not its snapshot) after review.
+
+`/snapshot bootcut` then `/qos boot-manifest bootcut <supervisor> <service> ...`
+generates the manifest and address from an independently verified clean
+causal cut. Store its JSON as `<address>.json` in a public content-addressed
+directory. The separately protected snapshot contains private authority
+and journal evidence. The manifest alone is not a key or runnable state.
+Boot rejects a missing/mismatched package, dependency cycle, mismatched
+device set, unsupported kernel contract or snapshot digest.
+
+After `pnpm build:wasm` and `pnpm install --frozen-lockfile`, run
+`node scripts/qos-cli/qos-boot.mjs discover --store <dir> --address <hash>`.
+For headless boot, use `boot --store <dir> --address <hash> --snapshot
+<private.json> --room-file <private-file>`. Private inputs must have mode
+0600. Native boot requires actual ZFA WASM initialization; the TS kernel is
+the same module as the browser. It reports JSON dmesg and ps, no chain RPC.
+Use `--init --identity <private-current-identity> --out <new-private-dir>`
+for an explicitly isolated init continuation that creates real builtin
+service processes, fresh snapshot and manifest. This is not a takeover
+of the live room. Never reuse that fork's identity file on the live
+room, broadcast its events, or merge its journal. The original cut and
+identity files are not changed. Do not export live identity to an untrusted
+host. Optional `--observe-ms <N> --signal <ws-endpoint>` joins via existing
+Node QOSPeer with the privately supplied room capability, observes new
+events from the verified cut and prints the resulting digest/ps. It does
+not publish events or restore a fork into live history. Install the
+existing scripts/qos-cli dependencies for this optional network path.
+
+Local filesystem discovery is implemented, not a public hosting service.
+Chain anchoring, automatic current-address resolution, live failover,
+native device acquisition and agent/macro/contract execution remain
+separate. Boot relies on private verified admission evidence under dyncap
+TOFU continuity and explicitly pinned signed package manifests.
