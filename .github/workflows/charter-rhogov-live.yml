@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   real-disposable-rholo:
-    name: Disposable Rholo signed Issue/4 handoff and read-back (not #584)
+    name: "Disposable Rholo signed Issue/4 handoff and read-back (#291)"
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:

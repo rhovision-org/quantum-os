@@ -1,11 +1,9 @@
 # QOS/1 ABI v0 — objects, handles, and syscalls
 
 **Status:** v0 pure-TypeScript model (`packages/browser/src/qos-kernel.ts`), tracked by
-[#277](https://github.com/rhovision-org/quantum-os/issues/277); journal wiring is
-[#317](https://github.com/rhovision-org/quantum-os/issues/317). `qos.syscall/1` names the
-operation/payload shape; it is **not a second journal**. The only canonical wire journal is
-`qos.event/1`, and syscall requests, results, and refusals are finite event types inside it.
-The shape is planned, not yet emitted.
+[#277](https://github.com/rhovision-org/quantum-os/issues/277). The wire form
+`qos.syscall/1` is **planned**, not yet emitted. This page is the contract both sides
+implement.
 
 The ABI is deliberately small. It is not a POSIX clone: capability handles replace
 file descriptors and UIDs, and every operation is attributed to a process and a handle.
@@ -63,9 +61,8 @@ creation; it says nothing about another room or another process's handles.
 | `handles` | live handle ids |
 
 The room-facing process table (`/qos status`, `/ps`) is a **view** of this kernel table
-plus the dyncap-attributed `qos.event/1` journal. The kernel model is the authority for v0
-tests; [#317](https://github.com/rhovision-org/quantum-os/issues/317) wires `/qos` and `/ps`
-to kernel replay rather than a parallel `QosProcessRoom` model.
+plus the signed QOS event log. The kernel model is the authority for v0 tests; wiring
+it to `qos.event/1` is the next slice.
 
 ## Syscall table
 
@@ -118,38 +115,25 @@ for control flow.
 - Process iteration is sorted by `pid`; handle iteration by `handle id`.
 - `stateDigest()` canonicalizes the process/handle table (sorted keys, sorted arrays)
   and hashes it with SHA-256.
-- Journal order is causal first (`prev`, grants, object versions, process creation);
-  otherwise-concurrent events order by `(source anchor, seq, hash)`. Arrival order is not an
-  input.
 - A replay is the same ordered operation sequence; two kernels that receive it must
   produce the same `stateDigest()`.
 
-## Planned syscall event payload
+## Planned wire envelope
 
-This is the payload shape carried inside a `qos.event/1` event; v0 does not emit it.
-`qos.syscall/1` never forms a parallel journal.
+This is the shape future peers will sign and broadcast; v0 does not emit it.
 
 ```json
 {
-  "schema": "qos.event/1",
-  "type": "syscall-request",
-  "process": "qos:proc:…",
+  "schema": "qos.syscall/1",
+  "caller": "qos:proc:…",
+  "op": "open",
+  "handle": "h:3",
+  "args": { "object": "file:notes/plan.md", "rights": 3 },
+  "nonce": "…",
   "source": "cap:peer/dyn:…",
-  "dyncap": { "anchor": "…", "seq": 42, "witness": "…" },
-  "payload": {
-    "schema": "qos.syscall/1",
-    "caller": "qos:proc:…",
-    "op": "open",
-    "handle": "h:3",
-    "args": { "object": "file:notes/plan.md", "rights": 3 },
-    "nonce": "…"
-  }
+  "dyncap": { "anchor": "…", "seq": 42, "witness": "…" }
 }
 ```
-
-Abridged: the outer event also carries the usual `capability`, `grant`, `payloadHash`, `zfa`,
-and `hash` fields. The finite event type vocabulary is defined by
-[#317](https://github.com/rhovision-org/quantum-os/issues/317).
 
 Validation order:
 
@@ -159,15 +143,13 @@ Validation order:
 4. arguments are valid for the op;
 5. the operation mutates only the caller's namespace or an object the handle names.
 
-A refused syscall is a recorded `syscall-result` event carrying the errno, not a local-only
-error, so every peer can audit and replay it.
+A refused syscall must be representable as a signed result event, not a local-only
+error, so every peer can audit it.
 
 ## Security invariants
 
 1. A handle never outlives its process.
-2. Kernel-handle revocation invalidates descendants; a revoked handle returns `EACCES`.
-   Distributed proxy revocation for already-disclosed bearer capabilities is a separate
-   mechanism ([#107](https://github.com/rhovision-org/quantum-os/issues/107)).
+2. Revocation invalidates descendants; a revoked handle returns `EACCES`.
 3. Closing a handle returns it to `EBADF`; it is not silently reissued with old rights.
 4. A process cannot signal a target without a `SIGNAL` handle to `proc:<pid>`.
 5. `spawn` requires `EXEC` on the image handle; the child never inherits a broader set.
@@ -180,11 +162,11 @@ error, so every peer can audit and replay it.
 | ABI concept | Current code |
 |---|---|
 | Process / PID | `qos-process.ts` `processIdFor`, `QosProcessView` |
-| dyncap-attributed events | `QosEventSigner`, `QosEventLog`, `QosProcessRoom` |
+| Signed events | `QosEventSigner`, `QosEventLog`, `QosProcessRoom` |
 | Authority | `zfa.ts` / `crates/zfa-core`, `dyncap.ts` |
 | Room transport | `QOSPeer` (`peer.ts` / `qospeer.mjs`) |
 | Sockets | `posix-net.ts` |
-| Durable bytes | rholo deploy/Channel (primary); `library.ts` OPFS helpers, `record.ts` (local cache) |
+| Persistent bytes | `library.ts` OPFS helpers, `record.ts` |
 | Room memory | `room-memory.mjs`, `qos-daemon.mjs` |
 | Shell | `app.ts` `handleCommand`, `/script`, `/macro`, `/rhoqu` |
 | Kernel v0 | `qos-kernel.ts` (this ABI) |
