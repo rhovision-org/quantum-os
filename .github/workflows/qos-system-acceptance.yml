@@ -1,7 +1,7 @@
 name: QOS/1 integrated system acceptance (#276)
 on:
   push:
-    branches: [feat/qos1-system-acceptance-276]
+    branches: [feat/qos1-system-acceptance-276, verify/qos-299-323-336-20261124]
   pull_request:
     branches: [main, work, feat/qos-native-boot-286]
     paths:

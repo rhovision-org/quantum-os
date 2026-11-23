@@ -1,6 +1,8 @@
 name: Charter Issue/4 real-chain evidence (#291)
 
 on:
+  push:
+    branches: [verify/qos-299-323-336-20261124]
   pull_request:
     branches: [main, work]
     paths:

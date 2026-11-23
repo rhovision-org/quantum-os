@@ -4,7 +4,7 @@ on:
   push:
     # `work` is where changes land first; `main` is what is deployed. Both are
     # checked, so a merge to main is never the first time anything is run.
-    branches: [main, work, feat/qos-kernel-scheduler-278, feat/qos-kernel-memory-279, feat/qos-kernel-vfs-280, feat/qos-kernel-shell-281, feat/qos-kernel-identity-282, feat/qos-kernel-devices-283, feat/qos-kernel-init-284, feat/qos-kernel-recovery-285, feat/qos-native-boot-286, feat/qos1-system-acceptance-276]
+    branches: [main, work, feat/qos-kernel-scheduler-278, feat/qos-kernel-memory-279, feat/qos-kernel-vfs-280, feat/qos-kernel-shell-281, feat/qos-kernel-identity-282, feat/qos-kernel-devices-283, feat/qos-kernel-init-284, feat/qos-kernel-recovery-285, feat/qos-native-boot-286, feat/qos1-system-acceptance-276, verify/qos-299-323-336-20261124]
   pull_request:
     branches: [main, work, feat/qos-kernel-journal-replay-317, feat/qos-kernel-scheduler-278, feat/qos-kernel-memory-279, feat/qos-kernel-vfs-280, feat/qos-kernel-shell-281, feat/qos-kernel-identity-282, feat/qos-kernel-devices-283, feat/qos-kernel-init-284, feat/qos-kernel-recovery-285, feat/qos-native-boot-286]
 
