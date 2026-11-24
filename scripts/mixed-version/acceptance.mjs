@@ -7,6 +7,7 @@ const room = generateCapability('room'), other = generateCapability('room');
 const signal = 'ws://127.0.0.1:4444';
 const browser = await chromium.launch({args:['--no-sandbox']});
 const children = [];
+const pages=[];
 let injector;
 async function wait(fn, label) {
   for(let i=0;i<120;i++){ if(await fn()) return; await new Promise(r=>setTimeout(r,500)); }
@@ -15,9 +16,10 @@ async function wait(fn, label) {
 async function peer(port,name,cap) {
   const context=await browser.newContext();
   await context.addInitScript(n=>localStorage.setItem('qos-name',n),name);
-  const page=await context.newPage();
+  const page=await context.newPage(); pages.push({name,page});
   page.on('pageerror',e=>console.error(name,e.message));
   await page.goto('http://localhost:'+port+'/quantum-os/?signal='+encodeURIComponent(signal)+'#room='+encodeURIComponent(cap));
+  await page.locator('#stun-url').evaluate(el=>{el.value='';});
   await page.locator('#connect-btn').click();
   await wait(()=>page.locator('#msg-input').isEnabled(),name+' connected');
   return page;
@@ -34,10 +36,11 @@ try {
  await cmd(a,'/note pass TESTA 4 Candidate'); await seen(b,'received TESTA 4'); await balance(a,'TESTA',6); await balance(b,'TESTA',4);
  const token=await b.locator('#note-list li').first().getAttribute('title');
  assert.ok(token?.startsWith('cap:'));
- injector=new QOSPeer({signalingUrl:signal,roomId:room,peerId:generateCapability('peer'),iceServers:[],onError:e=>console.error(e)});
+ const names=new Map();
+ injector=new QOSPeer({signalingUrl:signal,roomId:room,peerId:generateCapability('peer'),iceServers:[],onMessage:(from,d)=>{if(d?.kind==='name')names.set(d.name,from);},onError:e=>console.error(e)});
  await injector.connect();
- const bid=await b.locator('#my-id').innerText();
- await wait(()=>!!injector.roomKey,'injector ready');
+ await wait(()=>names.has('Candidate'),'injector received actual candidate transport identity');
+ const bid=names.get('Candidate');
  const countReceipts=async()=>((await b.locator('#messages').innerText()).match(/received TESTA 4 from/g)||[]).length;
  const receipts=await countReceipts();
  assert.ok(injector.send(bid,{kind:'note-pass',currency:'TESTA',denomination:4,token}));
@@ -75,4 +78,7 @@ try {
  console.log('PASS CLI bridge historical lemma import');
  await cmd(c,'/channel listen witness'); await cmd(a,'/channel send witness mixed-version-relay'); await seen(c,'mixed-version-relay');
  console.log('PASS actual CLI bridge unsigned channel relay');
+} catch(e) {
+ for(const {name,page} of pages) console.error(name,await page.locator('#messages').innerText().catch(()=>''));
+ throw e;
 } finally {injector?.disconnect();for(const p of children)p.kill();await browser.close();}
