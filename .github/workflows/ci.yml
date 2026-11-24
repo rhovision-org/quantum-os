@@ -7,7 +7,7 @@ on:
     # Stacked kernel slices also require an independently tested head.
     branches: [main, work, "feat/qos-kernel-*"]
   pull_request:
-    branches: [main, work, "feat/qos-*"]
+  workflow_dispatch:
 
 jobs:
   rust:
