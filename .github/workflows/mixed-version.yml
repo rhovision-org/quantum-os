@@ -1,0 +1,48 @@
+name: Mixed-version acceptance
+on:
+  push:
+    branches: [verify/mixed-version-323]
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build pinned versions
+        run: |
+          git worktree add --detach /tmp/legacy 86a569f99470b265784ab7d4d1189a03f375d50a
+          git worktree add --detach /tmp/candidate 215ff866447ba5bea26340063171e03e6cd11d27
+          for d in /tmp/legacy /tmp/candidate; do
+            (cd "$d"; pnpm build:wasm; pnpm install; pnpm build:browser; pnpm build:signaling)
+          done
+      - name: Install harness dependencies
+        run: |
+          npm install --prefix scripts/qos-cli --no-package-lock
+          npm install --prefix scripts/mixed-version --no-package-lock playwright@1.51.1
+          cd scripts/mixed-version
+          npx playwright install --with-deps chromium
+      - name: Run isolated browser acceptance
+        run: |
+          mkdir -p /tmp/site-old/quantum-os /tmp/site-new/quantum-os
+          cp -a /tmp/legacy/packages/browser/dist/. /tmp/site-old/quantum-os/
+          cp -a /tmp/candidate/packages/browser/dist/. /tmp/site-new/quantum-os/
+          python3 -m http.server 5173 --bind 127.0.0.1 --directory /tmp/site-old &
+          python3 -m http.server 5174 --bind 127.0.0.1 --directory /tmp/site-new &
+          node /tmp/candidate/packages/signaling/dist/index.js &
+          trap 'kill $(jobs -p) || true' EXIT
+          sleep 3
+          node scripts/mixed-version/acceptance.mjs
