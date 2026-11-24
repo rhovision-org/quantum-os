@@ -148,6 +148,9 @@ jobs:
       # The cross-shard trade recovery decision table (exchange-2pc.ts) —
       # pure, so this is exhaustive over every reachable (local, remote)
       # status pair, not shape-only.
+      - name: Note closure and split regression test
+        run: node packages/browser/test/notes.test.mjs
+
       - name: Exchange 2PC recovery test
         run: node packages/browser/test/exchange-2pc.test.mjs
 
