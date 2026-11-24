@@ -141,6 +141,8 @@ export interface Calls {
   /** A peer left, or ended their call: drop their tile. */
   peerGone(peerId: string): void;
   inCall(): boolean;
+  /** You pressed Leave while others are still in the call (the rejoin box is up). */
+  hasLeft(): boolean;
   /** Choose the layout: the thumbnail grid, or speaker view. */
   setView(view: CallView): void;
   view(): CallView;
@@ -336,8 +338,61 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
   });
   const showBar = () => { if (els.bar) els.bar.hidden = false; };
   const hideBarIfIdle = () => {
-    if (els.bar && !inCall && tiles.size === 0) els.bar.hidden = true;
+    if (els.bar && !inCall && !left && tiles.size === 0) els.bar.hidden = true;
   };
+
+  // --- having left ----------------------------------------------------------
+  // Leave means leaving the call, not only switching your own camera and mic
+  // off: everyone else's video and voice stop too. While anyone is still in
+  // the call, a video-shaped box stays where the call was, with a button back
+  // in. Their streams are kept (not shown, not played), so rejoining shows
+  // them at once rather than waiting for a renegotiation.
+  //
+  // The connections still carry what they send: a peer's tracks go to every
+  // connection, and taking ourselves off their list would need each of them to
+  // renegotiate. What leaving changes is what this browser shows and plays.
+  let left = false;
+  let rejoinBox: HTMLElement | null = null;
+  let rejoinMsg: HTMLElement | null = null;
+
+  /** Humans still sending into the call (agents never count). */
+  const othersInCall = (): string[] => [...remote.keys()].filter((id) => !host.isAgent(id));
+
+  function paintRejoin(): void {
+    const others = othersInCall();
+    if (!left || others.length === 0) {
+      rejoinBox?.remove(); rejoinBox = null; rejoinMsg = null;
+      els.bar?.classList.remove("call-left");
+      left = false;
+      hideBarIfIdle();
+      return;
+    }
+    els.bar?.classList.add("call-left");
+    if (!rejoinBox) {
+      rejoinBox = document.createElement("div");
+      rejoinBox.className = "call-rejoin";
+      const msg = rejoinMsg = document.createElement("div");
+      msg.className = "call-rejoin-msg";
+      const btn = document.createElement("button");
+      btn.className = "call-rejoin-btn";
+      btn.textContent = "📞 Rejoin the call";
+      btn.addEventListener("click", () => void start());
+      rejoinBox.append(msg, btn);
+      els.tiles?.appendChild(rejoinBox);
+    }
+    const names = others.map((id) => host.label(id));
+    const who = names.length <= 3 ? names.join(", ") : `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+    if (rejoinMsg) rejoinMsg.textContent = `You left the call. Still in it: ${who}.`;
+    showBar();
+  }
+
+  /** Show a peer's tile and play their stream. */
+  function attachRemote(peerId: string, stream: MediaStream): void {
+    let v = tiles.get(peerId);
+    if (!v) v = makeTile(peerId, host.label(peerId));
+    if (v.srcObject !== stream) v.srcObject = stream;
+    watchLevel(peerId, stream);
+  }
 
   const tileOf = (key: string): HTMLElement | null =>
     tiles.get(key)?.closest(".call-tile") as HTMLElement | null;
@@ -504,10 +559,15 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
       }
     }
     inCall = true;
+    const rejoining = left;
+    left = false;
+    paintRejoin();
     audioContext();   // inside the click that started the call, so it may run
     const local = makeTile("__local__", "you");
     local.muted = true;
     local.srcObject = localStream;
+    // Back in: everyone still in the call reappears straight away.
+    for (const [id, stream] of remote) if (!host.isAgent(id)) attachRemote(id, stream);
     showBar();
     // addLocalMedia adds tracks to whatever's in `peer`'s connection map RIGHT
     // NOW, so it must run BEFORE pinning, not after: pinning a peer with no
@@ -527,7 +587,7 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
     // made to each of them (harmless no-ops for anyone already connected).
     for (const id of host.roomPeers()) peer.pinNeighbor(id);
     peer.broadcast({ kind: "call-start" });
-    host.say("📞 you started a call");
+    host.say(rejoining ? "📞 you rejoined the call" : "📞 you started a call");
     updateControls();
     reachTimers.push(
       setTimeout(() => checkMediaReach(false), 12_000),
@@ -560,10 +620,15 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
     localStream = null;
     inCall = false;
     removeTile("__local__");
+    // Leaving the call leaves everyone in it: their tiles go, and with them
+    // their voices (the <video> elements are what play them).
+    for (const id of [...tiles.keys()]) { unwatchLevel(id); removeTile(id); }
+    pinned = null;
+    setFull(false);
+    left = othersInCall().length > 0;
+    if (left) host.say("📵 you left the call — Rejoin is where the call was");
     updateControls();
-    hideBarIfIdle();
-    // A hidden bar must not be left covering the window.
-    if (els.bar?.hidden) setFull(false);
+    paintRejoin();
   }
 
   function stopScreenTracks(): void {
@@ -694,21 +759,22 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
       // werift loops our own audio back, which plays as a strong echo when you
       // are "alone" in a call and spuriously raises the call bar. Humans only.
       if (host.isAgent(peerId)) return;
-      let v = tiles.get(peerId);
-      if (!v) v = makeTile(peerId, host.label(peerId));
-      if (v.srcObject !== stream) v.srcObject = stream;
       remote.set(peerId, stream);
-      watchLevel(peerId, stream);
+      // Having left, keep the stream for a rejoin but neither show nor play it.
+      if (left) { paintRejoin(); return; }
+      attachRemote(peerId, stream);
       showBar();
     },
     audioTracks() {
       return [...remote.values()].flatMap((s) => s.getAudioTracks());
     },
     peerGone(peerId) {
-      remote.delete(peerId); unwatchLevel(peerId); removeTile(peerId); hideBarIfIdle();
+      remote.delete(peerId); unwatchLevel(peerId); removeTile(peerId);
+      if (left) paintRejoin(); else hideBarIfIdle();
       if (els.bar?.hidden) setFull(false);
     },
     inCall: () => inCall,
+    hasLeft: () => left,
     setView,
     view: () => view,
     toggleView() { setView(view === "speaker" ? "grid" : "speaker"); },
