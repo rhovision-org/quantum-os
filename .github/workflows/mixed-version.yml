@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
@@ -29,6 +29,8 @@ jobs:
           for d in /tmp/legacy /tmp/candidate; do
             (cd "$d"; pnpm build:wasm; pnpm install; pnpm build:browser; pnpm build:signaling)
           done
+      - name: Initialization fallback unit witness
+        run: node scripts/mixed-version/init-fallback.mjs
       - name: Install harness dependencies
         run: |
           npm install --prefix scripts/qos-cli --no-package-lock
