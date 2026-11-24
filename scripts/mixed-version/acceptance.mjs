@@ -92,14 +92,16 @@ try {
  await seen(b,'refused: invalid dyncap');
  assert.ok(!(await b.locator('#lemma-list').innerText()).includes('invalidwitness'));
  console.log('PASS malformed dyncap refusal (shape control, not cryptographic authentication)');
- await cmd(a,'/lemma @bridgehistory');
+ // Use an explicitly closed historical fixture. Automatic allocation only guarantees aggregate balance.
+ await cmd(a,'/lemma @bridgehistory | ^v><');
 
  await wait(async()=> (await a.locator('#lemma-list').innerText()).includes('bridgehistory'),'legacy history created');
  const bridge=spawn(process.execPath,['scripts/qos-cli/bridge.mjs','--room',room,'--room',other,'--signal',signal,'--name','WitnessBridge','--lemmas'],{stdio:'inherit'});children.push(bridge);
  await wait(async()=> (await a.locator('#peer-list').innerText()).includes('WitnessBridge') && (await c.locator('#peer-list').innerText()).includes('WitnessBridge'),'bridge discovery');
  await wait(async()=> (await c.locator('#lemma-list').innerText()).includes('bridgehistory'),'CLI bridge historical lemma import');
  const historical=await a.evaluate(room=>JSON.parse(localStorage.getItem('qos-lemmas-'+room)||'{}').bridgehistory,room);
- assert.ok(historical?.twists && historical?.cap,'balanced historical lemma fixture');
+ assert.equal(historical?.twists,'^v><','closed historical lemma twists');
+ assert.equal(historical?.cap,'cap:bridgehistory:0123','closed historical lemma capability');
  assert.ok(injector.send(bid,{kind:'sync-lemmas',entries:[{name:'unsignedhistory',twists:historical.twists,who:'WitnessInjector'}]}));
  await wait(async()=> (await b.locator('#lemma-list').innerText()).includes('unsignedhistory'),'unsigned legacy sync-lemmas import');
  console.log('PASS unsigned sync-lemmas import');
