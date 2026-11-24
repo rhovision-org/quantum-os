@@ -1,6 +1,6 @@
 # quantum-os
 
-**In summary**
+**In summary:**
 
 QuantumOS (QOS) is a P2P Slack or Discord designed for making group decisions and deploying group resources, with a Rholo interface for when consensus needs to be publicly recorded and resources need to be exchanged.
 
