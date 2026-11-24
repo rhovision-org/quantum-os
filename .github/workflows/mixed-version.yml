@@ -26,6 +26,19 @@ jobs:
         run: |
           git worktree add --detach /tmp/legacy 86a569f99470b265784ab7d4d1189a03f375d50a
           git worktree add --detach /tmp/candidate 215ff866447ba5bea26340063171e03e6cd11d27
+          # Both sides receive the same separately reviewed note fix. This is
+          # a conditional integration witness, not unmodified legacy acceptance.
+          fix=3cb628aa2cefa405b72b9f95cb8b77171915d6b5
+          git fetch origin refs/heads/fix/note-closure-conservation
+          git diff 86a569f99470b265784ab7d4d1189a03f375d50a "$fix" -- packages/browser/src/notes.ts packages/browser/src/app.ts > /tmp/note-closure.patch
+          test -s /tmp/note-closure.patch
+          for d in /tmp/legacy /tmp/candidate; do
+            git -C "$d" apply --check /tmp/note-closure.patch
+            git -C "$d" apply /tmp/note-closure.patch
+            echo "Pinned base $(git -C "$d" rev-parse HEAD) + note fix $fix"
+            git -C "$d" diff --check
+            git -C "$d" diff --stat
+          done
           for d in /tmp/legacy /tmp/candidate; do
             (cd "$d"; pnpm build:wasm; pnpm install; pnpm build:browser; pnpm build:signaling)
           done
