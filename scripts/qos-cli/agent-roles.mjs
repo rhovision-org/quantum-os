@@ -29,7 +29,7 @@ export const ROLES = {
     duties: {
       intro: true, greet: true, namePrompt: true, silentQuarter: true,
       dominator: true, discrepancy: true, stimulate: true, synthesize: true,
-      verify: false,
+      verify: false, history: true,
     },
   },
 
@@ -43,7 +43,7 @@ export const ROLES = {
     duties: {
       intro: true, greet: false, namePrompt: false, silentQuarter: false,
       dominator: false, discrepancy: true, stimulate: false, synthesize: false,
-      verify: false,
+      verify: false, history: true,
     },
   },
 
