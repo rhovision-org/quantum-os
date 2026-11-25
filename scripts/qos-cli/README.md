@@ -199,6 +199,8 @@ node facilitator-faq.mjs --selftest          # /facil ask answers QOS/decision b
 node facilitator-advisor.selftest.mjs        # advisor failures surface (incl. a Claude session limit)
 node skills.selftest.mjs                     # activity skills parse, load by name/path, reach the advisor's prompt
 node skill-play.e2e.mjs                      # an agent with a skill answers /greeter rules and /greeter play over a relay
+node fork-host.selftest.mjs                  # fork grants: owner check, use limits, expiry, revoke + stop, restart
+node fork.e2e.mjs                            # a real fork: the owner's grant, a request from outside, a copy in room B, revoke stop
 ```
 
 The dyncap suite proves the witness port matches the browser byte-for-byte

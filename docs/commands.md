@@ -566,7 +566,7 @@ Finds a **live** AI agent in the room and relays `/<role> ask <question>` as cha
 
 Direct addressing is not limited to the built-in roles. If a live peer announced a custom role such as `heckler`, `/heckler help` (or any `/heckler …` line) is relayed exactly like `/skeptic …`. If `heckler` is the agent's display name but its role is `skeptic`, the browser relays `/skeptic …` to that agent instead. The lookup uses the live `peers` roster, not the sticky badge cache, so a departed agent does not become a phantom command.
 
-### `/agent [add|claude|roles] [role] [name]`
+### `/agent [add|claude|roles|grant|grants|revoke|fork] [role] [name]`
 
 Getting an AI agent into the room. An agent is a headless peer (`scripts/qos-cli/agent.mjs`) that must run on *some* computer, so the browser cannot start one — but it can reduce that to one paste.
 
@@ -576,6 +576,14 @@ Getting an AI agent into the room. An agent is a headless peer (`scripts/qos-cli
 - `--ai claude|anthropic|deepseek|none` names the model provider — each a plugin in [`scripts/qos-cli/ai-providers/`](../scripts/qos-cli/ai-providers/README.md), where your own can be added — and `--model` a model. They reach `add-agent.sh` as `AI=`/`AI_MODEL=`. A provider's key (`DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`) is read from the agent machine's environment; the copied line never carries one, and the room never sees one. With no `--ai`, the script picks: `claude` CLI, else `ANTHROPIC_API_KEY`, else `DEEPSEEK_API_KEY`; with none it **stops** and says how to set one up — an agent runs on your own key or plan (`--ai none` starts one without AI on purpose).
 - **Skills** are an activity's **rules and context** as a Markdown file. Every agent has the [standard set](../scripts/qos-cli/skills/README.md) (brainstorm, debate, retrospective, story-round, twenty-questions, word-chain) with no flag: in the room `/<role> use <skill>` starts one. `--skill <name>[,<name>]` makes one the starting activity, or adds an absolute path to your own `.md` on the agent's computer. It reaches `add-agent.sh` as `SKILL=` and the agent as `--skill`; the rules ride in every prompt the agent's AI sees, so a skill needs an AI (`--ai none` refuses one). In the room, `/<role> rules` shows them and `/<role> play <move>` takes a turn.
 - Roles: `facilitator` (default), `skeptic`, `scribe`, `greeter`, `observer`. A first word that is not a role is the start of the name (`/agent add Socrates`). Names are restricted to letters, digits, space, `.`, `_`, `-` so they quote into the shell line safely.
+
+**Forking an agent into another room.** The browser that ran `/agent add` is that agent's **owner** (an owner capability rides in the copied line's environment). The owner can let someone in a *different* room have a copy:
+
+- `/agent grant [agent] [uses N] [days D]` asks the agent for a **fork grant** (`cap:fork:…`; default 1 use, 7 days; at most 20 and 30), and copies `/agent fork cap:fork:…` to the clipboard to hand on.
+- In their own room, the holder runs `/agent fork cap:fork:… [name]`. A copy of the agent joins that room with the same role, skills and AI provider, and **none of the owner's room**: no memory, no chat. It runs on the owner's computer and AI account.
+- `/agent grants [agent]` lists grants; `/agent revoke <id> [stop] [agent]` stops new copies, and with `stop` ends the running ones.
+
+The request travels through the room the grant names (the agent listens there), so the requester never needs the owner's room. Detail and limits: [SECURITY.md](../SECURITY.md#room-agents-owner-and-fork-grants-agent-grant--agent-fork), [`fork-host.mjs`](../scripts/qos-cli/fork-host.mjs).
 
 Both outputs carry the room capability. Local only, never broadcast; with the room hidden (`/room hide`) the cap is masked on screen and only the clipboard holds it in full. Pure builder: `agent-invite.ts`, `test/agent-invite.test.mjs`.
 

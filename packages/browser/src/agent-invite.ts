@@ -131,17 +131,71 @@ const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
  * It keeps its own checkout under ~/.qos-agents, so it never touches a
  * development clone, and updates it on every run.
  */
-export function agentShellCommand(roomCap: string, req: AgentRequest, signalUrl = DEFAULT_SIGNAL): string {
+export function agentShellCommand(roomCap: string, req: AgentRequest, signalUrl = DEFAULT_SIGNAL, owner?: string): string {
   const d = `"$HOME/.qos-agents/quantum-os"`;
   const sig = signalUrl && signalUrl !== DEFAULT_SIGNAL ? `SIGNAL=${quote(signalUrl)} ` : "";
   const name = req.name ? ` ${quote(req.name)}` : "";
   return `if [ -d ${d}/.git ]; then git -C ${d} pull -q --ff-only; `
     + `else git clone -q --depth 1 ${REPO_URL}.git ${d}; fi && `
-    + `${sig}${aiEnv(req)}bash ${d}/scripts/qos-cli/add-agent.sh ${quote(roomCap)} ${req.role}${name}`;
+    + `${sig}${ownerEnv(owner)}${aiEnv(req)}bash ${d}/scripts/qos-cli/add-agent.sh ${quote(roomCap)} ${req.role}${name}`;
+}
+
+/**
+ * The owner capability rides in the agent's environment, so that whoever holds
+ * it — this browser, and the computer running the agent — can ask the agent for
+ * fork grants (`/agent grant`). Never a command-line argument: those show in `ps`.
+ */
+function ownerEnv(owner?: string): string {
+  return owner && OWNER_TOKEN_RE.test(owner) ? `QOS_AGENT_OWNER=${quote(owner)} ` : "";
+}
+
+export const OWNER_TOKEN_RE = /^cap:owner:[0-7]{2,128}$/;
+export const FORK_TOKEN_RE = /^cap:fork:[0-7]{2,128}$/;
+const GRANT_ID_RE = /^[0-9a-f]{4,8}$/;
+const NAME_RE = /^[A-Za-z][A-Za-z0-9 ._-]{0,31}$/;
+
+/** `/agent grant [agent] [uses N] [days D]` */
+export function parseGrantArgs(words: string[]): { agent?: string; uses?: number; days?: number } | { error: string } {
+  const out: { agent?: string; uses?: number; days?: number } = {};
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i].toLowerCase();
+    if (w === "uses" || w === "days") {
+      const n = Number(words[++i]);
+      const max = w === "uses" ? 20 : 30;
+      if (!Number.isInteger(n) || n < 1 || n > max) return { error: `${w} is a whole number from 1 to ${max}` };
+      out[w] = n;
+    } else if (!out.agent) out.agent = words[i];
+    else return { error: `didn't understand "${words[i]}" — /agent grant [agent] [uses N] [days D]` };
+  }
+  return out;
+}
+
+/** `/agent revoke <grant id> [stop] [agent]` */
+export function parseRevokeArgs(words: string[]): { id: string; stop: boolean; agent?: string } | { error: string } {
+  let id = "", stop = false, agent: string | undefined;
+  for (const raw of words) {
+    const w = raw.toLowerCase();
+    if (w === "stop" || w === "--stop") stop = true;
+    else if (!id && GRANT_ID_RE.test(w)) id = w;
+    else if (!agent) agent = raw;
+    else return { error: `didn't understand "${raw}"` };
+  }
+  if (!id) return { error: "which grant? /agent grants lists them — /agent revoke <id> [stop]" };
+  return agent ? { id, stop, agent } : { id, stop };
+}
+
+/** `/agent fork <cap:fork:…> [name]` */
+export function parseForkArgs(words: string[]): { token: string; name?: string } | { error: string } {
+  const token = words[0] ?? "";
+  if (!FORK_TOKEN_RE.test(token)) return { error: "paste the fork grant you were given: /agent fork cap:fork:… [name]" };
+  const name = words.slice(1).join(" ");
+  if (!name) return { token };
+  if (!NAME_RE.test(name)) return { error: "a name is up to 32 letters, digits, spaces, '.', '_' or '-', starting with a letter" };
+  return { token, name };
 }
 
 /** The same request, worded for a Claude Code session to carry out. */
-export function agentClaudePrompt(roomLink: string, req: AgentRequest, signalUrl = DEFAULT_SIGNAL): string {
+export function agentClaudePrompt(roomLink: string, req: AgentRequest, signalUrl = DEFAULT_SIGNAL, owner?: string): string {
   const named = req.name ? ` named "${req.name}"` : "";
   const sig = signalUrl && signalUrl !== DEFAULT_SIGNAL ? `SIGNAL=${quote(signalUrl)} ` : "";
   const p = providerOf(req);
@@ -153,7 +207,7 @@ export function agentClaudePrompt(roomLink: string, req: AgentRequest, signalUrl
   return `Add a ${req.role} AI agent${named} to my QuantumOS room ${roomLink}${using}. `
     + skillNote
     + keyNote
-    + `Clone ${REPO_URL} and run: ${sig}${aiEnv(req)}bash scripts/qos-cli/add-agent.sh ${quote(roomLink)} ${req.role}`
+    + `Clone ${REPO_URL} and run: ${sig}${ownerEnv(owner)}${aiEnv(req)}bash scripts/qos-cli/add-agent.sh ${quote(roomLink)} ${req.role}`
     + `${req.name ? " " + quote(req.name) : ""} `
     + `— if the signaling server (${signalUrl || DEFAULT_SIGNAL}) is blocked from your environment, tell me instead of retrying. `
     + `Guide: ${AGENT_DOCS_URL}`;
@@ -166,7 +220,7 @@ export function agentClaudePrompt(roomLink: string, req: AgentRequest, signalUrl
  */
 export function maskCap(text: string, roomCap: string): string {
   if (!roomCap) return text;
-  const hex = roomCap.split(":")[2] ?? roomCap;
-  const short = `cap:room:${hex.slice(0, 8)}…`;
+  const [, label = "room", hex = roomCap] = roomCap.split(":");
+  const short = `cap:${label}:${hex.slice(0, 8)}…`;
   return text.split(roomCap).join(short).split(encodeURIComponent(roomCap)).join(short);
 }

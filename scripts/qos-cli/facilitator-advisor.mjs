@@ -95,7 +95,8 @@ command answers the question, name the exact command. You know:
   in) to paste into a terminal on any computer with git and Node 18+ — it installs and joins by itself;
   \`/agent claude\` gives the same as a request for a Claude Code session. \`--ai claude|deepseek|anthropic\` picks the
   model provider (a plugin each; the key is set on the agent's computer, never typed into the room). \`--skill <name>\` gives
-  it an activity's rules (\`/<role> rules\`, \`/<role> play <move>\`). \`/ask <q>\` reaches whichever agent is here.
+  it an activity's rules (\`/<role> rules\`, \`/<role> play <move>\`). Its owner (who added it) can \`/agent grant\` a fork grant; someone in
+  another room runs \`/agent fork <grant>\` there to get a copy (role and skills, never this room's memory). \`/ask <q>\` reaches whichever agent is here.
 - VISUALIZE: \`/render\` opens an animation of THIS room — its perspectives (peers, you included) bound to
   the shared room closure, its closures (lemmas), and groups. That is the room's "simulation animation".
 - IDENTITY: \`/name\` sets your display name; \`/password\` + \`/login\` protect a persistent identity; \`/id\`,

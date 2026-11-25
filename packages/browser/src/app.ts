@@ -38,7 +38,8 @@ import { parseDefinition, parseInvocation, expandCommand, expandCallSites,
 import { createCalls, type Calls } from "./calls.js";
 import { QosCommand } from "./qos-command.js";
 import { pickAskAgent, agentAskText, liveAgentTarget, agentCommand } from "./agent-ask.js";
-import { AGENT_ROLES, STANDARD_SKILLS, AGENT_PROVIDERS, AGENT_DOCS_URL, parseAgentRequest, providerOf, agentShellCommand, agentClaudePrompt, maskCap } from "./agent-invite.js";
+import { AGENT_ROLES, STANDARD_SKILLS, AGENT_PROVIDERS, AGENT_DOCS_URL, parseAgentRequest, providerOf, agentShellCommand, agentClaudePrompt, maskCap,
+         parseGrantArgs, parseRevokeArgs, parseForkArgs, OWNER_TOKEN_RE, FORK_TOKEN_RE } from "./agent-invite.js";
 import { GoalStore, parseGoalAdd } from "./goal-store.js";
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
@@ -3552,6 +3553,82 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
   }
 }
 
+// ---- agent ownership and fork grants (/agent grant · grants · revoke · fork) ----
+const sys = (text: string) => addMessage("", text, "system");
+// One owner capability per browser: every agent added from here carries it
+// (QOS_AGENT_OWNER), so this browser can ask any of them for a fork grant.
+const AGENT_OWNER_KEY = "qos-agent-owner";
+function agentOwnerCap(create: boolean): string | null {
+  try {
+    const have = localStorage.getItem(AGENT_OWNER_KEY);
+    if (have && OWNER_TOKEN_RE.test(have)) return have;
+    if (!create) return null;
+    const fresh = generateCapability("owner");
+    localStorage.setItem(AGENT_OWNER_KEY, fresh);
+    return fresh;
+  } catch {
+    return create ? generateCapability("owner") : null;   // no storage: owner for this line only
+  }
+}
+/** Agents we asked something, and until when an answer is expected — an unasked reply is ignored. */
+const pendingAgentCtl = new Map<string, number>();
+function pickAgentFor(which?: string): { peerId: string } | { error: string } {
+  const present = [...peerAgents].filter(([id]) => peers.has(id));
+  if (!present.length) return { error: "no AI agent is in this room right now" };
+  if (which) {
+    const t = liveAgentTarget(present, peerNames, which);
+    return t ? { peerId: t.peerId } : { error: `no agent "${which}" here — /agent lists them` };
+  }
+  if (present.length > 1) return { error: `${present.length} agents here — say which: ${present.map(([id, r]) => `${r} (${peerLabel(id)})`).join(", ")}` };
+  return { peerId: present[0][0] };
+}
+function onAgentCtlReply(from: string, d: Record<string, unknown>): void {
+  const until = pendingAgentCtl.get(from);
+  if (!until || until < Date.now()) return;
+  pendingAgentCtl.delete(from);
+  const who = peerLabel(from);
+  const text = String(d.text ?? "").slice(0, 2000);
+  if (!d.ok) { sys(`✗ ${who}: ${text}`); return; }
+  const token = typeof d.token === "string" && FORK_TOKEN_RE.test(d.token) ? d.token : null;
+  if (d.op === "grant" && token) {
+    const line = `/agent fork ${token}`;
+    sys(`✓ ${who}: ${text}`);
+    sys("Give this line to whoever should have a copy; they paste it in their own room:");
+    sys("```\n" + (hideRoom ? maskCap(line, token) : line) + "\n```");
+    navigator.clipboard?.writeText(line).then(() => sys("✓ copied to your clipboard"), () => {});
+    sys(`  The copy brings ${who}'s role and skills, not this room's memory. It runs on that agent's computer and AI account. `
+      + `/agent revoke ${String(d.id ?? "")} stops new copies; add stop to remove the running ones.`);
+    return;
+  }
+  sys(`${who}:`);
+  for (const l of text.split("\n")) sys(`  ${l}`);
+}
+/** Ask the agent behind a fork grant for a copy of itself in the active room. */
+function forkAgentHere(token: string, name?: string): void {
+  const room = activeRoom;
+  const say = (t: string) => { const prev = activeRoom; setActiveRoom(room); try { sys(t); } finally { setActiveRoom(prev); } };
+  let done = false;
+  // The grant is a room capability: the agent listens in the room it names, so
+  // joining it for a moment is how a request reaches the agent from here.
+  const tp: QOSPeer = new QOSPeer({
+    signalingUrl: room.signalingUrl, roomId: token, peerId: generateCapability("peer"), iceServers: [],
+    onPeerReady: (id) => { tp.send(id, { kind: "fork-request", room: room.roomId, signal: room.signalingUrl, ...(name ? { name } : {}) }); },
+    onMessage: (_from, data) => {
+      const d = data as Record<string, unknown> | null;
+      if (done || !d || d.kind !== "fork-reply") return;
+      done = true; clearTimeout(timer); tp.disconnect();
+      say(d.ok ? `✓ ${String(d.text ?? "")}` : `✗ ${String(d.text ?? "")}`);
+    },
+  });
+  const timer = setTimeout(() => {
+    if (done) return;
+    done = true; tp.disconnect();
+    say("✗ no answer from the agent behind that grant — its computer may be off, or the grant revoked.");
+  }, 20_000);
+  say("asking the agent behind that grant for a copy in this room… (its owner's agent will hold this room's link, like any member)");
+  void tp.connect().catch(() => { if (!done) { done = true; clearTimeout(timer); say("✗ couldn't connect to ask"); } });
+}
+
 function handleCommand(raw: string): string[] {
   const body = raw.slice(1).trim();
   const parts = body.split(/\s+/);
@@ -6079,6 +6156,29 @@ function handleCommand(raw: string): string[] {
           + "--skill <name> makes one the starting activity; --skill /abs/path.md adds your own.");
         break;
       }
+      if (sub === "grant" || sub === "grants" || sub === "revoke") {
+        // Owner commands go to the agent as a DIRECT envelope carrying this
+        // browser's owner capability — never as chat, which every peer sees.
+        const owner = agentOwnerCap(false);
+        if (!owner) { sys("✗ this browser isn't the owner of an agent. The agent you add with /agent add is yours — its owner is whoever added it."); break; }
+        const parsed = sub === "grant" ? parseGrantArgs(restWords) : sub === "revoke" ? parseRevokeArgs(restWords) : { agent: restWords[0] };
+        if ("error" in parsed) { sys(`✗ ${parsed.error}`); break; }
+        const target = pickAgentFor(parsed.agent);
+        if ("error" in target) { sys(`✗ ${target.error}`); break; }
+        const env: Record<string, unknown> = { kind: "agent-ctl", op: sub, owner };
+        if (sub === "grant") { const g = parsed as { uses?: number; days?: number }; if (g.uses) env.uses = g.uses; if (g.days) env.days = g.days; }
+        if (sub === "revoke") { const r = parsed as { id: string; stop: boolean }; env.id = r.id; env.stop = r.stop; }
+        pendingAgentCtl.set(target.peerId, Date.now() + 30_000);
+        if (!qpeer?.send(target.peerId, env)) { sys(`✗ couldn't reach ${peerLabel(target.peerId)} right now`); break; }
+        sys(`asking ${peerLabel(target.peerId)}…`);
+        break;
+      }
+      if (sub === "fork") {
+        const f = parseForkArgs(restWords);
+        if ("error" in f) { sys(`✗ ${f.error}`); break; }
+        forkAgentHere(f.token, f.name);
+        break;
+      }
       if (sub !== "add" && sub !== "claude") {
         sys("usage: /agent · /agent add [role] [name] [--ai <provider>] [--model <m>] [--skill <s>] · /agent claude [role] [name] [--ai …] · /agent roles");
         break;
@@ -6087,9 +6187,12 @@ function handleCommand(raw: string): string[] {
       if ("error" in req) { sys(`✗ ${req.error}`); break; }
       const cap = activeRoom.roomId;
       const sig = activeRoom.signalingUrl;
-      const shell = agentShellCommand(cap, req, sig);
-      const prompt = agentClaudePrompt(roomUrl(), req, sig);
-      const show = (t: string) => (hideRoom ? maskCap(t, cap) : t);
+      const owner = agentOwnerCap(true)!;
+      const shell = agentShellCommand(cap, req, sig, owner);
+      const prompt = agentClaudePrompt(roomUrl(), req, sig, owner);
+      // The owner capability never shows on screen (it is in every screen share);
+      // the clipboard holds it in full.
+      const show = (t: string) => maskCap(hideRoom ? maskCap(t, cap) : t, owner);
       const prov = providerOf(req);
       const who = (req.name ? `${req.role} named ${req.name}` : req.role)
         + (prov && prov.id !== "none" ? ` running on ${prov.id}${req.model ? ` (${req.model})` : ""}` : prov ? " with no AI" : "")
@@ -6125,6 +6228,7 @@ function handleCommand(raw: string): string[] {
         sys("  No terminal? /agent claude gives the same request worded for Claude Code.");
       }
       sys("  ⚠ It carries this room's link — whoever you give it to can join the room.");
+      sys("  This browser becomes the agent's owner: /agent grant lets someone in another room have a copy of it.");
       break;
     }
 
@@ -7674,6 +7778,7 @@ async function connect(): Promise<void> {
         // for isReachable) — nothing to do here, receiving it at all is the
         // point (it updates lastHeardVia inside peer.ts before this fires).
         if (d.kind === "presence") return;
+        if (d.kind === "agent-ctl-reply") { onAgentCtlReply(from, d); return; }
         if (d.kind === "name") {
           const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
           const nm = String(d.name ?? "");

@@ -138,6 +138,35 @@ ok("every shipped skill name passes the parser", () => {
 ok("Claude request mentions the skill", () =>
   assert.ok(agentClaudePrompt(LINK, { role: "greeter", skills: ["twenty-questions"] }).includes("twenty-questions")));
 
+const OWNER = "cap:owner:0145236701452367";
+ok("the owner capability reaches add-agent.sh as QOS_AGENT_OWNER, in the environment only", () => {
+  const cmd = agentShellCommand(CAP, { role: "facilitator" }, DEFAULT_SIGNAL, OWNER);
+  const out = execFileSync("/bin/bash", ["-c", `git() { :; }; bash() { echo "$QOS_AGENT_OWNER|$*"; }; ${cmd}`],
+    { env: { HOME: "/nonexistent", PATH: process.env.PATH } }).toString().trim();
+  const [env, argv] = out.split("|");
+  assert.equal(env, OWNER);
+  assert.ok(!argv.includes(OWNER), "not a command-line argument");
+});
+ok("a malformed owner is left out", () => assert.ok(!agentShellCommand(CAP, { role: "facilitator" }, DEFAULT_SIGNAL, "cap:owner:x'; rm").includes("QOS_AGENT_OWNER")));
+ok("the Claude request carries the owner too", () => assert.ok(agentClaudePrompt(LINK, { role: "facilitator" }, DEFAULT_SIGNAL, OWNER).includes(`QOS_AGENT_OWNER='${OWNER}'`)));
+ok("maskCap hides an owner cap by its own label", () => assert.equal(maskCap(`x ${OWNER} y`, OWNER), "x cap:owner:01452367… y"));
+ok("grant args", () => {
+  assert.deepEqual(m.parseGrantArgs(["skeptic", "uses", "3", "days", "7"]), { agent: "skeptic", uses: 3, days: 7 });
+  assert.deepEqual(m.parseGrantArgs([]), {});
+  assert.ok("error" in m.parseGrantArgs(["uses", "99"]));
+  assert.ok("error" in m.parseGrantArgs(["days", "0"]));
+});
+ok("revoke args", () => {
+  assert.deepEqual(m.parseRevokeArgs(["0e7ccf09", "stop"]), { id: "0e7ccf09", stop: true });
+  assert.deepEqual(m.parseRevokeArgs(["facilitator", "0e7c"]), { id: "0e7c", stop: false, agent: "facilitator" });
+  assert.ok("error" in m.parseRevokeArgs(["stop"]));
+});
+ok("fork args", () => {
+  assert.deepEqual(m.parseForkArgs(["cap:fork:01234567", "Quiz", "Master"]), { token: "cap:fork:01234567", name: "Quiz Master" });
+  assert.ok("error" in m.parseForkArgs(["cap:room:0123"]));
+  assert.ok("error" in m.parseForkArgs(["cap:fork:0123", "$(id)"]));
+});
+
 ok("maskCap hides the cap, raw and URL-encoded", () => {
   const t = `a ${CAP} b ${encodeURIComponent(CAP)} c`;
   const out = maskCap(t, CAP);
