@@ -32,7 +32,7 @@ import { generateCapability, validateCapability, parseTwists,
 import { newDynCapState, signEnvelope, serializeState, deserializeState } from "./dyncap.mjs";
 import { makeAdvisor } from "./facilitator-advisor.mjs";
 import { loadProvider } from "./ai-providers/index.mjs";
-import { loadSkill, listSkills } from "./skills.mjs";
+import { loadSkill, listSkills, standardSkills } from "./skills.mjs";
 import { answerFromKnowledge } from "./facilitator-faq.mjs";
 import { createGameRecorder, compactForPrompt, trustWeightsFromGroups } from "./game-log.mjs";
 import { ROLES, DEFAULT_ROLE, resolveRole, dutiesOf } from "./agent-roles.mjs";
@@ -150,6 +150,16 @@ export function parseArgs(argv) {
   return a;
 }
 
+/** Split the model's play reply into what is posted and its private NOTE: lines. */
+export function splitNotes(text) {
+  const said = [], notes = [];
+  for (const line of String(text ?? "").split("\n")) {
+    const m = /^\s*\**NOTE\**\s*:\s*\**\s*(.*)$/i.exec(line);
+    if (m) { if (m[1].trim()) notes.push(m[1].trim().slice(0, 400)); } else said.push(line);
+  }
+  return { said: said.join("\n").trim(), notes };
+}
+
 function extractRoomCap(s) {
   if (!s) return null;
   if (s.startsWith("cap:room:")) return s;
@@ -194,6 +204,7 @@ export async function run(args) {
   const chairStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+(?:chair|deliberate)\\b\\s*`, "i");
   const gameStartStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+(?:start|record|begin)\\b\\s*`, "i");
   const playStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+(?:play|move)\\b\\s*`, "i");
+  const useStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+(?:use|activity)\\b\\s*`, "i");
   const rulesStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+rules\\b\\s*`, "i");
   const faucetStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+faucet\\b\\s*`, "i");
   const bareNameRe = new RegExp(`^(?:${aliasAlt})\\??$`, "i");
@@ -330,13 +341,22 @@ export async function run(args) {
     try { aiProvider = await loadProvider(args.aiBackend || "anthropic"); }
     catch (e) { console.error(`${TAG} ${e?.message ?? e}`); process.exit(1); return; }
   }
-  const skills = [];
+  // Skills: every agent has the standard set (skills/*.md) available; --skill
+  // adds your own and makes it the active activity. Only active skills' rules
+  // ride in the prompt — the rest are named, so the room can pick one with
+  // `/<cmd> use <name>`. Both arrays are mutated in place (the advisor reads them live).
+  const availableSkills = standardSkills();
+  const skills = [];   // active
   for (const spec of args.skills ?? []) {
-    try { const k = loadSkill(spec); if (!skills.some((x) => x.name === k.name)) skills.push(k); }
+    let k;
+    try { k = loadSkill(spec); }
     catch (e) { console.error(`${TAG} ${e?.message ?? e}`); process.exit(1); return; }
+    const at = availableSkills.findIndex((x) => x.name === k.name);
+    if (at >= 0) availableSkills[at] = k; else availableSkills.push(k);
+    if (!skills.some((x) => x.name === k.name)) skills.push(k);
   }
   if (skills.length && !args.ai) console.log(`${TAG} --skill ${skills.map((k) => k.name).join(",")} loaded, but without --ai I can only post the rules (\`/${CMD} rules\`), not play.`);
-  const advisor = makeAdvisor({ ai: args.ai, backend: args.aiBackend, provider: aiProvider, skills, model: args.aiModel, persona: role.persona, roleName: role.name, cmd: CMD, faucetActive: !!facilKey, log: console.log });
+  const advisor = makeAdvisor({ ai: args.ai, backend: args.aiBackend, provider: aiProvider, skills, skillIndex: availableSkills, model: args.aiModel, persona: role.persona, roleName: role.name, cmd: CMD, faucetActive: !!facilKey, log: console.log });
   const aiFailure = () => advisor.lastError
     ? `The AI backend did not answer — ${advisor.lastError.slice(0, 240)}.`
     : "The AI backend did not answer.";
@@ -553,7 +573,7 @@ export async function run(args) {
     ? " (QOS/decision basics or open-ended)"
     : " (QOS/decision basics; open-ended needs --ai)";
   const faucetHint = facilKey ? ` · \`/${CMD} faucet\` (sends ${FAUCET_REV} TEST REV to your own address, which your browser fills in; pass one to override — test systems only)` : "";
-  const helpText = () => `I'm ${myName}, ${role.blurb} Commands: \`/${CMD}\` (am I here?) · \`/${CMD} help\` · \`/${CMD} ask <question>\`${askHint} · \`/${CMD} optimize <problem>\`${aiHint} (facilitate an annealing-style optimization round) · \`/${CMD} chair <topic>\`${aiHint} (chair a structured deliberation → define · alternatives · evaluate · disagreements · agreements · closure, then record the decision; \`/${CMD} next\`/\`back\`/\`close\`/\`cancel\` to steer) · \`/${CMD} start <label> [payoffs a,b,c,d] [stag=…] [hare=…] [predict: …]\` / \`/${CMD} stop\` (record a live game: every poll, estimate, lemma and message, timestamped and signed → a structured record; \`/${CMD} games\`, \`/${CMD} summarize\`${aiHint}, \`/${CMD} publish\`) · ${skills.length ? `\`/${CMD} play <move>\` · \`/${CMD} skills\` · \`/${CMD} rules\` (activities: ${skills.map((k) => k.name).join(", ")}) · ` : ""}\`/${CMD} list [n]\` (the room's screen history, oldest→newest — default 25, max 500) · \`/${CMD} trust\` (my standing) · \`/${CMD} health\` (uptime, peers, budget, CPU) · \`/${CMD} off\` / \`/${CMD} on\` (mute/unmute)${faucetHint}. I'm a full member — \`/gov trust\` me up or \`/gov censure\` me down. About this room (and how to make your own): ${ABOUT_URL}`;
+  const helpText = () => `I'm ${myName}, ${role.blurb} Commands: \`/${CMD}\` (am I here?) · \`/${CMD} help\` · \`/${CMD} ask <question>\`${askHint} · \`/${CMD} optimize <problem>\`${aiHint} (facilitate an annealing-style optimization round) · \`/${CMD} chair <topic>\`${aiHint} (chair a structured deliberation → define · alternatives · evaluate · disagreements · agreements · closure, then record the decision; \`/${CMD} next\`/\`back\`/\`close\`/\`cancel\` to steer) · \`/${CMD} start <label> [payoffs a,b,c,d] [stag=…] [hare=…] [predict: …]\` / \`/${CMD} stop\` (record a live game: every poll, estimate, lemma and message, timestamped and signed → a structured record; \`/${CMD} games\`, \`/${CMD} summarize\`${aiHint}, \`/${CMD} publish\`) · ${availableSkills.length ? `\`/${CMD} skills\` · \`/${CMD} use <activity>\` · \`/${CMD} rules\` · \`/${CMD} play <move>\` (activities: ${availableSkills.map((k) => k.name).join(", ")}) · ` : ""}\`/${CMD} list [n]\` (the room's screen history, oldest→newest — default 25, max 500) · \`/${CMD} trust\` (my standing) · \`/${CMD} health\` (uptime, peers, budget, CPU) · \`/${CMD} off\` / \`/${CMD} on\` (mute/unmute)${faucetHint}. I'm a full member — \`/gov trust\` me up or \`/gov censure\` me down. About this room (and how to make your own): ${ABOUT_URL}`;
   const statusText = () => `👋 Yes, I'm here — ${myName} (${role.name})${muted ? ` — currently muted (\`/${CMD} on\` to wake me)` : ""}.${standing.governed ? ` Trust ${standing.level}${standing.discredited ? " — stood down" : ` (≤${standing.budget}/5min)`}.` : ""} \`/${CMD} help\` · \`/${CMD} trust\`.`;
   const introText = () => `Hi — I'm ${myName}, ${role.blurb} Say \`/${CMD}\` or \`/${CMD} help\` to reach me, or \`/${CMD} ask <q>\` for QuantumOS/decision basics${advisor.enabled ? " or anything else" : " (open-ended questions need `--ai`)"}. I'm a full room member — \`/gov trust\`/\`/gov censure\` me; \`/${CMD} trust\` shows my standing. About this room: ${ABOUT_URL}`;
   // Self-introduce to a newly-identified human peer, once per peer per run (direct
@@ -618,14 +638,30 @@ export async function run(args) {
   // and the model's only memory of the game is what it is shown.
   const PLAY_LOG_MAX = 80;
   const playLog = [];   // {name, text}
+  const PLAY_NOTES_MAX = 12;
+  const playNotes = [];   // the agent's own NOTE: lines — its private game memory, never posted
   const playRemember = (name, text) => { playLog.push({ name, text: String(text).slice(0, 600) }); if (playLog.length > PLAY_LOG_MAX) playLog.shift(); };
-  const skillsText = () => skills.length
-    ? `I know: ${skills.map((k) => `**${k.name}** — ${k.description}${k.players ? ` (${k.players} players)` : ""}`).join(" · ")}. \`/${CMD} play <move>\` to play, \`/${CMD} rules [name]\` for the rules.`
-    : `I have no activity skills loaded. Whoever runs me can add one with \`--skill <name>\` (or \`/agent add … --skill <name>\`).`;
-  function handleRules(which) {
-    if (!skills.length) { reply(skillsText(), "agskills", 5_000); return; }
-    const k = which ? skills.find((x) => x.name === which.toLowerCase()) : skills[0];
+  const skillsText = () => availableSkills.length
+    ? `Activities I know: ${availableSkills.map((k) => `**${k.name}**${skills.some((a) => a.name === k.name) ? " (on)" : ""} — ${k.description}${k.players ? ` (${k.players} players)` : ""}`).join(" · ")}. `
+      + `\`/${CMD} use <name>\` picks one, \`/${CMD} rules [name]\` shows its rules, \`/${CMD} play <move>\` plays.`
+    : `I have no activity skills. Whoever runs me can add one with \`--skill <name|path>\`.`;
+  function handleUse(which) {
+    const w = String(which || "").trim().toLowerCase();
+    if (!w) { reply(skillsText(), "agskills", 5_000); return; }
+    if (w === "none" || w === "off" || w === "stop") {
+      skills.length = 0; playLog.length = 0; playNotes.length = 0;
+      reply(`No activity now. \`/${CMD} use <name>\` to start one.`, "aguse", 3_000); return;
+    }
+    const k = availableSkills.find((x) => x.name === w);
     if (!k) { reply(`I don't know "${which}". ${skillsText()}`, "agskills", 5_000); return; }
+    // One activity at a time from the room: switching starts a fresh game.
+    skills.length = 0; skills.push(k); playLog.length = 0; playNotes.length = 0;
+    reply(`▶ **${k.name}** — ${k.description}. \`/${CMD} rules\` for the rules, \`/${CMD} play <move>\` to play.`, null, 0);
+  }
+  function handleRules(which) {
+    if (!availableSkills.length) { reply(skillsText(), "agskills", 5_000); return; }
+    const k = which ? availableSkills.find((x) => x.name === which.toLowerCase()) : skills[0];
+    if (!k) { reply(which ? `I don't know "${which}". ${skillsText()}` : `No activity is on. ${skillsText()}`, "agskills", 5_000); return; }
     reply(`📜 **${k.name}** — ${k.description}\n${k.body.slice(0, 3500)}${k.body.length > 3500 ? "\n…(trimmed)" : ""}`, `agrules:${k.name}`, 20_000);
   }
   // Moves are ruled one at a time, in arrival order: two quick moves must not
@@ -647,13 +683,19 @@ export async function run(args) {
     return run;
   }
   async function playOne(move, fromId) {
-    if (!skills.length) { reply(skillsText(), "agskills", 5_000); return; }
+    if (!skills.length) { reply(`No activity is on — pick one first. ${skillsText()}`, "agskills", 5_000); return; }
     if (!move) { reply(`What's your move? \`/${CMD} play <move>\` — ${skillsText()}`, "playhelp", 8_000); return; }
     if (!advisor.enabled) { reply(`Playing needs AI mode — whoever runs me should start me with \`--ai\` and their own provider key or Claude plan. \`/${CMD} rules\` still posts the rules.`, "playnoai", 20_000); return; }
     const player = fromId ? nameOf(fromId) : "someone";
     playRemember(player, move);
-    const text = await advisor.advise("play", { player, move, transcript: playLog.slice(0, -1) });
-    if (text) { playRemember(myName, text); reply(text, null, 0); return; }
+    const out = await advisor.advise("play", { player, move, transcript: playLog.slice(0, -1), notes: playNotes });
+    if (out) {
+      const { said, notes } = splitNotes(out);
+      for (const n of notes) { playNotes.push(n); if (playNotes.length > PLAY_NOTES_MAX) playNotes.shift(); }
+      if (said) { playRemember(myName, said); reply(said, null, 0); }
+      else reply("(noted)", null, 0);
+      return;
+    }
     reply(`${aiFailure()} Your move is noted; try again in a moment.`, null, 0);
   }
 
@@ -955,6 +997,7 @@ export async function run(args) {
       if (sub === "ask") { bg(handleAsk(raw.replace(askStripRe, "").trim(), fromId), "ask"); return true; }
       if (sub === "play" || sub === "move") { bg(handlePlay(raw.replace(playStripRe, "").trim(), fromId), "play"); return true; }
       if (sub === "skills" || sub === "skill") { reply(skillsText(), "agskills", 5_000); return true; }
+      if (sub === "use" || sub === "activity") { handleUse(raw.replace(useStripRe, "").trim()); return true; }
       if (sub === "rules") { handleRules(raw.replace(rulesStripRe, "").trim()); return true; }
       if (sub === "faucet" || sub === "testrev") { bg(handleFaucet(raw.replace(faucetStripRe, "").trim(), fromId), "faucet"); return true; }
       if (sub === "optimize" || sub === "opt") { bg(handleOptimize(raw.replace(optStripRe, "").trim()), "optimize"); return true; }

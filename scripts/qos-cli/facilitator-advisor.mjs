@@ -176,7 +176,8 @@ function userPrompt(mode, ctx) {
     return `Optimization problem: "${ctx.problem}"${ctxLine}\n\nFacilitate the next step of the round.`;
   }
   if (mode === "play") {
-    return `The room so far (oldest first; the game state is in here):\n${t || "(nothing yet)"}\n\n`
+    const notes = ctx.notes?.length ? `Your private notes (only you see these):\n${ctx.notes.join("\n")}\n\n` : "";
+    return `The room so far (oldest first; the game state is in here):\n${t || "(nothing yet)"}\n\n${notes}`
       + `${ctx.player || "A participant"} says: "${ctx.move}"\n\n`
       + `Respond as the activity's rules require, in one short chat message.`;
   }
@@ -192,16 +193,18 @@ function userPrompt(mode, ctx) {
   return `Recent transcript:\n${t}\n\nIf there is a real disagreement, name the crux in one sentence and suggest the single question or next step that would move toward agreement. If people are converging or there is no real disagreement, reply NONE.`;
 }
 
-export function makeAdvisor({ ai = false, backend = "anthropic", provider = null, apiKey, model = null, claudeBin = "claude", env = process.env, persona = null, cmd = "facil", roleName = "facilitator", faucetActive = false, skills = [], log = () => {}, fetchImpl } = {}) {
+export function makeAdvisor({ ai = false, backend = "anthropic", provider = null, apiKey, model = null, claudeBin = "claude", env = process.env, persona = null, cmd = "facil", roleName = "facilitator", faucetActive = false, skills = [], skillIndex = [], log = () => {}, fetchImpl } = {}) {
   // A plugin object wins; otherwise a built-in by name. An `apiKey` argument is
   // the Anthropic key (kept for callers and tests that pass it directly).
   const prov = provider ?? resolveProvider(backend);
   const penv = apiKey !== undefined ? { ...env, ANTHROPIC_API_KEY: apiKey } : env;
   // System prompt = role persona (or the facilitator default) + shared norms/knowledge.
   // Activity skills (skills.mjs) ride in every system prompt, so the agent can
-  // answer a rules question in `ask` as well as run a move in `play`.
-  const skillText = skillsPrompt(skills);
+  // answer a rules question in `ask` as well as run a move in `play`. Both
+  // arrays are read on every call: the room can switch activity mid-run
+  // (`/<cmd> use <skill>`), and the agent mutates them in place.
   const sysFor = (mode) => {
+    const skillText = skillsPrompt(skills, skillIndex);
     const base = sysBase(mode);
     return skillText ? `${base}\n\n${skillText}` : base;
   };

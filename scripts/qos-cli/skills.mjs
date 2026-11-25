@@ -45,6 +45,17 @@ export function listSkills(dir = SKILLS_DIR) {
   return files.map((f) => f.slice(0, -3)).sort();
 }
 
+/**
+ * The standard skills: every built-in in skills/, which every agent (a fork
+ * included) has without a flag. Only their names and one-line descriptions
+ * ride in the prompt until the room picks one, so shipping more costs little.
+ */
+export function standardSkills(dir = SKILLS_DIR) {
+  const out = [];
+  for (const n of listSkills(dir)) { try { out.push(loadSkill(n, { dir })); } catch { /* a broken file is skipped, not fatal */ } }
+  return out;
+}
+
 /** A built-in by name, or your own skill file by path. Throws a reason a person can act on. */
 export function loadSkill(spec, { dir = SKILLS_DIR, cwd = process.cwd() } = {}) {
   const s = String(spec ?? "").trim();
@@ -59,11 +70,18 @@ export function loadSkill(spec, { dir = SKILLS_DIR, cwd = process.cwd() } = {}) 
 }
 
 /** The system-prompt section an agent's AI gets for its loaded skills. */
-export function skillsPrompt(skills) {
-  if (!skills?.length) return "";
+export function skillsPrompt(skills, others = []) {
+  const rest = (others ?? []).filter((o) => !skills?.some((k) => k.name === o.name));
+  const index = rest.length
+    ? `\n\nOTHER ACTIVITIES you can run once someone picks one with \`use <name>\`: ${rest.map((o) => `${o.name} (${o.description})`).join("; ")}.`
+    : "";
+  if (!skills?.length) return index ? index.trim() : "";
   const parts = skills.map((k) => `### Skill: ${k.name}\n${k.description}${k.players ? `\nPlayers: ${k.players}` : ""}\n\n${k.body}`);
   return `ACTIVITY SKILLS. You know how to run or take part in these activities in this room. When a participant `
     + `plays a move or asks about one, follow its rules exactly, keep track of the game state from the room's transcript, `
     + `say whose turn it is, and keep every message short enough for a chat line. Never invent rules a skill does not state; `
-    + `if something is ambiguous, say so and propose a ruling the players can accept or reject.\n\n${parts.join("\n\n")}`;
+    + `if something is ambiguous, say so and propose a ruling the players can accept or reject. `
+    + `To remember something the players must not see (a secret answer, a hidden hand, the full state), write it on its `
+    + `own line starting "NOTE:" — it is kept for you, shown back to you next turn, and never posted. Keep notes current: `
+    + `a later note replaces nothing, so restate what still matters.\n\n${parts.join("\n\n")}${index}`;
 }

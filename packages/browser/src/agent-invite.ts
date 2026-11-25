@@ -41,6 +41,16 @@ export interface AgentRequest {
   skills?: string[];
 }
 
+/**
+ * The standard skills every agent has with no flag (scripts/qos-cli/skills/*.md).
+ * The room picks one with `/<role> use <name>`; `--skill` only makes one the
+ * starting activity or adds your own. test/agent-invite.test.mjs keeps this
+ * list equal to the directory.
+ */
+export const STANDARD_SKILLS: ReadonlyArray<string> = [
+  "brainstorm", "debate", "retrospective", "story-round", "twenty-questions", "word-chain",
+];
+
 /** A skill is a shipped name (skills/<name>.md) or an absolute path to your own .md. */
 export const SKILL_RE = /^(?:[a-z0-9][a-z0-9-]{0,40}|\/[A-Za-z0-9._\/-]{1,200}\.md)$/;
 

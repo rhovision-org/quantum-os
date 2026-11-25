@@ -132,7 +132,7 @@ ok("the skill reaches add-agent.sh as SKILL=", () => {
 ok("every shipped skill name passes the parser", () => {
   const dir = join(here, "../../../scripts/qos-cli/skills");
   const names = readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "README.md").map((f) => f.slice(0, -3));
-  assert.ok(names.length > 0);
+  assert.deepEqual([...m.STANDARD_SKILLS].sort(), names.sort(), "STANDARD_SKILLS matches scripts/qos-cli/skills/");
   for (const n of names) assert.deepEqual(parseAgentRequest(`--skill ${n}`).skills, [n]);
 });
 ok("Claude request mentions the skill", () =>

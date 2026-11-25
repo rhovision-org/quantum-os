@@ -26,10 +26,11 @@ const stub = join(dir, "stub-provider.mjs");
 writeFileSync(stub, `export default { name: "stub", describe: "test", keyEnv: null, defaultModel: "s",
   unavailable() { return null; },
   async complete({ system, prompt }) {
-    const rules = /twenty-questions/.test(system) ? "RULES" : "NORULES";
+    const rules = /You are the game master/.test(system) ? "RULES" : /You facilitate; you do not contribute/.test(system) ? "BRAINSTORM" : "NORULES";
     const prior = /is it alive/.test(prompt.split("says:")[0]) ? "PRIOR" : "FRESH";
+    const saw = /secret-giraffe/.test(prompt) ? "SAWNOTE" : "NONOTE";
     const move = (prompt.match(/says: "([^"]*)"/) || [])[1] || "?";
-    return { text: "STUB " + rules + " " + prior + " move=" + move };
+    return { text: "STUB " + rules + " " + prior + " " + saw + " move=" + move + "\\nNOTE: secret-giraffe" };
   } };`);
 
 run({ signal: `ws://127.0.0.1:${PORT}`, room: ROOM, role: "greeter", state: join(dir, "state"),
@@ -73,6 +74,15 @@ try {
   driver.broadcast({ kind: "chat", text: "/greeter play is it bigger than a cat?" });
   const second = await waitFor(/^STUB .*move=is it bigger than a cat\?/);
   ok(/PRIOR/.test(second ?? ""), `the second move sees the first  — ${second}`);
+  ok(/NONOTE/.test(first ?? "") && /SAWNOTE/.test(second ?? ""), "a private NOTE from one turn is shown to the model the next");
+  ok(!got.some((x) => /secret-giraffe/.test(x)), "a NOTE line is never posted to the room");
+
+  driver.broadcast({ kind: "chat", text: "/greeter use brainstorm" });
+  ok(!!(await waitFor(/▶ \*\*brainstorm\*\*/)), "/greeter use switches to a standard skill no flag loaded");
+  await sleep(3200);
+  driver.broadcast({ kind: "chat", text: "/greeter play remote fridays" });
+  const third = await waitFor(/^STUB .*move=remote fridays/);
+  ok(/BRAINSTORM/.test(third ?? "") && /FRESH NONOTE/.test(third ?? ""), `the new activity's rules, a fresh game, no old notes  — ${third}`);
 } finally {
   try { driver.disconnect(); } catch {}
   try { wss.close(); } catch {}

@@ -38,7 +38,7 @@ import { parseDefinition, parseInvocation, expandCommand, expandCallSites,
 import { createCalls, type Calls } from "./calls.js";
 import { QosCommand } from "./qos-command.js";
 import { pickAskAgent, agentAskText, liveAgentTarget, agentCommand } from "./agent-ask.js";
-import { AGENT_ROLES, AGENT_PROVIDERS, AGENT_DOCS_URL, parseAgentRequest, providerOf, agentShellCommand, agentClaudePrompt, maskCap } from "./agent-invite.js";
+import { AGENT_ROLES, STANDARD_SKILLS, AGENT_PROVIDERS, AGENT_DOCS_URL, parseAgentRequest, providerOf, agentShellCommand, agentClaudePrompt, maskCap } from "./agent-invite.js";
 import { GoalStore, parseGoalAdd } from "./goal-store.js";
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
@@ -6074,8 +6074,9 @@ function handleCommand(raw: string): string[] {
         sys("AI providers (--ai), each a plugin in scripts/qos-cli/ai-providers — or your own:");
         for (const p of AGENT_PROVIDERS) sys(`  ${p.id} — ${p.what}${p.key ? ` · needs ${p.key} on the agent's computer` : ""}`);
         sys("  Leave --ai out and the agent uses the claude CLI if it finds one, else whichever API key is set.");
-        sys("Skills (--skill <name>): rules and context an agent follows for an activity — a Markdown file in scripts/qos-cli/skills/, "
-          + "or an absolute path to your own. Shipped: twenty-questions. Then /<role> rules, /<role> play <move>.");
+        sys("Skills: rules and context an agent follows for an activity. Every agent has the standard ones: " + STANDARD_SKILLS.join(", ")
+          + ". In the room, /<role> use <skill> starts one, /<role> rules shows it, /<role> play <move> plays. "
+          + "--skill <name> makes one the starting activity; --skill /abs/path.md adds your own.");
         break;
       }
       if (sub !== "add" && sub !== "claude") {
