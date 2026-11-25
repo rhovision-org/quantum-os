@@ -51,6 +51,7 @@ interface ZfaWasm {
   wasm_charge(bytes: Uint8Array): number;
   wasm_capability_from_entropy(bytes: Uint8Array, label: string): string;
   wasm_capability_valid(hex: string): boolean;
+  wasm_capability_v2_candidate(label: string): string;
 }
 
 let _wasm: ZfaWasm | null = null;
@@ -288,7 +289,17 @@ export function spectralGap(twists: Uint8Array): number {
 /// Uses rejection sampling so the result is also Pauli-closed (~25% of random
 /// count-balanced sequences pass; expected ~4 iterations).
 export function generateCapability(label: string): string {
-  const bytes = new Uint8Array(16);
+  return generateCapabilityProfile(label, 16);
+}
+
+/** Research candidate only. The default issuer and existing room IDs stay unchanged. */
+export function generateCapabilityV2Candidate(label: string): string {
+  if (_wasm) return _wasm.wasm_capability_v2_candidate(label);
+  return generateCapabilityProfile(label, 34);
+}
+
+function generateCapabilityProfile(label: string, size: number): string {
+  const bytes = new Uint8Array(size);
   crypto.getRandomValues(bytes);
   if (_wasm) return _wasm.wasm_capability_from_entropy(bytes, label);
 
