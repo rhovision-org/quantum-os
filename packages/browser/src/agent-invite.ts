@@ -42,7 +42,7 @@ export interface AgentRequest {
 }
 
 /** A skill is a shipped name (skills/<name>.md) or an absolute path to your own .md. */
-export const SKILL_RE = /^(?:[a-z0-9][a-z0-9-]{0,47}|\/[A-Za-z0-9._\/-]{1,200}\.md)$/;
+export const SKILL_RE = /^(?:[a-z0-9][a-z0-9-]{0,40}|\/[A-Za-z0-9._\/-]{1,200}\.md)$/;
 
 /**
  * Parse the argument of `/agent add [role] [display name…]`.
@@ -62,7 +62,8 @@ export function parseAgentRequest(arg: string): AgentRequest | { error: string }
     if (w === "--skill") {
       const v = words[i + 1];
       if (!v) return { error: "--skill needs a skill name" };
-      for (const s of v.split(",").filter(Boolean)) {
+      for (const raw of v.split(",").filter(Boolean)) {
+        const s = raw.startsWith("/") ? raw : raw.toLowerCase();
         if (!SKILL_RE.test(s)) return { error: `"${s}" isn't a skill — a name like twenty-questions, or an absolute path to a .md` };
         if (!skills.includes(s)) skills.push(s);
       }

@@ -332,7 +332,7 @@ export async function run(args) {
   }
   const skills = [];
   for (const spec of args.skills ?? []) {
-    try { skills.push(loadSkill(spec)); }
+    try { const k = loadSkill(spec); if (!skills.some((x) => x.name === k.name)) skills.push(k); }
     catch (e) { console.error(`${TAG} ${e?.message ?? e}`); process.exit(1); return; }
   }
   if (skills.length && !args.ai) console.log(`${TAG} --skill ${skills.map((k) => k.name).join(",")} loaded, but without --ai I can only post the rules (\`/${CMD} rules\`), not play.`);
@@ -628,7 +628,25 @@ export async function run(args) {
     if (!k) { reply(`I don't know "${which}". ${skillsText()}`, "agskills", 5_000); return; }
     reply(`📜 **${k.name}** — ${k.description}\n${k.body.slice(0, 3500)}${k.body.length > 3500 ? "\n…(trimmed)" : ""}`, `agrules:${k.name}`, 20_000);
   }
-  async function handlePlay(move, fromId) {
+  // Moves are ruled one at a time, in arrival order: two quick moves must not
+  // both be ruled against the same board. And each player waits a moment
+  // between moves, since every ruling is spent from the agent owner's AI account.
+  let playQueue = Promise.resolve();
+  const lastPlayBy = new Map();
+  const PLAY_COOLDOWN_MS = 3_000;
+  function handlePlay(move, fromId) {
+    const who = fromId || "?";
+    const now = Date.now();
+    if (move && now - (lastPlayBy.get(who) ?? 0) < PLAY_COOLDOWN_MS) {
+      reply(`One move at a time — give it a few seconds.`, `playslow:${who}`, PLAY_COOLDOWN_MS);
+      return Promise.resolve();
+    }
+    if (move) lastPlayBy.set(who, now);
+    const run = playQueue.then(() => playOne(move, fromId));
+    playQueue = run.catch(() => {});
+    return run;
+  }
+  async function playOne(move, fromId) {
     if (!skills.length) { reply(skillsText(), "agskills", 5_000); return; }
     if (!move) { reply(`What's your move? \`/${CMD} play <move>\` — ${skillsText()}`, "playhelp", 8_000); return; }
     if (!advisor.enabled) { reply(`Playing needs AI mode — whoever runs me should start me with \`--ai\` and their own provider key or Claude plan. \`/${CMD} rules\` still posts the rules.`, "playnoai", 20_000); return; }

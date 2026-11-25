@@ -63,7 +63,13 @@ try {
   ok(/RULES/.test(first ?? ""), "the model was given the skill's rules");
   ok(/FRESH/.test(first ?? ""), "the first move has no earlier moves");
 
-  await sleep(300);
+  // Too soon after the first: the player is asked to wait, and nothing reaches the model.
+  driver.broadcast({ kind: "chat", text: "/greeter play is it a dog?" });
+  const slow = await waitFor(/One move at a time/);
+  ok(!!slow, "a move inside the per-player cooldown is held back");
+  ok(!got.some((x) => /move=is it a dog\?/.test(x)), "the held-back move never reached the model");
+
+  await sleep(3200);
   driver.broadcast({ kind: "chat", text: "/greeter play is it bigger than a cat?" });
   const second = await waitFor(/^STUB .*move=is it bigger than a cat\?/);
   ok(/PRIOR/.test(second ?? ""), `the second move sees the first  — ${second}`);

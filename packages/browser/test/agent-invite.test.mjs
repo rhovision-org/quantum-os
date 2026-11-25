@@ -113,10 +113,14 @@ ok("--skill parses, comma lists and repeats merge", () => {
   const r = parseAgentRequest("greeter --skill twenty-questions Quizmaster --skill a-b,twenty-questions");
   assert.deepEqual(r, { role: "greeter", name: "Quizmaster", skills: ["twenty-questions", "a-b"] });
 });
+ok("--skill lowercases a name, but not a path", () => {
+  assert.deepEqual(parseAgentRequest("--skill Twenty-Questions").skills, ["twenty-questions"]);
+  assert.deepEqual(parseAgentRequest("--skill /Home/Me/Game.md").skills, ["/Home/Me/Game.md"]);
+});
 ok("--skill takes an absolute .md path", () =>
   assert.deepEqual(parseAgentRequest("--skill /home/me/my-game.md").skills, ["/home/me/my-game.md"]));
 ok("--skill refuses shell metacharacters and relative paths", () => {
-  for (const bad of ["x;rm", "../x.md", "$(id)", "Foo", "/a b.md"]) assert.ok("error" in parseAgentRequest(`--skill ${bad}`), bad);
+  for (const bad of ["x;rm", "../x.md", "$(id)", "a".repeat(42), "/a b.md"]) assert.ok("error" in parseAgentRequest(`--skill ${bad}`), bad);
 });
 ok("--skill with --ai none is refused", () => assert.ok("error" in parseAgentRequest("--ai none --skill twenty-questions")));
 ok("the skill reaches add-agent.sh as SKILL=", () => {
