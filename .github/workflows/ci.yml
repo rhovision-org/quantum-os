@@ -96,6 +96,11 @@ jobs:
       - name: Faucet HTTP selftest
         run: node scripts/qos-cli/faucet-http.selftest.mjs
 
+      # An agent hands a joiner the conversation it heard (sync-chat); with
+      # --persist it reads it back from the room memory's transcript. No deps.
+      - name: Agent chat history selftest
+        run: node scripts/qos-cli/chat-history.mjs --selftest
+
       - name: Locker selftest
         run: node packages/browser/src/locker.js --selftest
 
