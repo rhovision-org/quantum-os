@@ -73,6 +73,13 @@ jobs:
           python3 formal/lifecycle-oracle.py
           node formal/compare-lifecycle.mjs
           sha256sum authority-lifecycle-proof.txt authority-lifecycle-vectors.jsonl authority-lifecycle-commands.json authority-lifecycle.json > authority-lifecycle.SHA256SUMS
+      - name: Durable authority journal and crash recovery
+        env:
+          AUTHORITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node formal/test-authority-journal.mjs
+          sha256sum authority-journal.json > authority-journal.SHA256SUMS
       - uses: actions/upload-artifact@v6
         with:
           name: authority-proof
@@ -88,4 +95,6 @@ jobs:
             authority-lifecycle-commands.json
             authority-lifecycle.json
             authority-lifecycle.SHA256SUMS
+            authority-journal.json
+            authority-journal.SHA256SUMS
           if-no-files-found: error

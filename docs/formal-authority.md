@@ -85,3 +85,24 @@ ordering or authenticated revocation distribution is supplied. A successful
 execute marks a request as used but does not invoke any external action.
 Production revocation semantics and backwards-compatible migration require
 maintainer agreement and a separately reviewed integration.
+
+
+## Phase VI — durable serial authority journal
+
+The research-only SQLite adapter wraps the Phase V reference reducer in
+BEGIN IMMEDIATE transactions with WAL and FULL synchronous mode. Each
+accepted transition commits state and a unique request receipt together.
+Receipt digests bind actor and canonical command; reusing an ID with different
+content is a conflict, while identical retries are refused as replays.
+Receipt replay checks the complete stored state against genesis and each
+recorded transition. This is corruption detection under trusted storage,
+not authentication against an administrator who can rewrite the entire log.
+
+CI uses separate local processes and temporary databases to check request
+contention, grant-ID contention, process termination immediately before and
+after commit, serial ordering of execute versus revoke, and journal corruption.
+The adapter does not invoke external actions. It assumes trusted actor input,
+a single database, compatible SQLite/VFS and storage durability. Process
+termination is not a physical power-loss test. No distributed consensus,
+authenticated revocation propagation, browser persistence, or production
+integration is supplied.
