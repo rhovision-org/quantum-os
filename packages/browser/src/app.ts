@@ -60,6 +60,8 @@ import { loadConfig as loadNodeConfig, saveConfig as saveNodeConfig, describeCon
          registryUriOf, powerboxUsed, DEFAULT_CONFIG as DEFAULT_NODE_CONFIG,
          readResult, readResultRecord, syncResultNonce, deployAnswer, deployVerdict,
          type NodeConfig } from "./rholang.js";
+import { transcriptForSync, sanitizeTranscript, mergeTranscript, needsTimeMark, timeMarkText, findMentions,
+         type TranscriptLine } from "./chat-view.js";
 import { qucalcSearch, qucalcSolve,
          type SearchDone as QucalcSearchDone } from "./qucalc-search.js";
 
@@ -212,7 +214,15 @@ interface ProbeWindow {
 
 // Per-room chat history so tab switching can replay the messages area.
 type ChatKind = "peer" | "self" | "system";
-interface ChatLine { from: string; text: string; kind: ChatKind; label?: string; media?: MediaAttachment; pollId?: string; groupId?: string; issueId?: string }
+interface ChatLine {
+  from: string; text: string; kind: ChatKind; label?: string; media?: MediaAttachment; pollId?: string; groupId?: string; issueId?: string;
+  /** When this browser saw it (epoch ms). Older saved lines have none and get no time mark. */
+  at?: number;
+  /** A conversation line (typed chat, ours or a peer's) — what `sync-chat` hands a joiner. */
+  chat?: boolean;
+  /** Merged from another peer's transcript: that peer's label, shown on hover. */
+  via?: string;
+}
 
 // A persist request is an offer from another peer asking us to also store
 // their lemma / currency declaration so the room's public state has more
@@ -1403,7 +1413,68 @@ function unreachablePeers(): string[] {
   return [...peers].filter((id) => !qpeer!.isReachable(id));
 }
 
+// The time of the last mark on screen. Reset whenever the transcript is
+// repainted from empty, which renderChatLine notices for itself.
+let lastTimeMarkAt: number | null = null;
+
+function renderTimeMark(at: number): void {
+  if (!messagesEl.firstChild) lastTimeMarkAt = null;
+  if (!needsTimeMark(at, lastTimeMarkAt)) return;
+  const mark = document.createElement("div");
+  mark.className = "msg time-mark";
+  mark.textContent = timeMarkText(at, lastTimeMarkAt, Date.now());
+  mark.title = new Date(at).toLocaleString();
+  messagesEl.appendChild(mark);
+  lastTimeMarkAt = at;
+}
+
+/** Everyone this browser knows by name in the active room, us included. */
+function knownNames(): string[] {
+  const out = new Set<string>();
+  for (const n of peerNames.values()) if (n && n.trim()) out.add(n.trim());
+  for (const n of lastKnownNames.values()) if (n && n.trim()) out.add(n.trim());
+  if (myName && myName.trim()) out.add(myName.trim());
+  return [...out];
+}
+
+/**
+ * Wrap mentions of known people in `<span class="mention">` — ours as
+ * `mention me` — walking text nodes only, so markup, links and code are left
+ * alone. Returns whether we were mentioned.
+ */
+function highlightMentions(el: HTMLElement, names: string[]): boolean {
+  if (!names.length) return false;
+  const me = (myName || "").trim().toLowerCase();
+  let mentionedMe = false;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement?.closest("a, code, pre, .mention") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  const nodes: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text);
+  for (const node of nodes) {
+    const text = node.data;
+    const found = findMentions(text, names);
+    if (!found.length) continue;
+    const frag = document.createDocumentFragment();
+    let pos = 0;
+    for (const m of found) {
+      if (m.start > pos) frag.appendChild(document.createTextNode(text.slice(pos, m.start)));
+      const span = document.createElement("span");
+      const isMe = me !== "" && m.name.toLowerCase() === me;
+      if (isMe) mentionedMe = true;
+      span.className = isMe ? "mention me" : "mention";
+      span.textContent = text.slice(m.start, m.end);
+      frag.appendChild(span);
+      pos = m.end;
+    }
+    if (pos < text.length) frag.appendChild(document.createTextNode(text.slice(pos)));
+    node.replaceWith(frag);
+  }
+  return mentionedMe;
+}
+
 function renderChatLine(line: ChatLine): void {
+  if (line.at) renderTimeMark(line.at);
   const div = document.createElement("div");
   div.className = `msg${line.kind === "system" ? " system-line" : ""}`;
   if (line.pollId) {
@@ -1439,6 +1510,13 @@ function renderChatLine(line: ChatLine): void {
     renderMedia(textEl, line.media);
   } else {
     textEl.innerHTML = renderMarkdown(line.text);
+    if (line.kind !== "system" && highlightMentions(textEl, knownNames()) && line.kind === "peer") {
+      div.classList.add("mentions-me");
+    }
+  }
+  if (line.via) {
+    div.classList.add("synced");
+    div.title = `from ${line.via}'s transcript — relayed, not signed by the author`;
   }
   div.appendChild(fromEl);
   div.appendChild(textEl);
@@ -1446,7 +1524,15 @@ function renderChatLine(line: ChatLine): void {
 }
 
 function addMessage(from: string, text: string, kind: "peer" | "self" | "system" = "peer", label?: string): void {
-  const line: ChatLine = { from, text, kind, label };
+  pushChatLine({ from, text, kind, label, at: Date.now() });
+}
+
+/** A conversation line — typed chat, ours or a peer's — which a joiner is handed in `sync-chat`. */
+function addChat(from: string, text: string, kind: "peer" | "self", label?: string): void {
+  pushChatLine({ from, text, kind, label, at: Date.now(), chat: true });
+}
+
+function pushChatLine(line: ChatLine): void {
   activeRoom.chatLog.push(line);
   trimChatLog(activeRoom);
   saveChat(activeRoom);
@@ -1550,6 +1636,13 @@ function switchToRoom(roomId: string): void {
   applyActiveRoomToUI();
 }
 
+/** Repaint the visible transcript from the active room's log. */
+function repaintChat(): void {
+  messagesEl.innerHTML = "";
+  for (const line of activeRoom.chatLog) renderChatLine(line);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 function applyActiveRoomToUI(): void {
   // Sidebar identity / room display
   // Signaling URL field reflects this room's last-used URL.
@@ -1566,10 +1659,7 @@ function applyActiveRoomToUI(): void {
     msgInput.disabled = true;
     sendBtn.disabled  = true;
   }
-  // Chat history replay
-  messagesEl.innerHTML = "";
-  for (const line of activeRoom.chatLog) renderChatLine(line);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  repaintChat();
   // Sidebar lists
   renderPeers();
   renderLemmas();
@@ -8521,6 +8611,13 @@ async function connect(): Promise<void> {
           addMessage("", `📊 estimate round closed by ${peerLabel(from)} — “${estimateRound.question}” (type /estimate status)`, "system");
           return;
         }
+        if (d.kind === "sync-chat") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
+          if (ignoredForSync.has(from)) return;
+          mergeChatFromPeer(from, d.lines);
+          return;
+        }
         if (d.kind === "sync-polls") {
           const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
           if (status.startsWith("  · refused")) return;
@@ -8899,7 +8996,7 @@ async function connect(): Promise<void> {
         }
         if (d.kind === "chat" || "text" in d) {
           const text = "text" in d ? String(d.text) : String(d.message ?? JSON.stringify(d));
-          addMessage(from, text, "peer", peerLabel(from));
+          addChat(from, text, "peer", peerLabel(from));
           return;
         }
       }
@@ -8935,6 +9032,10 @@ async function connect(): Promise<void> {
         peers.add(peerId);
         renderPeers();
         signedSend(peerId, { kind: "name", name: myName });
+        // The conversation so far, as this browser saw it, so a joiner reads
+        // the room from where it is rather than from an empty screen.
+        const said = transcriptForSync(chatLinesForSync());
+        if (said.length > 0) signedSend(peerId, { kind: "sync-chat", lines: said });
         if (lemmaStore.size > 0) {
           const entries = Array.from(lemmaStore.entries()).map(([name, e]) => ({
             name, twists: e.twists, who: e.who, cap: e.cap, dyncap: e.dyncap, event: e.event, text: e.text,
@@ -9155,14 +9256,14 @@ function send(): void {
   if (text.startsWith("//")) {
     const escaped = text.slice(1);
     qpeer.broadcast({ kind: "chat", text: escaped });
-    addMessage("", escaped, "self");
+    addChat("", escaped, "self");
     return;
   }
   // `++text` escapes a literal `+` line into chat, the way `//` does for `/`.
   if (text.startsWith("++")) {
     const escaped = text.slice(1);
     qpeer.broadcast({ kind: "chat", text: escaped });
-    addMessage("", escaped, "self");
+    addChat("", escaped, "self");
     return;
   }
   // `+name` is a user-defined command. Only an identifier-shaped name is taken
@@ -9196,7 +9297,7 @@ function send(): void {
     return;
   }
   qpeer.broadcast({ kind: "chat", text });
-  addMessage("", text, "self");
+  addChat("", text, "self");
 }
 
 // ---------------------------------------------------------------------------
@@ -9336,8 +9437,49 @@ function saveChat(room: RoomContext): void {
   } catch { /* storage quota — drop silently */ }
 }
 
+/** This room's conversation lines as `sync-chat` carries them — ours under our own peer id. */
+function chatLinesForSync(): TranscriptLine[] {
+  const me = myPeerId();
+  const out: TranscriptLine[] = [];
+  for (const l of activeRoom.chatLog) {
+    if (!l.chat || !l.at || !l.text) continue;
+    const self = l.kind === "self";
+    out.push({ from: self ? me : l.from, label: self ? (myName || undefined) : l.label, text: l.text, at: l.at });
+  }
+  return out;
+}
+
+/**
+ * Merge a peer's transcript (`sync-chat`) into this room's log: lines we
+ * already have are skipped, the rest go in at their time and are marked as
+ * relayed by that peer, since a line in their transcript is their account of
+ * who said it.
+ */
+function mergeChatFromPeer(relayer: string, raw: unknown): void {
+  const incoming = sanitizeTranscript(raw, Date.now());
+  if (!incoming.length) return;
+  const me = myPeerId();
+  const via = peerLabel(relayer);
+  const { log, added } = mergeTranscript(activeRoom.chatLog, incoming, (l): ChatLine => {
+    const self = l.from === me;
+    // A name we already know for that id beats the one we were handed.
+    const known = peerNames.get(l.from) || lastKnownNames.get(l.from);
+    return {
+      from: self ? "" : l.from, text: l.text, kind: self ? "self" : "peer",
+      label: self ? undefined : (known || l.label || shortId(l.from)),
+      at: l.at, chat: true, via,
+    };
+  }, me);
+  if (!added) return;
+  activeRoom.chatLog.splice(0, activeRoom.chatLog.length, ...log);
+  trimChatLog(activeRoom);
+  saveChat(activeRoom);
+  if (isUiActive()) repaintChat(); else markUnread(activeRoom);
+  addMessage("", `  · ${added} earlier message${added === 1 ? "" : "s"} from ${via}'s transcript`, "system");
+}
+
 function addMedia(from: string, media: MediaAttachment, kind: "peer" | "self", label?: string): void {
-  const line: ChatLine = { from, text: "", kind, label, media };
+  const line: ChatLine = { from, text: "", kind, label, media, at: Date.now() };
   activeRoom.chatLog.push(line);
   trimChatLog(activeRoom);
   saveChat(activeRoom);

@@ -27,6 +27,7 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { QOSPeer } from "./qospeer.mjs";
 import { openRoomMemory, MEMORY_SIGNED_KINDS } from "./room-memory.mjs";
+import { historyForSync, loadPersistedChat } from "./chat-history.mjs";
 import { generateCapability, validateCapability, parseTwists,
          achievesZfa, achievesZfaPairwise, signedAction, CENSUS_ADMITTED } from "./zfa.mjs";
 import { newDynCapState, signEnvelope, serializeState, deserializeState } from "./dyncap.mjs";
@@ -47,8 +48,8 @@ const DEFAULT_SIGNAL = "wss://quantum-os-signaling.onrender.com";
 // "name" is always signed. When this agent carries the room's memory
 // (--persist), the state it re-serves must be signed too or receiving peers
 // will not trust it — see MEMORY_SIGNED_KINDS in room-memory.mjs.
-const SIGNED_KINDS = new Set(["name"]);
-const PERSIST_SIGNED_KINDS = new Set(["name", ...MEMORY_SIGNED_KINDS]);
+const SIGNED_KINDS = new Set(["name", "sync-chat"]);
+const PERSIST_SIGNED_KINDS = new Set(["name", "sync-chat", ...MEMORY_SIGNED_KINDS]);
 
 const USAGE = `qos agent — measured, trust-governable room-agent daemon
 
@@ -420,6 +421,19 @@ export async function run(args) {
     transcript.push({ name, text: t.slice(0, 400), at: Date.now() });
     if (transcript.length > TRANSCRIPT_MAX) transcript.shift();
   };
+  // The room's conversation as this agent heard it, verbatim, for a joiner
+  // (`sync-chat`, the browser's own join handshake kind). A browser hands a
+  // joiner only what it saw while it was there; an agent that has been in the
+  // room longer — or that carries the room's memory on disk (--persist) — holds
+  // what no browser present still has. The browser merges by author, text and
+  // time, so this overlapping a browser's copy adds nothing twice.
+  const HISTORY_MAX = 300;
+  const chatHistory = [];          // {from, label, text, at}
+  const heard = (from, label, text, at = Date.now()) => {
+    if (typeof text !== "string" || !text || text.length > 8000) return;
+    chatHistory.push({ from, label: label || undefined, text, at });
+    if (chatHistory.length > HISTORY_MAX) chatHistory.shift();
+  };
   const realName = (n) => (typeof n === "string" && n.trim()) ? n.trim() : null;   // "" / blank ⇒ no name
   const nameOf = (id) => realName(peerNames.get(id)) ?? realName(known[id]?.name) ?? short(id);
   const hasName = (id) => !!(realName(peerNames.get(id)) ?? realName(known[id]?.name));
@@ -542,6 +556,7 @@ export async function run(args) {
     if (key && !cooled(key, cooldownMs)) return false;
     if (overFairShare())             { if (args.verbose) console.log(`${TAG} · held (fair-share): ${text}`); return false; }
     peer.broadcast({ kind: "chat", text });
+    heard(identity.peerId, myName, text);
     postLog.push(now); lastPostAt = now; if (key) cooldown.set(key, now);
     remember(myName, text);
     console.log(`${TAG} → ${text}`);
@@ -553,6 +568,7 @@ export async function run(args) {
   function reply(text, key, cooldownMs = 30_000) {
     if (key && !cooled(key, cooldownMs)) return false;
     peer.broadcast({ kind: "chat", text });
+    heard(identity.peerId, myName, text);
     postLog.push(Date.now()); lastPostAt = Date.now(); if (key) cooldown.set(key, Date.now());
     // `ag*` keys are the fixed control replies (presence/help/trust/health/list/
     // mute) — pure lookup chatter, kept out of the room record. Substantive
@@ -1041,6 +1057,8 @@ export async function run(args) {
   // so N agents don't all greet at once, but state must be served by whoever
   // holds it, every time, or a joiner gets nothing.
   const memDir = args.persist === "" ? stateDir : args.persist;
+  // A memory carrier starts with what the room said before this process did.
+  if (memDir) for (const l of loadPersistedChat(path.join(memDir, "rooms", roomHex, "transcript.jsonl"), HISTORY_MAX)) chatHistory.push(l);
   let mem = null;
   const signedKinds = memDir ? PERSIST_SIGNED_KINDS : SIGNED_KINDS;
 
@@ -1135,6 +1153,23 @@ export async function run(args) {
     }
   }
 
+  // Hand a joiner the conversation so far. Lead-gated among agents with the
+  // `history` duty (facilitator, scribe) so a room of several agents sends it
+  // once; a duplicate would be harmless (the browser dedupes) but is wasted.
+  // A short cooldown keeps a flapping channel from re-sending it.
+  const historyServedAt = new Map();
+  function serveHistoryTo(id) {
+    if (!leadGate("history") || !chatHistory.length) return;
+    if (isAgentPeer(id)) return;
+    const now = Date.now();
+    if (now - (historyServedAt.get(id) ?? 0) < 60_000) return;
+    historyServedAt.set(id, now);
+    const lines = historyForSync(chatHistory);
+    if (!lines.length) return;
+    bg(signedSend(id, { kind: "sync-chat", lines }), "history");
+    console.log(`${TAG} ↪ ${lines.length} history line${lines.length === 1 ? "" : "s"} → ${short(id)}`);
+  }
+
   function onChannelOpen(id) {
     if (id === identity.peerId) return;
     present.add(id);
@@ -1142,6 +1177,7 @@ export async function run(args) {
     // announce name + our agent role so other agents recognize us (self-heals via
     // reannounceStale if this delivery is lost to a signaling flap)
     bg(announceName(id), "announce");
+    serveHistoryTo(id);
     // Self-introduction is delivered per-peer when a human identifies (see introduceTo,
     // called from onMessage) — NOT a one-time startup broadcast — so a browser that joins
     // later, or whose channel opens after a co-agent's, still reliably gets it.
@@ -1193,6 +1229,7 @@ export async function run(args) {
         chatLog.push({ peer: from, at: Date.now() });
         recentMsgs.push({ name: nameOf(from), text: String(d.text ?? "").slice(0, 280), at: Date.now() });
         remember(nameOf(from), d.text);
+        heard(from, hasName(from) ? nameOf(from) : undefined, String(d.text ?? ""));
         if (args.verbose) console.log(`[${nameOf(from)}] ${String(d.text).slice(0, 120)}`);
         introduceTo(from);   // covers a human who chats before announcing a name
         if (handleCommand(d.text, from)) break;
