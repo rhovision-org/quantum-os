@@ -12,6 +12,7 @@ on:
       - "scripts/qos-cli/package.json"
       - "scripts/localnet/charter-handoff-live.mjs"
       - "contract/success-charter-1-vector.json"
+      - "contract/success-charter-1-negative-vector.json"
       - ".github/workflows/charter-rhogov-live.yml"
   workflow_dispatch:
 

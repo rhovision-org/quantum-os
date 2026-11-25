@@ -95,10 +95,17 @@ export function charterIssueTitle(charter) {
       || !HEX64.test(charter.charterHash || "")) throw new Error("invalid success-charter/1 artifact");
   // Serialize the exact shared artifact. Do not store only its hash; RhoGov
   // must be able to return exactly the content peers voted to export.
+  if (!Array.isArray(charter.members) || !Array.isArray(charter.signatures) || !charter.group?.id)
+    throw new Error("bad charter schema");
+  if (charter.members.some(m => !m || typeof m !== "object" || "signature" in m))
+    throw new Error("member.signature is unsupported: dyncap is hash-only TOFU, not signing");
   const text = canonicalJson(charter);
-  if (/cap:room:/i.test(text) || /room[_-]?cap/i.test(text) || /"personal(goals?|notes?|habits?)"/i.test(text)) {
+  if (/cap:room:/i.test(text) || /room[_-]?cap/i.test(text) || /"personal[_-]?(goals?|notes?|habits?)"\s*:/i.test(text)) {
     throw new Error("raw room capability or personal-state field is forbidden");
   }
+  const { charterHash, signatures, ...content } = charter;
+  if (toHex(sha256(encoder.encode(canonicalJson(content)))) !== charterHash)
+    throw new Error("CHAIN_CONTENT_HASH_MISMATCH");
   const title = TITLE_PREFIX + encodeURIComponent(text);
   if (encoder.encode(title).length > MAX_TITLE_BYTES) throw new Error("charter too large for issue-title transport");
   return title;

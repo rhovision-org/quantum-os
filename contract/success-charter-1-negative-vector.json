@@ -1,0 +1,41 @@
+{
+  "schema": "success-charter-negative/1",
+  "cases": [
+    {
+      "field": "personalGoals",
+      "value": [
+        "fixture-private-only"
+      ]
+    },
+    {
+      "field": "personal_notes",
+      "value": [
+        "fixture-private-only"
+      ]
+    },
+    {
+      "field": "personal-habits",
+      "value": [
+        "fixture-private-only"
+      ]
+    },
+    {
+      "field": "personalGoal",
+      "value": [
+        "fixture-private-only"
+      ]
+    },
+    {
+      "field": "personalNote",
+      "value": [
+        "fixture-private-only"
+      ]
+    },
+    {
+      "field": "personalHabit",
+      "value": [
+        "fixture-private-only"
+      ]
+    }
+  ]
+}

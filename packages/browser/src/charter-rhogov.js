@@ -122,6 +122,9 @@ export async function readCharterIssue(nodeUrl, issueUri, charterHash) {
 }
 export async function readCharterStatus(nodeUrl, issueUri, charter) {
   const record = await readCharterIssue(nodeUrl,issueUri,charter.charterHash);
+  return inspectObservedCharter(record, issueUri, charter);
+}
+async function inspectObservedCharter(record, issueUri, charter) {
   const status = await inspectCharterIssue(record.raw,charter);
   // Rehash the exact independently retrieved on-chain artifact.
   if (record.raw) {
@@ -142,6 +145,8 @@ export async function readCharterStatus(nodeUrl, issueUri, charter) {
  * automatically: a deploy might already have been accepted at the node.
  */
 export async function submitCharter(nodeUrl, issueUri, charter, submitTerm) {
+  // Refuse malformed/hash-mismatched input before any read or signing callback.
+  const title = charterIssueTitle(charter);
   const before = await readCharterStatus(nodeUrl, issueUri, charter);
   if (before.storedHash === charter.charterHash) return { ...before, submitted:false, idempotent:true };
   if (before.status !== "unknown" || before.reason !== "not found") {
@@ -149,7 +154,7 @@ export async function submitCharter(nodeUrl, issueUri, charter, submitTerm) {
   }
   const pid = charterProposalId(charter.charterHash);
   const term = rgov.openIssueProgram(issueUri, pid, charter.group.id,
-    charterIssueTitle(charter), "approval", ["approve","reject"], []);
+    title, "approval", ["approve","reject"], []);
   const send = await submitTerm(term);
   if (!send || !send.ok || !send.sig) throw new Error("RhoGov deploy not accepted: " + String(send?.message ?? "unknown"));
   // Acceptance is not execution. A separate read may lag until the deploy
@@ -176,5 +181,6 @@ export async function readCharterStatusByHash(nodeUrl, issueUri, hash, groupId) 
   if (expected.group?.id !== groupId || expected.charterHash !== hash) {
     throw new Error("CHAIN_CONTENT_HASH_MISMATCH");
   }
-  return readCharterStatus(nodeUrl, issueUri, expected);
+  // Inspect the record already obtained, not a second observation at a moving tip.
+  return inspectObservedCharter(record, issueUri, expected);
 }
