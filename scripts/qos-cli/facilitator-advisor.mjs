@@ -6,17 +6,16 @@
 // returns a disabled advisor when `--ai` is off or no API key is present, and the
 // deterministic v1 behaviours carry the room.
 //
-// Two backends (pick with `--ai-backend`):
-//   • api (default)         — Anthropic Messages API via global `fetch` (Node 18+), key from
-//                             ANTHROPIC_API_KEY. Pay-as-you-go API credits.
-//   • claude-code           — shells out to the local `claude` CLI in print mode, using the
-//                             user's Claude login (Pro/Max subscription) — NO API credits.
+// The model is reached through a provider plugin (pick with `--ai-backend`; see
+// ai-providers/README.md):
+//   • anthropic (default; alias api) — Anthropic Messages API, ANTHROPIC_API_KEY.
+//   • claude-code (alias claude)     — the local `claude` CLI, the user's Claude plan.
+//   • deepseek                       — DeepSeek's API, DEEPSEEK_API_KEY.
+//   • a path to your own .mjs        — loaded by agent.mjs and passed in as `provider`.
 // Calls are made only when the throttle would allow a post (the daemon gates them), so usage is
 // bounded by the same budget/cooldowns.
 
-import { spawn } from "node:child_process";
-
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+import { resolveProvider } from "./ai-providers/index.mjs";
 
 // Persona = the role-specific "who you are" line (overridable per role via makeAdvisor's
 // `persona`); the norms / knowledge below are role-neutral and shared. The facilitator
@@ -93,7 +92,8 @@ command answers the question, name the exact command. You know:
   Evidence keeper, Operator, Boundary keeper); don't close a proposal unrefuted; include the silent.
 - AI AGENTS: \`/agent\` lists the agents in the room; \`/agent add [role] [name]\` copies one command (the room filled
   in) to paste into a terminal on any computer with git and Node 18+ — it installs and joins by itself;
-  \`/agent claude\` gives the same as a request for a Claude Code session. \`/ask <q>\` reaches whichever agent is here.
+  \`/agent claude\` gives the same as a request for a Claude Code session. \`--ai claude|deepseek|anthropic\` picks the
+  model provider (a plugin each; the key is set on the agent's computer, never typed into the room). \`/ask <q>\` reaches whichever agent is here.
 - VISUALIZE: \`/render\` opens an animation of THIS room — its perspectives (peers, you included) bound to
   the shared room closure, its closures (lemmas), and groups. That is the room's "simulation animation".
 - IDENTITY: \`/name\` sets your display name; \`/password\` + \`/login\` protect a persistent identity; \`/id\`,
@@ -185,60 +185,11 @@ function userPrompt(mode, ctx) {
   return `Recent transcript:\n${t}\n\nIf there is a real disagreement, name the crux in one sentence and suggest the single question or next step that would move toward agreement. If people are converging or there is no real disagreement, reply NONE.`;
 }
 
-// claude-code backend: shell out to the local `claude` CLI in non-interactive print
-// mode. Uses the user's Claude login (Pro/Max subscription) — NO Anthropic API credits.
-// The system text is appended via --append-system-prompt; the user prompt is fed on stdin.
-function callClaudeCLI({ claudeBin, model, system, prompt, log, timeoutMs = 45_000 }) {
-  return new Promise((resolve) => {
-    const args = ["-p", "--output-format", "text", "--append-system-prompt", system];
-    if (model) args.push("--model", model);
-    let child;
-    try {
-      child = spawn(claudeBin, args, { stdio: ["pipe", "pipe", "pipe"] });
-    } catch (e) {
-      const error = `claude CLI spawn failed: ${e?.message ?? e}`;
-      log(`[facil] ${error}`);
-      return resolve({ text: null, error });
-    }
-    let out = "", err = "", done = false;
-    const finish = (result) => { if (done) return; done = true; clearTimeout(timer); resolve(result); };
-    const fail = (error) => { log(`[facil] ${error}`); finish({ text: null, error }); };
-    const timer = setTimeout(() => {
-      try { child.kill("SIGKILL"); } catch {}
-      fail(`claude CLI timed out after ${Math.round(timeoutMs / 1000)}s`);
-    }, timeoutMs);
-    child.on("error", (e) => fail(`claude CLI error: ${e?.message ?? e} (is the \`claude\` CLI installed + logged in?)`));
-    child.stdout?.on("data", (d) => { out += d; });
-    child.stderr?.on("data", (d) => { err += d; });
-    // A CLI that exits before reading the prompt (a session limit does exactly
-    // that) makes the stdin socket emit EPIPE. That is not the failure to
-    // report — the close handler has the CLI's own message. Ignore EPIPE and
-    // let close/timeout decide; anything else is a real stdin failure.
-    child.stdin?.on("error", (e) => {
-      if (e?.code !== "EPIPE") fail(`claude CLI stdin error: ${e?.message ?? e}`);
-    });
-    child.on("close", (code) => {
-      const text = out.trim();
-      const stderr = err.trim();
-      if (code !== 0) {
-        // Claude Code puts its subscription/session-limit message on stdout,
-        // not stderr (e.g. "You've hit your session limit · resets 3:10pm").
-        // Keep both so the room hears the real cause instead of a generic
-        // "I don't have a good answer."
-        const why = stderr || text || "no output";
-        return fail(`claude CLI exit ${code}: ${why.slice(0, 300)}`);
-      }
-      if (!text) return fail(`claude CLI returned no text${stderr ? `: ${stderr.slice(0, 300)}` : ""}`);
-      finish({ text, error: null });
-    });
-    try {
-      if (child.stdin?.writable) { child.stdin.write(prompt); child.stdin.end(); }
-    } catch (e) { fail(`claude CLI stdin error: ${e?.message ?? e}`); }
-  });
-}
-
-export function makeAdvisor({ ai = false, backend = "api", apiKey = process.env.ANTHROPIC_API_KEY, model = null, claudeBin = "claude", persona = null, cmd = "facil", roleName = "facilitator", faucetActive = false, log = () => {} } = {}) {
-  backend = (backend === "cli" || backend === "claude") ? "claude-code" : (backend || "api");
+export function makeAdvisor({ ai = false, backend = "anthropic", provider = null, apiKey, model = null, claudeBin = "claude", env = process.env, persona = null, cmd = "facil", roleName = "facilitator", faucetActive = false, log = () => {}, fetchImpl } = {}) {
+  // A plugin object wins; otherwise a built-in by name. An `apiKey` argument is
+  // the Anthropic key (kept for callers and tests that pass it directly).
+  const prov = provider ?? resolveProvider(backend);
+  const penv = apiKey !== undefined ? { ...env, ANTHROPIC_API_KEY: apiKey } : env;
   // System prompt = role persona (or the facilitator default) + shared norms/knowledge.
   const sysFor = (mode) => {
     const who = persona || DEFAULT_PERSONA;
@@ -248,12 +199,17 @@ export function makeAdvisor({ ai = false, backend = "api", apiKey = process.env.
     if (mode === "gamesummary") return `${who}\n\n${gameSummaryKnowledge()}`;
     return `${who}\n\n${NUDGE_NORMS}`;
   };
-  const apiModel = model || "claude-haiku-4-5-20251001";    // api backend default
-  const cliModel = model || null;                            // claude-code: null = CLI's own default
+  const useModel = model || prov?.defaultModel || null;
   let enabled, label;
   if (!ai) { enabled = false; label = "off"; }
-  else if (backend === "claude-code") { enabled = true; label = `claude-code${cliModel ? " " + cliModel : ""}`; }
-  else { enabled = !!apiKey; label = enabled ? apiModel : "off"; if (!apiKey) log("[facil] --ai (api backend) set but ANTHROPIC_API_KEY missing — running deterministic only (try --ai-backend claude-code)"); }
+  else if (!prov) { enabled = false; label = "off"; log(`[facil] --ai: unknown AI provider "${backend}" — running deterministic only`); }
+  else {
+    const why = prov.unavailable ? prov.unavailable(penv) : null;
+    enabled = !why;
+    label = enabled ? `${prov.name}${useModel ? " " + useModel : ""}` : "off";
+    if (why) log(`[facil] --ai (${prov.name}) set but ${why} — running deterministic only`);
+  }
+  backend = prov?.name ?? String(backend);
   let lastError = null;
   return {
     enabled,
@@ -270,33 +226,13 @@ export function makeAdvisor({ ai = false, backend = "api", apiKey = process.env.
       const system = sysFor(mode);
       const prompt = userPrompt(mode, ctx);
       const max_tokens = mode === "gamesummary" ? 1200 : mode === "optimize" ? 400 : mode === "chair" ? (ctx?.phase === "closure" ? 400 : 256) : mode === "ask" ? 256 : 160;
-      let text = null;
-      if (backend === "claude-code") {
-        const out = await callClaudeCLI({ claudeBin, model: cliModel, system, prompt, log, timeoutMs: mode === "gamesummary" ? 120_000 : 45_000 });
-        if (out.error) { lastError = out.error; return null; }
-        text = out.text;
-      } else {
-        try {
-          const res = await fetch(ANTHROPIC_URL, {
-            method: "POST",
-            headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
-            body: JSON.stringify({ model: apiModel, max_tokens, system, messages: [{ role: "user", content: prompt }] }),
-          });
-          if (!res.ok) {
-            let body = "";
-            try { body = (await res.text()).slice(0, 300); } catch { /* body is optional */ }
-            lastError = `advisor HTTP ${res.status}${body ? `: ${body}` : ""}`;
-            log(`[facil] ${lastError}`);
-            return null;
-          }
-          const j = await res.json();
-          text = (j?.content?.[0]?.text ?? "").trim();
-        } catch (e) {
-          lastError = `advisor error: ${e?.message ?? e}`;
-          log(`[facil] ${lastError}`);
-          return null;
-        }
-      }
+      const out = await prov.complete({
+        system, prompt, maxTokens: max_tokens, model: useModel, env: penv, log, claudeBin,
+        timeoutMs: mode === "gamesummary" ? 120_000 : 45_000,
+        ...(fetchImpl ? { fetchImpl } : {}),
+      });
+      if (out?.error) { lastError = out.error; log(`[facil] ${out.error}`); return null; }
+      const text = String(out?.text ?? "").trim();
       if (!text) { lastError = "advisor returned no text"; return null; }
       if (mode !== "chair" && /^NONE\b/i.test(text)) {
         // NONE means "nothing to say" for the nudge modes, but for a direct

@@ -5,12 +5,13 @@
 #
 # The browser's `/agent add` prints this command with the room filled in. It:
 #   • installs the agent's dependencies the first time (npm install),
-#   • picks the AI backend it can actually use:
-#       the `claude` CLI on PATH        → your Claude plan (no API key)
-#       else ANTHROPIC_API_KEY is set   → the Anthropic API (pay as you go)
-#       else                            → no AI: greets and answers basics
-#                                         from its built-in FAQ
-#     (AI=off forces the last; AI=api / AI=claude-code force a backend),
+#   • uses the AI provider you name, or picks one it can actually use:
+#       AI=claude-code | anthropic | deepseek | /abs/path/my-plugin.mjs  (ai-providers/README.md)
+#       AI=auto (default): the `claude` CLI on PATH → your Claude plan (no key);
+#         else ANTHROPIC_API_KEY → Anthropic; else DEEPSEEK_API_KEY → DeepSeek;
+#         else no AI — greets and answers basics from its built-in FAQ
+#       AI=off forces no AI. AI_MODEL=<model> picks the model.
+#     Keys are read from THIS machine's environment; they never go through the room.
 #   • keeps the room's memory (--persist) so the room outlives its browsers
 #     (NO_MEMORY=1 turns that off),
 #   • runs the agent DETACHED, so closing the terminal does not remove it.
@@ -52,16 +53,31 @@ if [ ! -d node_modules ]; then
 fi
 
 ai=()
-case "${AI:-auto}" in
+provider="${AI:-auto}"
+if [ "$provider" = "auto" ]; then
+  if command -v claude >/dev/null; then provider=claude-code
+  elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then provider=anthropic
+  elif [ -n "${DEEPSEEK_API_KEY:-}" ]; then provider=deepseek
+  else provider=off
+  fi
+fi
+keyhint=""
+case "$provider" in
   off) ;;
-  api) ai=(--ai --ai-backend api) ;;
-  claude-code) ai=(--ai --ai-backend claude-code) ;;
-  auto)
-    if command -v claude >/dev/null; then ai=(--ai --ai-backend claude-code)
-    elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then ai=(--ai --ai-backend api)
-    fi ;;
-  *) echo "AI must be auto, off, api or claude-code"; exit 1 ;;
+  claude-code|claude|cli) provider=claude-code
+    command -v claude >/dev/null || keyhint="the claude CLI is not on PATH here — install it and run 'claude' once to log in" ;;
+  anthropic|api) provider=anthropic
+    [ -n "${ANTHROPIC_API_KEY:-}" ] || keyhint="ANTHROPIC_API_KEY is not set here — export it, then run this again" ;;
+  deepseek)
+    [ -n "${DEEPSEEK_API_KEY:-}" ] || keyhint="DEEPSEEK_API_KEY is not set here — export it (from platform.deepseek.com), then run this again" ;;
+  */*|*.mjs|*.js) [ -f "$provider" ] || { echo "No provider plugin at $provider"; exit 1; } ;;
+  *) echo "Unknown AI provider '$provider'. Built-ins: claude-code, anthropic, deepseek — or AI=off, or a path to a plugin .mjs."; exit 1 ;;
 esac
+if [ -n "$keyhint" ]; then echo "✗ AI=$provider: $keyhint"; exit 1; fi
+if [ "$provider" != "off" ]; then
+  ai=(--ai --ai-backend "$provider")
+  [ -z "${AI_MODEL:-}" ] || ai+=(--ai-model "$AI_MODEL")
+fi
 
 mkdir -p .agents
 pidf=".agents/$ROLE.pid"
@@ -96,9 +112,9 @@ for _ in $(seq 1 40); do
 done
 
 if [ ${#ai[@]} -eq 0 ]; then
-  mode="no AI (built-in FAQ only — install the claude CLI or set ANTHROPIC_API_KEY for full answers)"
+  mode="no AI (built-in FAQ only — install the claude CLI, or set ANTHROPIC_API_KEY or DEEPSEEK_API_KEY, for full answers)"
 else
-  mode="AI via ${ai[2]}"
+  mode="AI via $provider${AI_MODEL:+ ($AI_MODEL)}"
 fi
 if [ -n "$joined" ]; then
   echo "✓ ${NAME:-$ROLE} joined the room (pid $pid) — $mode"

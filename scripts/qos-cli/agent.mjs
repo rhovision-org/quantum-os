@@ -31,6 +31,7 @@ import { generateCapability, validateCapability, parseTwists,
          achievesZfa, achievesZfaPairwise, signedAction, CENSUS_ADMITTED } from "./zfa.mjs";
 import { newDynCapState, signEnvelope, serializeState, deserializeState } from "./dyncap.mjs";
 import { makeAdvisor } from "./facilitator-advisor.mjs";
+import { loadProvider } from "./ai-providers/index.mjs";
 import { answerFromKnowledge } from "./facilitator-faq.mjs";
 import { createGameRecorder, compactForPrompt, trustWeightsFromGroups } from "./game-log.mjs";
 import { ROLES, DEFAULT_ROLE, resolveRole, dutiesOf } from "./agent-roles.mjs";
@@ -69,17 +70,21 @@ Options:
   --quiet            Less assertive (halves budget, longer cooldowns).
   --active           More assertive (raises budget, shorter cooldowns).
   --ai               Enable the AI advisor (stimulate + disagreement-synthesis + ask).
-  --ai-backend <b>   api (default; needs ANTHROPIC_API_KEY, pay-as-you-go credits) or
-                     claude-code (shells out to the local \`claude\` CLI = your Claude
-                     subscription, no API credits — must be installed + logged in).
+  --ai-backend <b>   The AI provider plugin (ai-providers/README.md):
+                     anthropic (default; alias api) — ANTHROPIC_API_KEY, pay as you go;
+                     claude-code (alias claude) — the local \`claude\` CLI, your Claude
+                       plan, no API key (must be installed + logged in);
+                     deepseek — DEEPSEEK_API_KEY;
+                     or a path to your own provider plugin (.mjs).
+                     Keys are read from this machine's environment only.
   --about <url>      Link to the room's about page, shown in intro/help
                      (default: the QuantumOS MyRoom page).
   --turn             Fetch a TURN relay (GET /turn). Off by default — the agent
                      is data-only and reaches peers over the flood relay, so a
                      relay only adds ICE-candidate traffic through signaling.
                      Turn on only if this agent must span a NAT boundary itself.
-  --ai-model <m>     Model. api default: claude-haiku-4-5-20251001;
-                     claude-code default: the CLI's configured model.
+  --ai-model <m>     Model. Defaults: anthropic claude-haiku-4-5-20251001;
+                     claude-code the CLI's configured model; deepseek deepseek-chat.
   --key <hex>        TEST-SYSTEM ONLY: a secp256k1 REV deploy key (64 hex
                      chars). Activates \`/<role> faucet [address]\`, which
                      sends a fixed amount of TEST REV to a REV address on
@@ -312,7 +317,12 @@ export async function run(args) {
     if (!facilKey) { console.error(`${TAG} --faucet-http needs --key — there is no faucet to serve without one`); process.exit(1); }
   }
 
-  const advisor = makeAdvisor({ ai: args.ai, backend: args.aiBackend, model: args.aiModel, persona: role.persona, roleName: role.name, cmd: CMD, faucetActive: !!facilKey, log: console.log });
+  let aiProvider = null;
+  if (args.ai) {
+    try { aiProvider = await loadProvider(args.aiBackend || "anthropic"); }
+    catch (e) { console.error(`${TAG} ${e?.message ?? e}`); process.exit(1); return; }
+  }
+  const advisor = makeAdvisor({ ai: args.ai, backend: args.aiBackend, provider: aiProvider, model: args.aiModel, persona: role.persona, roleName: role.name, cmd: CMD, faucetActive: !!facilKey, log: console.log });
   const aiFailure = () => advisor.lastError
     ? `The AI backend did not answer — ${advisor.lastError.slice(0, 240)}.`
     : "The AI backend did not answer.";
@@ -603,7 +613,7 @@ export async function run(args) {
     const known = answerFromKnowledge(q, { cmd: CMD });
     if (known) { reply(known, null, 0); return; }
     if (!advisor.enabled) {
-      reply(`I can answer basics about QuantumOS and group decisions without AI, but that one needs AI mode — start me with \`--ai\` (\`--ai-backend claude-code\` for a Claude subscription, or set \`ANTHROPIC_API_KEY\`). Try \`/${CMD} ask what is /poll\` or \`/${CMD} help\` for commands.`, "asknoai", 20_000);
+      reply(`I can answer basics about QuantumOS and group decisions without AI, but that one needs AI mode — start me with \`--ai\` and a provider (\`--ai-backend claude-code\` for a Claude plan, \`deepseek\` with \`DEEPSEEK_API_KEY\`, or \`ANTHROPIC_API_KEY\`). Try \`/${CMD} ask what is /poll\` or \`/${CMD} help\` for commands.`, "asknoai", 20_000);
       return;
     }
     const text = await advisor.advise("ask", { question: q, transcript: recentMsgs.slice(-12).map((mm) => ({ name: mm.name, text: mm.text })) });
@@ -619,7 +629,7 @@ export async function run(args) {
   // /poll → /probe → /lemma). See Collective_Optimization.md.
   async function handleOptimize(problem) {
     if (!problem) { reply(`Give me something to optimize — \`/${CMD} optimize <objective + constraints>\` (e.g. "pick a sprint plan: ship auth in 2 weeks, 2 engineers"). I'll propose candidates and a way to score them.`, "opthelp", 12_000); return; }
-    if (!advisor.enabled) { reply(`I'd need AI mode for that — start me with \`--ai\` (\`--ai-backend claude-code\` for a Claude subscription, or set \`ANTHROPIC_API_KEY\`). For now, \`/${CMD} help\`.`, "optnoai", 20_000); return; }
+    if (!advisor.enabled) { reply(`I'd need AI mode for that — start me with \`--ai\` and a provider (\`--ai-backend claude-code\` for a Claude plan, \`deepseek\` with \`DEEPSEEK_API_KEY\`, or \`ANTHROPIC_API_KEY\`). For now, \`/${CMD} help\`.`, "optnoai", 20_000); return; }
     if (!cooled("optimize", 6_000)) return;
     cooldown.set("optimize", Date.now());
     const text = await advisor.advise("optimize", { problem, transcript: recentMsgs.slice(-16).map((mm) => ({ name: mm.name, text: mm.text })) });
@@ -671,7 +681,7 @@ export async function run(args) {
     if (games.current) { reply(`Still recording **${games.current.spec.label}** — \`/${CMD} stop\` first, then summarize.`, "gamesumbusy", 8_000); return; }
     const latest = games.loadLatest();
     if (!latest) { reply(`No recorded game to summarize yet.`, "gamesumnone", 8_000); return; }
-    if (!advisor.enabled) { reply(`I'd need AI mode to write the summary — start me with \`--ai\` (\`--ai-backend claude-code\` for a Claude subscription). The structured record is already on disk: \`${latest.entry.file}\`.`, "gamesumnoai", 20_000); return; }
+    if (!advisor.enabled) { reply(`I'd need AI mode to write the summary — start me with \`--ai\` and a provider (\`--ai-backend claude-code\` for a Claude plan, or \`deepseek\`). The structured record is already on disk: \`${latest.entry.file}\`.`, "gamesumnoai", 20_000); return; }
     if (!cooled("gamesummary", 10_000)) return;
     cooldown.set("gamesummary", Date.now());
     reply(`✍️ Summarizing **${latest.record.label}** (${latest.record.events} events)…`, null, 0);
@@ -694,7 +704,7 @@ export async function run(args) {
   async function handleChair(topic) {
     if (chair) { reply(`A deliberation is already in progress: **${chair.topic}** (phase *${chair.phase}*). \`/${CMD} status\`, \`/${CMD} next\`, \`/${CMD} close\`, or \`/${CMD} cancel\`.`, "chairbusy", 8_000); return; }
     if (!topic) { reply(`Start a facilitated deliberation — \`/${CMD} chair <topic or question>\`. I'll chair it through define → alternatives → evaluate → disagreements → agreements → closure, then record the decision. One leader (best practice): I chair, you all deliberate; \`/${CMD} next\` to move on.`, "chairhelp", 12_000); return; }
-    if (!advisor.enabled) { reply(`I'd need AI mode to chair — start me with \`--ai\` (\`--ai-backend claude-code\` for a Claude subscription, or set \`ANTHROPIC_API_KEY\`).`, "chairnoai", 20_000); return; }
+    if (!advisor.enabled) { reply(`I'd need AI mode to chair — start me with \`--ai\` and a provider (\`--ai-backend claude-code\` for a Claude plan, \`deepseek\` with \`DEEPSEEK_API_KEY\`, or \`ANTHROPIC_API_KEY\`).`, "chairnoai", 20_000); return; }
     chair = { topic: topic.slice(0, 200), phaseIdx: 0, phase: PHASES[0], startedAt: Date.now(), phaseStartedAt: Date.now(), collected: Object.fromEntries(COLLECT_PHASES.map((p) => [p, []])), synthesis: {}, busy: false };
     console.log(`${TAG} chair: started "${chair.topic}"`);
     reply(PHASE_PROMPT.define(chair.topic), null, 0);

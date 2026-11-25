@@ -23,7 +23,7 @@ const bundle = await build({
   bundle: true, format: "esm", platform: "node", write: false,
 });
 const m = await import("data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64"));
-const { parseAgentRequest, agentShellCommand, agentClaudePrompt, maskCap, AGENT_ROLES, DEFAULT_SIGNAL } = m;
+const { parseAgentRequest, agentShellCommand, agentClaudePrompt, maskCap, AGENT_ROLES, AGENT_PROVIDERS, DEFAULT_SIGNAL } = m;
 
 let pass = 0, fail = 0;
 const ok = (label, fn) => {
@@ -50,6 +50,24 @@ ok("every role add-agent.sh accepts is offered, and no other", () => {
   assert.equal(sh, AGENT_ROLES.map((r) => r.role).join("|") + ") ;;");
 });
 
+ok("--ai picks a provider, anywhere in the line", () =>
+  assert.deepEqual(parseAgentRequest("skeptic --ai deepseek Ada"), { role: "skeptic", ai: "deepseek", name: "Ada" }));
+ok("--model rides along", () =>
+  assert.deepEqual(parseAgentRequest("--ai deepseek --model deepseek-reasoner"), { role: "facilitator", ai: "deepseek", model: "deepseek-reasoner" }));
+ok("an unknown provider is refused, listing the choices", () => {
+  const r = parseAgentRequest("--ai gpt5");
+  assert.ok("error" in r && /deepseek/.test(r.error));
+});
+ok("a model name cannot smuggle shell", () => assert.ok("error" in parseAgentRequest("--ai deepseek --model a;id")));
+ok("--model with no AI is refused", () => assert.ok("error" in parseAgentRequest("--ai none --model x")));
+ok("every provider maps to a plugin add-agent.sh knows", () => {
+  const sh = execFileSync("cat", [join(root, "../../scripts/qos-cli/add-agent.sh")]).toString();
+  for (const p of AGENT_PROVIDERS) assert.ok(p.script === "off" || sh.includes(p.script), p.script);
+  for (const p of AGENT_PROVIDERS.filter((p) => p.script !== "off")) {
+    assert.ok(execFileSync("ls", [join(root, `../../scripts/qos-cli/ai-providers/${p.script}.mjs`)]));
+  }
+});
+
 // Run the command with git and add-agent.sh replaced by echoes, so we see
 // exactly the arguments the script would get.
 function argsOf(cmd) {
@@ -62,6 +80,17 @@ ok("shell command passes room and role", () =>
   assert.deepEqual(argsOf(agentShellCommand(CAP, { role: "skeptic" })), [CAP, "skeptic"]));
 ok("shell command keeps a spaced name as one argument", () =>
   assert.deepEqual(argsOf(agentShellCommand(CAP, { role: "greeter", name: "Ada Lovelace" })), [CAP, "greeter", "Ada Lovelace"]));
+ok("the provider reaches add-agent.sh as AI=, the model as AI_MODEL=", () => {
+  const cmd = agentShellCommand(CAP, { role: "facilitator", ai: "deepseek", model: "deepseek-reasoner" });
+  const env = execFileSync("/bin/bash", ["-c", `git() { :; }; bash() { echo "$AI|$AI_MODEL"; }; ${cmd}`],
+    { env: { HOME: "/nonexistent", PATH: process.env.PATH } }).toString().trim();
+  assert.equal(env, "deepseek|deepseek-reasoner");
+});
+ok("claude means the CLI plugin", () => assert.ok(agentShellCommand(CAP, { role: "facilitator", ai: "claude" }).includes("AI=claude-code ")));
+ok("no key ever appears in the line", () => {
+  const cmd = agentShellCommand(CAP, { role: "facilitator", ai: "deepseek" });
+  assert.ok(!/DEEPSEEK_API_KEY|sk-/.test(cmd));
+});
 ok("default signaling adds no SIGNAL=", () =>
   assert.ok(!agentShellCommand(CAP, { role: "facilitator" }, DEFAULT_SIGNAL).includes("SIGNAL=")));
 ok("a room on another signaling server says so", () =>
@@ -72,6 +101,11 @@ ok("shell command uses its own checkout, never the cwd", () =>
 ok("Claude request names role, name, room and the script", () => {
   const p = agentClaudePrompt(LINK, { role: "scribe", name: "Ada" });
   for (const s of ["scribe", `named "Ada"`, LINK, "scripts/qos-cli/add-agent.sh", "blocked"]) assert.ok(p.includes(s), s);
+});
+
+ok("Claude request names the provider and where its key lives", () => {
+  const p = agentClaudePrompt(LINK, { role: "facilitator", ai: "deepseek" });
+  assert.ok(/DeepSeek/.test(p) && /DEEPSEEK_API_KEY/.test(p) && /never in the room/.test(p) && p.includes("AI=deepseek "));
 });
 
 ok("maskCap hides the cap, raw and URL-encoded", () => {

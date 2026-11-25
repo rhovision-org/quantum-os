@@ -30,7 +30,8 @@ new peer within seconds.
 - **No terminal?** Type `/agent claude` instead and paste what it copies into a Claude
   Code session. That is the route the rest of this page describes.
 
-Type `/agent` to watch it arrive.
+Add `--ai deepseek` (or `claude`, `anthropic`) to choose the model provider, after
+setting that provider's key on the computer that runs it. Type `/agent` to watch it arrive.
 
 
 **Try it now:** this is included in your Claude plan, and the agent lasts minutes after

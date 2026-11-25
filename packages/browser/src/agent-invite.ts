@@ -19,9 +19,24 @@ export const AGENT_ROLES: ReadonlyArray<{ role: string; what: string }> = [
   { role: "observer", what: "records live games (/observer start … stop)" },
 ];
 
+/**
+ * The AI providers `/agent add --ai <p>` can name — each a plugin in
+ * scripts/qos-cli/ai-providers/. Keys are never part of the request: the
+ * machine running the agent reads its own environment.
+ */
+export const AGENT_PROVIDERS: ReadonlyArray<{ id: string; script: string; key: string | null; what: string }> = [
+  { id: "claude", script: "claude-code", key: null, what: "Claude through the claude CLI — your Claude plan, no API key" },
+  { id: "anthropic", script: "anthropic", key: "ANTHROPIC_API_KEY", what: "Claude through the Anthropic API" },
+  { id: "deepseek", script: "deepseek", key: "DEEPSEEK_API_KEY", what: "DeepSeek through its API" },
+  { id: "none", script: "off", key: null, what: "no AI — greets and answers basics from its built-in FAQ" },
+];
+
 export interface AgentRequest {
   role: string;
   name?: string;
+  /** An AGENT_PROVIDERS id; absent = let add-agent.sh pick what it can use. */
+  ai?: string;
+  model?: string;
 }
 
 /**
@@ -33,16 +48,52 @@ export interface AgentRequest {
  */
 export function parseAgentRequest(arg: string): AgentRequest | { error: string } {
   const words = arg.trim().split(/\s+/).filter(Boolean);
+  let ai: string | undefined;
+  let model: string | undefined;
+  // Flags may sit anywhere: --ai <provider>, --model <model>.
+  for (let i = 0; i < words.length; ) {
+    const w = words[i].toLowerCase();
+    if (w === "--ai" || w === "--model") {
+      const v = words[i + 1];
+      if (!v) return { error: `${w} needs a value` };
+      if (w === "--ai") {
+        const id = v.toLowerCase();
+        if (!AGENT_PROVIDERS.some((p) => p.id === id)) {
+          return { error: `unknown AI provider "${v}" — choose ${AGENT_PROVIDERS.map((p) => p.id).join(", ")}` };
+        }
+        ai = id;
+      } else {
+        if (!/^[A-Za-z0-9][A-Za-z0-9._:\/-]{0,63}$/.test(v)) return { error: `"${v}" doesn't look like a model name` };
+        model = v;
+      }
+      words.splice(i, 2);
+    } else i++;
+  }
+  if (model && ai === "none") return { error: "--model needs an AI provider, not none" };
   let role = "facilitator";
   if (words.length && AGENT_ROLES.some((r) => r.role === words[0].toLowerCase())) {
     role = words.shift()!.toLowerCase();
   }
   const name = words.join(" ");
-  if (!name) return { role };
+  const req: AgentRequest = { role };
+  if (ai) req.ai = ai;
+  if (model) req.model = model;
+  if (!name) return req;
   if (name.length > 32 || !/^[A-Za-z][A-Za-z0-9 ._-]*$/.test(name)) {
     return { error: "an agent's name is up to 32 letters, digits, spaces, '.', '_' or '-', starting with a letter" };
   }
-  return { role, name };
+  return { ...req, name };
+}
+
+/** The provider entry a request names, if it names one. */
+export function providerOf(req: AgentRequest) {
+  return req.ai ? AGENT_PROVIDERS.find((p) => p.id === req.ai) ?? null : null;
+}
+
+/** The environment prefix add-agent.sh reads for the provider and model. */
+function aiEnv(req: AgentRequest): string {
+  const p = providerOf(req);
+  return (p ? `AI=${p.script} ` : "") + (req.model ? `AI_MODEL=${quote(req.model)} ` : "");
 }
 
 const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -58,15 +109,19 @@ export function agentShellCommand(roomCap: string, req: AgentRequest, signalUrl 
   const name = req.name ? ` ${quote(req.name)}` : "";
   return `if [ -d ${d}/.git ]; then git -C ${d} pull -q --ff-only; `
     + `else git clone -q --depth 1 ${REPO_URL}.git ${d}; fi && `
-    + `${sig}bash ${d}/scripts/qos-cli/add-agent.sh ${quote(roomCap)} ${req.role}${name}`;
+    + `${sig}${aiEnv(req)}bash ${d}/scripts/qos-cli/add-agent.sh ${quote(roomCap)} ${req.role}${name}`;
 }
 
 /** The same request, worded for a Claude Code session to carry out. */
 export function agentClaudePrompt(roomLink: string, req: AgentRequest, signalUrl = DEFAULT_SIGNAL): string {
   const named = req.name ? ` named "${req.name}"` : "";
   const sig = signalUrl && signalUrl !== DEFAULT_SIGNAL ? `SIGNAL=${quote(signalUrl)} ` : "";
-  return `Add a ${req.role} AI agent${named} to my QuantumOS room ${roomLink} . `
-    + `Clone ${REPO_URL} and run: ${sig}bash scripts/qos-cli/add-agent.sh ${quote(roomLink)} ${req.role}`
+  const p = providerOf(req);
+  const using = p && p.id !== "none" ? `, using ${p.what}${req.model ? ` (model ${req.model})` : ""}` : "";
+  const keyNote = p?.key ? `It reads ${p.key} from your environment; if that is not set, ask me to set it there — never in the room. ` : "";
+  return `Add a ${req.role} AI agent${named} to my QuantumOS room ${roomLink}${using}. `
+    + keyNote
+    + `Clone ${REPO_URL} and run: ${sig}${aiEnv(req)}bash scripts/qos-cli/add-agent.sh ${quote(roomLink)} ${req.role}`
     + `${req.name ? " " + quote(req.name) : ""} `
     + `— if the signaling server (${signalUrl || DEFAULT_SIGNAL}) is blocked from your environment, tell me instead of retrying. `
     + `Guide: ${AGENT_DOCS_URL}`;

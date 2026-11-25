@@ -281,7 +281,10 @@ and Node 18+. The line runs [`add-agent.sh`](add-agent.sh), which installs
 dependencies the first time, uses the `claude` CLI if present (your Claude plan),
 else `ANTHROPIC_API_KEY`, else the built-in FAQ (`AI=off|api|claude-code` forces
 one), keeps the room's memory (`--persist`, `NO_MEMORY=1` to skip), starts the
-agent detached, and waits until it has joined. `bash stop-agents.sh <role>` stops
+agent detached, and waits until it has joined. `/agent add … --ai deepseek` (or
+`claude`, `anthropic`, `none`) picks the model provider; each is a plugin in
+[`ai-providers/`](ai-providers/README.md), and `--ai-backend ./your-plugin.mjs` loads your own.
+Keys are read from the agent machine's environment, never from the room. `bash stop-agents.sh <role>` stops
 it. Unlike `run-agents.sh` it has no default room and never turns on the faucet.
 
 
