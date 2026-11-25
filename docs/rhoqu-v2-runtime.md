@@ -2,7 +2,13 @@
 
 The browser lowers RhoQu source to a typed process IR. Enter a program directly
 with /rhoqu to review the expanded commands and approve execution. Room,
-connection, or identity changes stop subsequent dispatch.
+connection, or identity changes stop subsequent dispatch. Review opens with
+Cancel focused. Approval requires activating the Run program button (mouse,
+touch, or keyboard); a document-level Enter is not approval. A covered
+confirmation dialog does not receive keyboard or button approval. A macro or
+script cannot enter RhoQu execution or clear registered channel handlers;
+`/rhoqu clear` requires direct input. This is a local UI authority boundary,
+not authentication of the operator or a proof of all agent entry points.
 
 ## Sequence and concurrent branches
 

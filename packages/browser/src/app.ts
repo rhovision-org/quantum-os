@@ -2299,9 +2299,10 @@ interface SecureField { label: string; type: "password" | "text" | "textarea"; p
  * the app having died. It was doing that in front of a deploy, which is the
  * worst place for it: the moment someone is deciding whether to spend phlo.
  */
-function confirmDialog(title: string, body: string, okLabel = "OK"): Promise<boolean> {
+function confirmDialog(title: string, body: string, okLabel = "OK", buttonOnly = false): Promise<boolean> {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
+    overlay.dataset.confirmDialog = "true";
     overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px";
     const card = document.createElement("div");
     card.style.cssText = "background:#1b1d23;color:#e8e8ea;border:1px solid #3a3d46;border-radius:10px;max-width:440px;width:100%;padding:18px 18px 14px;box-shadow:0 8px 40px rgba(0,0,0,.5);font:14px/1.5 system-ui,sans-serif";
@@ -2332,15 +2333,28 @@ function confirmDialog(title: string, body: string, okLabel = "OK"): Promise<boo
       overlay.remove();
       resolve(answer);
     };
+    const isTop = (): boolean => {
+      const dialogs = document.querySelectorAll('[data-confirm-dialog="true"]');
+      return dialogs[dialogs.length - 1] === overlay;
+    };
     const onKey = (e: KeyboardEvent): void => {
+      if (!isTop()) return;
       if (e.key === "Escape") { e.preventDefault(); close(false); }
-      else if (e.key === "Enter") { e.preventDefault(); close(true); }
+      else if (e.key === "Enter") {
+        if (buttonOnly) {
+          // Let native keyboard activation of the focused button work. An
+          // unrelated Enter (including in the chat input) is not approval.
+          if (e.target !== ok && e.target !== cancel) e.preventDefault();
+          return;
+        }
+        e.preventDefault(); close(true);
+      }
     };
     document.addEventListener("keydown", onKey, true);
-    cancel.addEventListener("click", () => close(false));
-    ok.addEventListener("click", () => close(true));
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(false); });
-    setTimeout(() => ok.focus(), 0);
+    cancel.addEventListener("click", () => { if (isTop()) close(false); });
+    ok.addEventListener("click", () => { if (isTop()) close(true); });
+    overlay.addEventListener("click", (e) => { if (isTop() && e.target === overlay) close(false); });
+    setTimeout(() => { if (isTop()) (buttonOnly ? cancel : ok).focus(); }, 0);
   });
 }
 
@@ -6264,6 +6278,10 @@ function handleCommand(raw: string, commandOptions: { directInput?: boolean; rec
         break;
       }
       if (src === "clear") {
+        if (!commandOptions.directInput) {
+          sys("Enter /rhoqu clear directly to remove channel handlers.");
+          break;
+        }
         const n = rhoquHandlers.length;
         rhoquHandlers.length = 0;
         activeRoom.rhoquHandlers = rhoquHandlers;   // keep RoomContext field in sync
@@ -6340,7 +6358,7 @@ function handleCommand(raw: string, commandOptions: { directInput?: boolean; rec
       const run = async (): Promise<void> => {
         const plan = formatRhoQuProcess(process);
         const handlerSource = pendingHandlers.length ? "\n\nChannel handler source:\n" + src : "";
-        if (!(await confirmDialog("Review RhoQu program", plan + handlerSource, "Run program"))) return;
+        if (!(await confirmDialog("Review RhoQu program", plan + handlerSource, "Run program", true))) return;
         if (!canDispatch()) throw new Error("RhoQu execution context changed");
         rhoquHandlers.push(...pendingHandlers);
         const results = await executeRhoProcessAsync(process, async (command, { binding }) => {
