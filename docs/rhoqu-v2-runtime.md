@@ -56,3 +56,18 @@ An import checks schema, limits, and the canonical content hash. The author
 anchor is a claim supplied with the package. Import and export are preview
 operations. Channel handler registrations require an interactive RhoQu
 program because package v1 has no representation for them.
+
+## Approval and agent-message audit
+
+`send()` marks the user's local input as direct; `runInput()` (scripts and
+command macros) does not. The `/rhoqu` execution entry and handler removal
+require that direct path. The package UI imports and exports without dispatch.
+Inbound chat, including command-shaped agent replies, is rendered as peer
+text. The existing `/ask` and role commands relay chat to agents; they do
+not interpret the reply as a local RhoQu program. Inbound channel messages
+can invoke explicitly registered flat handlers, under a narrower command
+allowlist. This is a scoped source audit of the current browser, not a claim
+about all agent implementations, future provider integrations, or remote
+agent-side actions. The Chromium acceptance workflow uses an independent
+synthetic peer, not live model inference. It checks local goal storage, the
+preview/cancel/keyboard boundary, script entry, and channel-handler denial.

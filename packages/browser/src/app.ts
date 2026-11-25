@@ -2344,7 +2344,10 @@ function confirmDialog(title: string, body: string, okLabel = "OK", buttonOnly =
         if (buttonOnly) {
           // Let native keyboard activation of the focused button work. An
           // unrelated Enter (including in the chat input) is not approval.
-          if (e.target !== ok && e.target !== cancel) e.preventDefault();
+          if (e.target !== ok && e.target !== cancel) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
           return;
         }
         e.preventDefault(); close(true);

@@ -1,0 +1,61 @@
+name: RhoQu approval browser acceptance
+on:
+  pull_request:
+    branches: [work]
+    paths:
+      - 'packages/browser/src/app.ts'
+      - 'packages/browser/src/rhoqu*.ts'
+      - 'packages/browser/test/rhoqu-approval-browser-ci.mjs'
+      - '.github/workflows/rhoqu-approval-browser.yml'
+permissions:
+  contents: read
+jobs:
+  approval:
+    name: Real browser approval and peer-message boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm build:wasm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:signaling
+      - name: Install Chromium
+        run: |
+          npm install --prefix "$RUNNER_TEMP/rhoqu-playwright" --no-save --no-package-lock playwright@1.65.1
+          "$RUNNER_TEMP/rhoqu-playwright/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Isolated browser witness
+        env:
+          QOS_PLAYWRIGHT_MODULE: ${{ runner.temp }}/rhoqu-playwright/node_modules/playwright/index.mjs
+        run: |
+          set -euo pipefail
+          PORT=4444 node packages/signaling/dist/index.js > "$RUNNER_TEMP/rhoqu-signal.log" 2>&1 &
+          signal=$!
+          (cd packages/browser && exec node node_modules/vite/bin/vite.js --host 127.0.0.1 --strictPort) > "$RUNNER_TEMP/rhoqu-vite.log" 2>&1 &
+          vite=$!
+          trap 'kill "$signal" "$vite" 2>/dev/null || true' EXIT
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:4444/ >/dev/null && curl -kfsS https://127.0.0.1:5173/quantum-os/ >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:4444/ >/dev/null
+          curl -kfsS https://127.0.0.1:5173/quantum-os/ >/dev/null
+          node packages/browser/test/rhoqu-approval-browser-ci.mjs
+      - uses: actions/upload-artifact@v6
+        if: success()
+        with:
+          name: rhoqu-approval-evidence
+          path: |
+            rhoqu-approval-evidence.json
+            rhoqu-approval-evidence.SHA256SUMS
+          if-no-files-found: error

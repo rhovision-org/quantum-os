@@ -27,7 +27,7 @@ class Element {
 }
 const body=new Element("body");
 globalThis.document={body,createElement:tag=>new Element(tag),querySelectorAll:()=>body.children.filter(c=>c.dataset.confirmDialog==="true"),addEventListener:(type,fn)=>keys.add(fn),removeEventListener:(type,fn)=>keys.delete(fn)};
-function key(name,target) { const e={key:name,target,preventDefault(){this.prevented=true;}}; for (const fn of [...keys]) fn(e); return e; }
+function key(name,target) { const e={key:name,target,preventDefault(){this.prevented=true;},stopImmediatePropagation(){this.stopped=true;}}; for (const fn of [...keys]) fn(e); return e; }
 function buttons(overlay) { return overlay.children[0].children[2].children; }
 const tick=()=>new Promise(r=>setTimeout(r,0));
 let first, second;
@@ -37,7 +37,7 @@ await tick();
 const [lower,upper]=body.children;
 const [cancel,run]=buttons(upper);
 assert.equal(focused,cancel,"RhoQu must focus cancel by default");
-assert(key("Enter",body).prevented); await tick(); assert.equal(first,undefined); assert.equal(second,undefined);
+const unrelated = key("Enter",body); assert(unrelated.prevented && unrelated.stopped); await tick(); assert.equal(first,undefined); assert.equal(second,undefined);
 buttons(lower)[1].click(); await tick(); assert.equal(first,undefined,"covered confirm cannot approve");
 run.click(); await b; assert.equal(second,true); assert.equal(first,undefined);
 key("Enter",body); await a; assert.equal(first,true,"legacy topmost Enter remains supported");
