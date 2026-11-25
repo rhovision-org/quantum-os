@@ -2,7 +2,7 @@ use crate::history::{achieves_zfa, is_count_balanced, spectral_gap};
 use crate::pauli::is_pauli_closed;
 use crate::twist::Twist;
 
-/// A capability token: an unforgeable ZFA-balanced identity.
+/// A capability token: a bearer identifier with an algebraic balance check.
 ///
 /// In QuantumOS, possessing a capability name IS proof of authorization
 /// (Curry-Howard for capabilities). Tokens are ZFA-balanced by construction —
@@ -78,7 +78,7 @@ impl Capability {
     }
 
     /// Derive a child capability by appending a ZFA-balanced extension.
-    /// The child is unforgeable without the parent.
+    /// This is structural prefix derivation, not a cryptographic authorization proof.
     pub fn derive(&self, extension: &[u8], label: impl Into<String>) -> Self {
         let child_entropy = Self::from_entropy(extension, "");
         let mut twists = self.twists.clone();

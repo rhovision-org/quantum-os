@@ -2,7 +2,7 @@
 
 ## Threat model
 
-[quantum-os](README.md) is a peer-to-peer browser application. The security boundary is the **ZFA capability token** — a cryptographically unguessable, algebraically unforgeable identifier. Possessing a token IS the capability to act (Curry-Howard for capabilities). The signaling server is an untrusted relay and is explicitly outside the trust boundary.
+[quantum-os](README.md) is a peer-to-peer browser application. The security boundary is the **ZFA capability token** — a bearer secret with a publicly checkable algebraic shape. Shape validity is not evidence of issuer authenticity, possession of another secret, or authorization for a particular operation. The signaling relay is not trusted with plaintext control-plane content; metadata and availability remain exposed. See [Security assurance boundary](docs/security-assurance-boundary.md).
 
 **Scope note — off-chain by default.** Every mechanism in this document (capability tokens, dyncap chains, lemma immutability, the discrepancy probe, rendezvous conservation, vault encryption, group/trust governance) is enforced entirely peer-to-peer, with no blockchain, consensus, or third party in the loop. That is deliberate: it is both the privacy property (ordinary room activity — who's here, what was decided, what changed hands — is never written to a public ledger for anyone outside the room to observe) and the resource property (no gas, no block production, no on-chain state to grow). `/rholang` and the on-chain macros (`$x*` pooled exchange, `$w*` wrapped tokens) are an explicit, opt-in extension for the cases that need a durable public record or a currency that outlives a room — they carry rnode's own trust model (see `docs/rholang.md`'s "Known gaps") and do not weaken, or get relied on by, the off-chain guarantees above.
 
@@ -10,11 +10,11 @@
 
 | Threat | Mechanism |
 |--------|-----------|
-| Identity forgery | Peer IDs are 128-bit random ZFA-balanced tokens; guessing one is computationally infeasible |
-| Unauthorized room access | Room IDs are ZFA capability tokens; no token = no join |
+| Identity forgery | Random peer identifiers distinguish sessions; they do not authenticate an issuer. Effective token entropy must be assessed at the output, not RNG input. |
+| Unauthorized room access | Bearer room secret derives the control-plane key; relay routing and authenticated content access are distinct. |
 | SDP/ICE relay forgery | Signaling server binds each `peerId` to its WebSocket; relayed `from` fields are validated server-side |
 | Eavesdropping on peer data | Control-plane envelopes are AES-256-GCM sealed under a key derived from the room token before the signaling relay carries them; WebRTC DTLS + SRTP encrypt media and bulk end-to-end. The relay sees ciphertext and a hashed room name |
-| Capability decoherence | `decoherence_impossibility` (machine-verified in Lean 4): `parallel(peer1, peer2, …)` stays ZFA-balanced by construction |
+| Capability decoherence | `decoherence_impossibility` concerns the Lean representation of parallel processes, not adversarial browser or network transitions |
 | Envelope authorship after TOFU | `/dyncap` ties each signable envelope to its sender's `H(seed)` anchor; once TOFU-pinned, mismatches and forks are detected and surfaced. Covers `name`, `lemma`, `note-declare`, `note-series`, `retract`, and the outer `sync-*` envelopes. |
 | Owner-gated removal | A `retract` is honored only from the item's owner — `from === poll.creator` for a poll, or the sender's verified anchor matching the lemma's stored author anchor. Anyone else only hides the item locally. Tombstones (`qos-retracted-<room>`) keep a removed gossiped item from healing back via a later `sync-*`. The memory-peer daemon honors author lemma retractions too, so an always-on peer won't resurrect a removed lemma. |
 | Note terms integrity | A terms-stamped note's token commits to a hash of its terms (`cap:note-<base>~<termsHash8>`), so a relayer can't swap the text without changing the note's identity. The issuer's `note-series` declaration (text + hash) is dyncap-signed and honored only from the currency's issuer; a passed terms cache is accepted only if it hashes to the token's stamp. |
@@ -28,7 +28,7 @@
 |--------|-------|
 | Compromised browser / OS | If the client environment is compromised, RNG and capability storage are untrusted |
 | Sybil attacks | Anyone with the room URL can join; the signaling server imposes no per-identity limit |
-| Signaling server operator | The operator can observe room membership (peerIds, who joined when, message timing and sizes), disrupt or delay relay, and replay an unsigned `chat` frame under its original sender; they cannot read peer data, forge a sender, or join the room (they hold its hash, not its token) |
+| Signaling server operator | The operator can observe room membership (peerIds, who joined when, message timing and sizes), disrupt or delay relay, and replay an unsigned `chat` frame under its original sender; content confidentiality is conditional on the bearer secret; relay routing membership is not cryptographic authentication |
 | STUN server IP disclosure | ICE candidate gathering uses `stun.l.google.com`; Google observes peer IPs. Use a self-hosted STUN/TURN server to avoid this. |
 | Default TURN relay IP/metadata disclosure | When a call falls back to the default relay (`/ice auto`, on by default — see above), Cloudflare observes that call's traffic metadata (IPs, timing, volume) but not content (DTLS/SRTP end-to-end). `/ice auto off` or `/ice turn` substitutes a relay you trust more, or none. |
 | Physical link intercept | Signaling channel uses WSS (TLS) in production; a CA compromise could allow MITM of signaling (but not WebRTC data channels) |
@@ -42,7 +42,7 @@
 | Dyncap clone race | An attacker who exfiltrates a peer's seed and broadcasts a `name` envelope *before* the legitimate peer in a fresh room wins the TOFU pin. The legitimate peer's subsequent envelopes will then be rejected as anchor-mismatched in that room. Hash-only identity cannot close this; signature-strength identity could. |
 | Vault password brute-force | The identity vault is confidential only up to its password. Anyone who obtains the ciphertext can attack it **offline**, and with group-scoped recovery the ciphertext is *deliberately* replicated to every group peer (including the always-on memory daemon), so it is not a secret. PBKDF2 at 210 000 iterations raises the per-guess cost but does not save a weak or reused password. Choose a strong password; the vault's security is exactly its strength. |
 | Public recovery handle | The `/login <handle>` lookup key is a public label (your display name); anyone in the group can fetch a member's *ciphertext* by handle. Confidentiality rests entirely on the password (row above), not on the handle being secret. |
-| Token balance is weaker than QLF's ZFA | `achieves_zfa` conjoins Pauli closure with **aggregate** count balance (`count_pos == count_neg`), where QLF's `is_zfa` requires **pairwise** balance — the signed action vector `(#^-#v, #>-#<, #/-#\\, #+-#-)` vanishing. The aggregate reading is strictly weaker, so the token space is larger than the ZFA-balanced space: at length 6 the kernel accepts 20,480 histories where QLF accepts 5,120. `^^<<` is the smallest illustration — it folds to `+I` with two positives against two negatives, and its signed action vector is `(2,-2,0,0)`. This does not weaken *entropy* (tokens are still 128-bit random), and no attack follows from it; what it means is that "ZFA-balanced token" names a superset of ZFA. See the section below. |
+| Token balance is weaker than QLF's ZFA | `achieves_zfa` conjoins Pauli closure with **aggregate** count balance (`count_pos == count_neg`), where QLF's `is_zfa` requires **pairwise** balance — the signed action vector `(#^-#v, #>-#<, #/-#\\, #+-#-)` vanishing. The aggregate reading is strictly weaker, so the token space is larger than the ZFA-balanced space: at length 6 the kernel accepts 20,480 histories where QLF accepts 5,120. `^^<<` is the smallest illustration — it folds to `+I` with two positives against two negatives, and its signed action vector is `(2,-2,0,0)`. This predicate comparison does not establish token entropy or an attack; what it means is that "ZFA-balanced token" names a superset of ZFA. See the section below. |
 | Vault widens the seed's blast radius | Before `/password`, exfiltrating the seed required reading `localStorage` on the victim's device. A published vault means the seed is now recoverable by anyone with the ciphertext **and** the password — a successful offline crack yields a full clone, subject to the same TOFU clone-race above. This is the accepted cost of portable recovery; it is why the password gate and the "don't run one identity in two browsers" (fork) guidance matter. |
 
 ---
@@ -145,7 +145,7 @@ Every peer identity, room ID, and granted capability is a `cap:label:hex` token:
 ```
 cap:room:024602460246024602460246…
      ↑       ↑
-  label    32 hex digits (16 bytes = 128-bit entropy)
+  label    32 encoded twist digits (not 128 bits of output entropy)
            ZFA = half-spin closure
                  = Pauli scalar return (matrix fold ∈ {±I, ±iI})
                  ∧ Hermitian-pair count balance (count_pos == count_neg)
@@ -189,60 +189,15 @@ length 8 behind `--ignored`. A sign flip in `twist_matrix`, a wrong branch in
 `is_pauli_closed`, or a drifted `Twist` encoding moves at least one total and
 fails the build. It is the check that found the balance-predicate gap above.
 
-Tokens are generated using `crypto.getRandomValues()` (browser) or the `getrandom` crate (Rust/WASM), which calls `crypto.getRandomValues()` internally. Entropy: 128 bits. Since v0.17, `Capability::from_entropy` uses rejection sampling (expected ~4 iterations) to guarantee both faces of the half-spin closure hold for every issued token. The output space is reduced versus the count-only check, but remains astronomically large for 32-twist tokens.
+Tokens are generated using `crypto.getRandomValues()` (browser) or `getrandom` (Rust/WASM). The generator draws 16 bytes, maps each byte to one positive and one negative twist, and rejection-samples for Pauli closure. RNG input length does not establish output entropy; the mapping is many-to-one. Do not claim 128-bit guessing resistance for this representation. A versioned entropy-preserving construction and compatibility plan are separate engineering work.
 
-The ZFA invariant is machine-verified in [Lean 4](https://github.com/rhovision-org/quantum-logical-framework):
-
-- `achieves_ZFA` — half-spin closure (Pauli scalar return ∧ Hermitian-pair count balance)
-- `rho_process_always_zfa` — parallel composition stays ZFA
-- `decoherence_impossibility` — no operation can break ZFA
-- `no_magnetic_monopoles` (ZFAEventDynamics.lean) — `∇·B = 0` follows from ZFA closure
+The [Lean model](https://github.com/rhovision-org/quantum-logical-framework/blob/2b93f23fd8f8cbcbac330710f305a62a38e4905d/lean/RhoQuCalc.lean) proves `rho_process_always_zfa` for `achieves_ZFA (toTopoString p)`. `toTopoString` encodes action/lift as opposite-phase pairs and composes by concatenation. `decoherence_impossibility` specializes that result to parallel composition. Neither quantifies over browser adversaries, token issuance, secret leakage, or authorization. `is_valid_transition` is currently `True` (placeholder); it is not a determinant-preservation proof. No extraction/refinement theorem connecting this model to the deployed Rust/WASM/TypeScript application is supplied by these results.
 
 Rust source: [`crates/zfa-core/src/capability.rs`](crates/zfa-core/src/capability.rs)
 
 ### Quantum security
 
-The core p2p security model — capability tokens, dyncap identity, the
-identity vault — uses **no public-key cryptography whose hardness depends on
-factoring or discrete log**, the class of problem Shor's algorithm breaks. It
-is built entirely from CSPRNG entropy, hashing, and symmetric encryption,
-each of which a quantum computer only attacks with Grover's algorithm — a
-quadratic speedup, not a break:
-
-| Mechanism | Primitive | Quantum exposure |
-|-----------|-----------|-------------------|
-| Capability tokens (peer ID, room ID, lemma/note caps) | `crypto.getRandomValues()` entropy, 128 bits, ZFA-constrained | Grover only: brute-force search over the token space, not a structural attack |
-| Dyncap identity (`anchor`, `witness`) | SHA-256 only, hash chain, no keypair | Grover only: preimage search, not a structural attack |
-| Identity vault (`/password`) | PBKDF2-SHA256 (210k iters) → AES-256-GCM | Grover only: AES-256 keeps a large post-quantum margin |
-
-None of these rely on discrete log or factoring, so there is no known quantum
-algorithm that breaks them structurally the way Shor's algorithm breaks RSA
-or ECDSA — only the same brute-force search a classical attacker faces,
-sped up quadratically. **This is what "off-chain by default" buys beyond
-privacy and cost**: it also keeps the identity and capability layer off of
-classical public-key crypto, by construction, not as a deliberate
-post-quantum design exercise.
-
-Two exceptions, both outside the core p2p model and both inherent to
-interfacing with systems this project does not control, not choices made
-here:
-
-- **`/rholang deploy`** signs with **secp256k1 ECDSA** (`rholang.ts`, via
-  `@noble/curves`) to interoperate with the shipped rnode's existing
-  signature scheme — the same exposure to Shor's algorithm every
-  classical-signature blockchain has today. This path is opt-in and
-  off-chain-by-default (see the scope note above); a broken deploy key
-  compromises that key's on-chain funds/registry slot, not any peer's room
-  identity or capability tokens.
-- **WebRTC/DTLS transport** — the browser's own DTLS handshake typically
-  negotiates ECDHE, outside this project's control. A "harvest now, decrypt
-  later" adversary who records a session's ciphertext today and gains a
-  quantum computer later could in principle recover that session's
-  transport key. This affects only the recorded traffic of that one call,
-  not the algebraic capability/identity layer above it, which is not
-  transported as a secret to begin with — a capability token's *security*
-  is that possessing it is authorization, not that it stays hidden in
-  transit forever.
+The room-key derivation uses HKDF-SHA256 and AES-GCM; dyncap uses hash-based attribution and the vault uses password-derived encryption. These primitive choices do not establish post-quantum security of the application. In particular, derived key length does not add entropy to the bearer secret, and vault security depends on password strength. Dyncap is not a public-key signature scheme. WebRTC/DTLS and WSS/TLS have their own transport negotiation and trust assumptions; the opt-in chain deploy path uses secp256k1. No comprehensive quantum adversary model or end-to-end proof is supplied here.
 
 ### Signaling server trust model
 
@@ -253,7 +208,7 @@ The signaling server (`packages/signaling/`) is a **thin WebSocket relay**. It:
 - Tracks room membership (peer join/leave), holding a seat for `SIGNAL_GRACE_MS` (60 s) when a socket dies so a rejoin under the same peerId resumes silently ([docs/connection.md](docs/connection.md), "The transport")
 - Never sees WebRTC data channel or media contents (DTLS/SRTP-encrypted peer-to-peer) — calls, attachments and `/file get` stay on WebRTC
 
-**The relay cannot read or join the room** (`packages/browser/src/room-crypto.js`, shared by the browser and the Node agents). Each control-plane envelope is AES-256-GCM encrypted under `HKDF-SHA256(room token)`, with the sender's peerId as GCM additional data — so a frame the relay re-labels with another `from` opens for no one. The server is told only `SHA-256("qos-room-id:" + token)` as the room's name. **Before this build the raw room token was sent on `join`**: the relay operator held the capability to join every room it relayed. Now they hold a name that is not a capability. Symmetric primitives only — no keypair, so no new Shor exposure (see *Quantum security*). What this does **not** prevent: the relay **replaying** a sealed frame under its original `from`. The dyncap-signed kinds (`name`, `lemma`, `note-declare`, `sync-*`, polls, gov, …) carry a monotonic `seq` and a replay is refused as a chain violation; a plain `chat` line could be replayed. A per-room, per-sender frame counter inside the sealed payload would close this and is not built.
+**Control-plane confidentiality is conditional on the room secret and cryptographic assumptions** (`packages/browser/src/room-crypto.js`, shared by the browser and the Node agents). Each control-plane envelope is AES-256-GCM encrypted under `HKDF-SHA256(room token)`, with the sender's peerId as GCM additional data — so a frame the relay re-labels with another `from` opens for no one. The server is told `SHA-256("qos-room-id:" + token)` as the routing name; this is not proof of secret possession. **Before this build the raw room token was sent on `join`**: the relay operator held the capability to join every room it relayed. Now they hold a name that is not a capability. Symmetric primitives only — no keypair, so no new Shor exposure (see *Quantum security*). What this does **not** prevent: the relay **replaying** a sealed frame under its original `from`. The dyncap-signed kinds (`name`, `lemma`, `note-declare`, `sync-*`, polls, gov, …) carry a monotonic `seq` and a replay is refused as a chain violation; a plain `chat` line could be replayed. A per-room, per-sender frame counter inside the sealed payload would close this and is not built.
 
 **Relay forgery protection:** the server maintains a `ws → peerId` index populated at join time. Every relay message (`offer`, `answer`, `ice`, and `data`) is rejected with an error if the `from` field does not match the peer ID registered for the sending connection, and a `leave` is honoured only for the sending socket's own seat (before this any socket could `leave` any peer, making the room see them gone). A peer cannot forge messages as if they came from another peer.
 

@@ -334,11 +334,11 @@ function formatCap(label: string, twists: Uint8Array): string {
 export function validateCapability(token: string): boolean {
   if (_wasm) return _wasm.wasm_capability_valid(token);
   const parts = token.split(":");
-  if (parts.length < 3 || parts[0] !== "cap") return false;
+  if (parts.length !== 3 || parts[0] !== "cap") return false;
   // Each char encodes one twist value (0–7). Reject any char outside that range
   // rather than silently filtering, which would let malformed tokens pass.
   const hexStr = parts[2];
-  if (hexStr.length === 0 || !/^[0-7]+$/.test(hexStr)) return false;
+  if (hexStr.length === 0 || /[^0-7]/.test(hexStr)) return false;
   const twistBytes = Uint8Array.from([...hexStr].map(c => parseInt(c, 10)));
   return achievesZfa(twistBytes);
 }

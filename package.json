@@ -2,7 +2,7 @@
   "name": "quantum-os",
   "version": "0.1.0",
   "private": true,
-  "description": "QuantumOS (QOS) — an intelligent gateway to each other and everything: the rho ZFA peer-to-peer layer, proven secure. ZFA kernel (Rust/WASM) + WebRTC browser peers",
+  "description": "QuantumOS (QOS) — an intelligent gateway to each other and everything: a rho ZFA-inspired peer-to-peer layer. ZFA kernel (Rust/WASM) + WebRTC browser peers",
   "scripts": {
     "build:wasm": "cd crates/zfa-core && wasm-pack build --target web --out-dir ../../packages/zfa-core-wasm --scope quantum-os --features wasm",
     "build:signaling": "pnpm --filter @quantum-os/signaling build",
