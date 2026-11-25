@@ -37,7 +37,9 @@ import { parseDefinition, parseInvocation, expandCommand, expandCallSites,
          MACRO_NAME_RE, MAX_BODY } from "./macro-lang.js";
 import { createCalls, type Calls } from "./calls.js";
 import { QosCommand } from "./qos-command.js";
-import { pickAskAgent, agentAskText, liveAgentTarget } from "./agent-ask.js";
+import { pickAskAgent, agentAskText, liveAgentTarget, agentCommand } from "./agent-ask.js";
+import { AGENT_ROLES, STANDARD_SKILLS, AGENT_PROVIDERS, AGENT_DOCS_URL, parseAgentRequest, providerOf, agentShellCommand, agentClaudePrompt, maskCap,
+         parseGrantArgs, parseRevokeArgs, parseForkArgs, OWNER_TOKEN_RE, FORK_TOKEN_RE } from "./agent-invite.js";
 import { GoalStore, parseGoalAdd } from "./goal-store.js";
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
@@ -3641,6 +3643,82 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
   }
 }
 
+// ---- agent ownership and fork grants (/agent grant · grants · revoke · fork) ----
+const sys = (text: string) => addMessage("", text, "system");
+// One owner capability per browser: every agent added from here carries it
+// (QOS_AGENT_OWNER), so this browser can ask any of them for a fork grant.
+const AGENT_OWNER_KEY = "qos-agent-owner";
+function agentOwnerCap(create: boolean): string | null {
+  try {
+    const have = localStorage.getItem(AGENT_OWNER_KEY);
+    if (have && OWNER_TOKEN_RE.test(have)) return have;
+    if (!create) return null;
+    const fresh = generateCapability("owner");
+    localStorage.setItem(AGENT_OWNER_KEY, fresh);
+    return fresh;
+  } catch {
+    return create ? generateCapability("owner") : null;   // no storage: owner for this line only
+  }
+}
+/** Agents we asked something, and until when an answer is expected — an unasked reply is ignored. */
+const pendingAgentCtl = new Map<string, number>();
+function pickAgentFor(which?: string): { peerId: string } | { error: string } {
+  const present = [...peerAgents].filter(([id]) => peers.has(id));
+  if (!present.length) return { error: "no AI agent is in this room right now" };
+  if (which) {
+    const t = liveAgentTarget(present, peerNames, which);
+    return t ? { peerId: t.peerId } : { error: `no agent "${which}" here — /agent lists them` };
+  }
+  if (present.length > 1) return { error: `${present.length} agents here — say which: ${present.map(([id, r]) => `${r} (${peerLabel(id)})`).join(", ")}` };
+  return { peerId: present[0][0] };
+}
+function onAgentCtlReply(from: string, d: Record<string, unknown>): void {
+  const until = pendingAgentCtl.get(from);
+  if (!until || until < Date.now()) return;
+  pendingAgentCtl.delete(from);
+  const who = peerLabel(from);
+  const text = String(d.text ?? "").slice(0, 2000);
+  if (!d.ok) { sys(`✗ ${who}: ${text}`); return; }
+  const token = typeof d.token === "string" && FORK_TOKEN_RE.test(d.token) ? d.token : null;
+  if (d.op === "grant" && token) {
+    const line = `/agent fork ${token}`;
+    sys(`✓ ${who}: ${text}`);
+    sys("Give this line to whoever should have a copy; they paste it in their own room:");
+    sys("```\n" + (hideRoom ? maskCap(line, token) : line) + "\n```");
+    navigator.clipboard?.writeText(line).then(() => sys("✓ copied to your clipboard"), () => {});
+    sys(`  The copy brings ${who}'s role and skills, not this room's memory. It runs on that agent's computer and AI account. `
+      + `/agent revoke ${String(d.id ?? "")} stops new copies; add stop to remove the running ones.`);
+    return;
+  }
+  sys(`${who}:`);
+  for (const l of text.split("\n")) sys(`  ${l}`);
+}
+/** Ask the agent behind a fork grant for a copy of itself in the active room. */
+function forkAgentHere(token: string, name?: string): void {
+  const room = activeRoom;
+  const say = (t: string) => { const prev = activeRoom; setActiveRoom(room); try { sys(t); } finally { setActiveRoom(prev); } };
+  let done = false;
+  // The grant is a room capability: the agent listens in the room it names, so
+  // joining it for a moment is how a request reaches the agent from here.
+  const tp: QOSPeer = new QOSPeer({
+    signalingUrl: room.signalingUrl, roomId: token, peerId: generateCapability("peer"), iceServers: [],
+    onPeerReady: (id) => { tp.send(id, { kind: "fork-request", room: room.roomId, signal: room.signalingUrl, ...(name ? { name } : {}) }); },
+    onMessage: (_from, data) => {
+      const d = data as Record<string, unknown> | null;
+      if (done || !d || d.kind !== "fork-reply") return;
+      done = true; clearTimeout(timer); tp.disconnect();
+      say(d.ok ? `✓ ${String(d.text ?? "")}` : `✗ ${String(d.text ?? "")}`);
+    },
+  });
+  const timer = setTimeout(() => {
+    if (done) return;
+    done = true; tp.disconnect();
+    say("✗ no answer from the agent behind that grant — its computer may be off, or the grant revoked.");
+  }, 20_000);
+  say("asking the agent behind that grant for a copy in this room… (its owner's agent will hold this room's link, like any member)");
+  void tp.connect().catch(() => { if (!done) { done = true; clearTimeout(timer); say("✗ couldn't connect to ask"); } });
+}
+
 function handleCommand(raw: string): string[] {
   const body = raw.slice(1).trim();
   const parts = body.split(/\s+/);
@@ -3701,6 +3779,7 @@ function handleCommand(raw: string): string[] {
         "  /kill <name|id>  — terminate a process you own (owner-only alias)",
         "  /goal [sub]      — private personal goals: add · list · done · review · share",
         "  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)",
+        "  /agent [sub]     — AI agents: add [role] [name] [--ai p] [--skill s] · grant · fork <grant> · revoke · roles",
         "  /<role|name> [cmd] — address any live agent by role or display name (e.g. /heckler help)",
         "  /probe [sub]     — discrepancy probe window state (status|clear)",
         "  /room [sub]      — multi-room tabs (new|list|join <cap>|leave|ref)",
@@ -6125,13 +6204,121 @@ function handleCommand(raw: string): string[] {
       const agent = pickAskAgent(presentAgents);
       if (!agent) {
         sys("no AI agent is in this room right now — /ask needs a facilitator, scribe, skeptic, or other agent present.");
-        sys("  Start one with scripts/qos-cli/run-agents.sh, then try /ask again.");
+        sys("  [/agent add](help:agent) gives you the one command that adds one, then try /ask again.");
         break;
       }
       const text = agentAskText(agent, question);
       qpeer.broadcast({ kind: "chat", text });
       const role = agent.role === "facilitator" ? "facilitator" : agent.role;
       sys(`→ asked the ${role} (${peerLabel(agent.peerId)}) — ${text}`);
+      break;
+    }
+
+    case "agent":
+    case "agents": {
+      // /agent            — who's here
+      // /agent add [role] [name]   — the one command that puts an agent in this room
+      // /agent claude [role] [name] — the same, worded for a Claude Code session
+      const [sub0, ...restWords] = arg.trim().split(/\s+/).filter(Boolean);
+      const sub = (sub0 ?? "list").toLowerCase();
+      if (sub === "list" || sub === "ls") {
+        const present = [...peerAgents].filter(([id]) => peers.has(id));
+        if (present.length === 0) {
+          sys("no AI agent is in this room right now.");
+        } else {
+          sys(`${present.length} AI agent${present.length === 1 ? "" : "s"} here:`);
+          for (const [id, role] of present) {
+            sys(`  ${peerLabel(id)} — ${role} · talk to it with /${agentCommand(role)} help`);
+          }
+        }
+        sys("  /agent add [role] [name] [--ai claude|deepseek|…] — add one. Roles: " + AGENT_ROLES.map((r) => r.role).join(", ")
+          + " · AI: " + AGENT_PROVIDERS.map((p) => p.id).join(", ") + " (/agent roles for what each is)");
+        break;
+      }
+      if (sub === "roles" || sub === "providers") {
+        sys("Roles:");
+        for (const r of AGENT_ROLES) sys(`  ${r.role} — ${r.what}`);
+        sys("AI providers (--ai), each a plugin in scripts/qos-cli/ai-providers — or your own:");
+        for (const p of AGENT_PROVIDERS) sys(`  ${p.id} — ${p.what}${p.key ? ` · needs ${p.key} on the agent's computer` : ""}`);
+        sys("  Leave --ai out and the agent uses the claude CLI if it finds one, else whichever API key is set.");
+        sys("Skills: rules and context an agent follows for an activity. Every agent has the standard ones: " + STANDARD_SKILLS.join(", ")
+          + ". In the room, /<role> use <skill> starts one, /<role> rules shows it, /<role> play <move> plays. "
+          + "--skill <name> makes one the starting activity; --skill /abs/path.md adds your own.");
+        break;
+      }
+      if (sub === "grant" || sub === "grants" || sub === "revoke") {
+        // Owner commands go to the agent as a DIRECT envelope carrying this
+        // browser's owner capability — never as chat, which every peer sees.
+        const owner = agentOwnerCap(false);
+        if (!owner) { sys("✗ this browser isn't the owner of an agent. The agent you add with /agent add is yours — its owner is whoever added it."); break; }
+        const parsed = sub === "grant" ? parseGrantArgs(restWords) : sub === "revoke" ? parseRevokeArgs(restWords) : { agent: restWords[0] };
+        if ("error" in parsed) { sys(`✗ ${parsed.error}`); break; }
+        const target = pickAgentFor(parsed.agent);
+        if ("error" in target) { sys(`✗ ${target.error}`); break; }
+        const env: Record<string, unknown> = { kind: "agent-ctl", op: sub, owner };
+        if (sub === "grant") { const g = parsed as { uses?: number; days?: number }; if (g.uses) env.uses = g.uses; if (g.days) env.days = g.days; }
+        if (sub === "revoke") { const r = parsed as { id: string; stop: boolean }; env.id = r.id; env.stop = r.stop; }
+        pendingAgentCtl.set(target.peerId, Date.now() + 30_000);
+        if (!qpeer?.send(target.peerId, env)) { sys(`✗ couldn't reach ${peerLabel(target.peerId)} right now`); break; }
+        sys(`asking ${peerLabel(target.peerId)}…`);
+        break;
+      }
+      if (sub === "fork") {
+        const f = parseForkArgs(restWords);
+        if ("error" in f) { sys(`✗ ${f.error}`); break; }
+        forkAgentHere(f.token, f.name);
+        break;
+      }
+      if (sub !== "add" && sub !== "claude") {
+        sys("usage: /agent · /agent add [role] [name] [--ai <provider>] [--model <m>] [--skill <s>] · /agent claude [role] [name] [--ai …] · /agent roles");
+        break;
+      }
+      const req = parseAgentRequest(restWords.join(" "));
+      if ("error" in req) { sys(`✗ ${req.error}`); break; }
+      const cap = activeRoom.roomId;
+      const sig = activeRoom.signalingUrl;
+      const owner = agentOwnerCap(true)!;
+      const shell = agentShellCommand(cap, req, sig, owner);
+      const prompt = agentClaudePrompt(roomUrl(), req, sig, owner);
+      // The owner capability never shows on screen (it is in every screen share);
+      // the clipboard holds it in full.
+      const show = (t: string) => maskCap(hideRoom ? maskCap(t, cap) : t, owner);
+      const prov = providerOf(req);
+      const who = (req.name ? `${req.role} named ${req.name}` : req.role)
+        + (prov && prov.id !== "none" ? ` running on ${prov.id}${req.model ? ` (${req.model})` : ""}` : prov ? " with no AI" : "")
+        + (req.skills?.length ? ` that knows ${req.skills.join(", ")}` : "");
+      const copied = sub === "claude" ? prompt : shell;
+      navigator.clipboard?.writeText(copied).then(
+        () => sys(`✓ copied the ${sub === "claude" ? "request for Claude" : "command"} to your clipboard${hideRoom ? " (in full — the room is hidden on screen)" : ""}`),
+        () => sys("couldn't reach the clipboard — copy it from above" + (hideRoom ? " after /room show" : "")),
+      );
+      if (sub === "claude") {
+        sys(`To have Claude add a ${who} with no terminal on your side, paste this into your own Claude Code session at https://claude.ai/code :`);
+        sys(prov?.key ? `  **You need your own ${prov.key}**, set in that session's environment — not in the room.`
+          : "  **It runs on your own Claude plan** (the session's Claude).");
+        sys("```\n" + show(prompt) + "\n```");
+        sys("  Its cloud environment must allow quantum-os-signaling.onrender.com, and an agent there lasts only minutes after the chat goes quiet — "
+          + `for one that stays, use /agent add on a computer that stays on. Guide: ${AGENT_DOCS_URL}`);
+      } else {
+        sys(`To add a ${who} to this room, paste this into a terminal on any computer with git and Node 18+:`);
+        sys("```\n" + show(shell) + "\n```");
+        if (prov?.key) {
+          sys(`  **You need your own ${prov.key}.** Set it on that computer first (export ${prov.key}=…). It stays there — never type it into the room.`);
+        } else if (prov?.id === "claude") {
+          sys("  **You need your own Claude plan:** the claude CLI installed and logged in on that computer.");
+        } else if (!prov) {
+          sys("  **You need your own AI account on that computer:** the claude CLI logged in (your Claude plan), or ANTHROPIC_API_KEY or DEEPSEEK_API_KEY set there. "
+            + "The agent's AI runs on your account, not the room's. Without one the line stops and says how to set it up. Keys never go in the room.");
+        }
+        sys("  It joins within seconds and stays while that computer is on. Type /agent to see it arrive.");
+        if (req.skills?.length) {
+          const c = agentCommand(req.role);
+          sys(`  Once it's here: /${c} rules shows the rules it follows, /${c} play <move> takes a turn.`);
+        }
+        sys("  No terminal? /agent claude gives the same request worded for Claude Code.");
+      }
+      sys("  ⚠ It carries this room's link — whoever you give it to can join the room.");
+      sys("  This browser becomes the agent's owner: /agent grant lets someone in another room have a copy of it.");
       break;
     }
 
@@ -7681,6 +7868,7 @@ async function connect(): Promise<void> {
         // for isReachable) — nothing to do here, receiving it at all is the
         // point (it updates lastHeardVia inside peer.ts before this fires).
         if (d.kind === "presence") return;
+        if (d.kind === "agent-ctl-reply") { onAgentCtlReply(from, d); return; }
         if (d.kind === "name") {
           const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
           const nm = String(d.name ?? "");
@@ -9103,7 +9291,7 @@ function send(): void {
     if (cmd !== "help" && cmd !== "dump") {
       sessionLog.push({ who: myName || "you", cmd, arg, summary: lines[0] ?? "" });
     }
-    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "ask" && cmd !== "goal" && cmd !== "ps" && cmd !== "kill" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
+    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "ask" && cmd !== "agent" && cmd !== "agents" && cmd !== "goal" && cmd !== "ps" && cmd !== "kill" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
       qpeer.broadcast({ kind: "qlf", cmd, arg, lines });
     }
     return;

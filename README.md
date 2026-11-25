@@ -46,7 +46,7 @@ Everything linked from the first four rows is **running code or a verified proof
 9. Use `/grant [label]` to mint a random ZFA capability token and share it as a proof object.
 10. Use `/request name` to signal you need a named lemma; the holder sees a prompt and can `/pass name peer` to transfer it directly — no token strings to copy.
 
-Beyond evaluation, a room is a full collaboration space: take **group decisions** (`/poll`, `/estimate`, the `/probe` consensus check, trust-weighted `/gov` liquid democracy); invite **AI agent members** — a trust-governed *facilitator*, *scribe*, and *skeptic* that join as full peers and run on a Claude subscription ([Developer Guide](Developer_Guide.md)) — and ask the room with **`/ask <question>`**, which picks the facilitator when present, otherwise another live agent ([Agents](scripts/qos-cli/README.md)); and run the room as a **quantum problem solver** (below). New here? Start with the **[User Guide](User_Guide.md)**.
+Beyond evaluation, a room is a full collaboration space: take **group decisions** (`/poll`, `/estimate`, the `/probe` consensus check, trust-weighted `/gov` liquid democracy); invite **AI agent members** with **`/agent add`** — one pasted line puts a trust-governed *facilitator*, *scribe*, *skeptic*, *greeter* or *observer* in the room, running on **your own** Claude plan or API key (Claude, DeepSeek, or a provider plugin of your own), with **standard activity skills** (brainstorm, debate, retrospective, word games) and a way to **fork** your agent into someone else's room ([docs/commands.md](docs/commands.md#agent-ai-agents-in-the-room)) — and ask the room with **`/ask <question>`**, which picks the facilitator when present, otherwise another live agent ([Agents](scripts/qos-cli/README.md)); join late and still **see the conversation so far**, with time marks and your name highlighted where you're mentioned; and run the room as a **quantum problem solver** (below). New here? Start with the **[User Guide](User_Guide.md)**.
 
 The room URL encodes a ZFA capability token in the hash (`#room=cap:room:…`). Anyone with the link can join — no account needed. The public signaling server (`wss://quantum-os-signaling.onrender.com`) is used by default; edit the field to point at a self-hosted server.
 
@@ -78,7 +78,7 @@ and the source file behind it, is in [docs/commands.md](docs/commands.md)**. By 
 | Claims & value | `/lemma` `/grant` `/request` `/pass` `/note` `/rdv` `/persist` `/forget` | [PromissoryNoteDemo.md](PromissoryNoteDemo.md) · [AtomicSwapDemo.md](AtomicSwapDemo.md) |
 | Deciding | `/poll` `/estimate` `/probe` `/gov` `/channel` | [Group_Decisions.md](Group_Decisions.md) · [Governance.md](Governance.md) · [Consensus.md](Consensus.md) |
 | Processes | `/qos` `/ps` `/kill` | [docs/qos-process.md](docs/qos-process.md) · [docs/os-roadmap.md](docs/os-roadmap.md) |
-| Agents | `/ask` `/facil` `/scribe` `/skeptic` `/observer` `/greeter` | [scripts/qos-cli/README.md](scripts/qos-cli/README.md) |
+| Agents | `/agent` (`add` · `grant` · `fork`) `/ask` `/facil` `/scribe` `/skeptic` `/observer` `/greeter` | [docs/agents-from-claude.md](docs/agents-from-claude.md) · [scripts/qos-cli/README.md](scripts/qos-cli/README.md) · [skills](scripts/qos-cli/skills/README.md) · [AI providers](scripts/qos-cli/ai-providers/README.md) |
 | Personal goals | `/goal` | [docs/success-frameworks.md](docs/success-frameworks.md) · [docs/success-charter.md](docs/success-charter.md) |
 | Macros & chain | `/macro` `+name` `$name` `/rhoqu` `/rholang` | [MacRhoLang.md](MacRhoLang.md) · [docs/rholang.md](docs/rholang.md) |
 | Media & files | Call bar · `/record` · `/file` · `/render` | [Media_Libraries.md](Media_Libraries.md) (design) |
@@ -185,6 +185,7 @@ and a **bridge** that stands in two rooms at once ([Room_Bridges.md](Room_Bridge
 cd scripts/qos-cli && npm install
 node qos-cli.mjs --room "<cap:room:… | room-URL>" --message "hello room"
 bash run-agents.sh "" facilitator observer      # defaults to the MyRoom test room
+bash add-agent.sh "<room link>" skeptic         # what /agent add copies: one agent, your own AI key or plan
 ```
 
 Rooms are peer-to-peer: a message reaches only the peers present at that moment; the daemon

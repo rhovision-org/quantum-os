@@ -89,6 +89,17 @@ jobs:
       - name: Facilitator advisor error selftest
         run: node scripts/qos-cli/facilitator-advisor.selftest.mjs
 
+      # Every AI provider plugin keeps the contract; DeepSeek and Anthropic are
+      # reached correctly through a stub fetch; a plugin loads by path.
+      - name: AI provider plugins selftest
+        run: node scripts/qos-cli/ai-providers.selftest.mjs
+
+      - name: Agent skills selftest
+        run: node scripts/qos-cli/skills.selftest.mjs
+
+      - name: Agent fork grants selftest
+        run: node scripts/qos-cli/fork-host.selftest.mjs
+
       # The faucet's HTTP face (faucet-http.mjs) against a stub send — the
       # per-address cooldown, the per-client hourly cap, X-Forwarded-For as
       # the client, the JSON/CORS shape a wallet codes against. Dependency-
@@ -178,6 +189,11 @@ jobs:
       # no agent means a clear refusal rather than a fake answer.
       - name: Ask agent routing test
         run: node packages/browser/test/agent-ask.test.mjs
+
+      # `/agent add` builds a shell line that parses, passes the room/role/name
+      # as add-agent.sh expects, and offers exactly add-agent.sh's roles.
+      - name: Agent invite test
+        run: node packages/browser/test/agent-invite.test.mjs
 
       # A joiner is handed the room's conversation by the peers present: lines
       # merge in by time without duplicates; minute marks; mentions of names.
