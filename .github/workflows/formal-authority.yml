@@ -4,6 +4,9 @@ on:
     branches: [work, main]
     paths:
       - 'formal/**'
+      - 'packages/browser/src/qos-process.ts'
+      - 'packages/browser/src/dyncap.ts'
+      - 'packages/browser/src/zfa.ts'
       - '.github/workflows/formal-authority.yml'
   workflow_dispatch:
 permissions:
@@ -37,10 +40,30 @@ jobs:
           print('PASS: five selected theorem footprints checked')
           PY
           sha256sum formal/Authority.lean authority-proof.txt > authority.SHA256SUMS
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Lean-to-runtime bounded correspondence
+        env:
+          AUTHORITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          lean -o formal/Authority.olean formal/Authority.lean
+          LEAN_PATH=formal lean formal/AuthorityWitness.lean | tee authority-refinement-proof.txt
+          if grep -E 'sorryAx|error:' authority-refinement-proof.txt; then exit 1; fi
+          grep -F "QosAuthority.subsetCheck_sound" authority-refinement-proof.txt
+          LEAN_PATH=formal lean --run formal/AuthorityWitness.lean > authority-vectors.txt
+          npm install --prefix "$RUNNER_TEMP/authority-tools" --no-save --no-package-lock esbuild@0.21.5
+          AUTHORITY_ESBUILD="$RUNNER_TEMP/authority-tools/node_modules/esbuild/lib/main.js" node formal/compare-authority.mjs
+          sha256sum authority-refinement-proof.txt authority-vectors.txt authority-refinement.json > authority-refinement.SHA256SUMS
       - uses: actions/upload-artifact@v6
         with:
           name: authority-proof
           path: |
             authority-proof.txt
             authority.SHA256SUMS
+            authority-refinement-proof.txt
+            authority-vectors.txt
+            authority-refinement.json
+            authority-refinement.SHA256SUMS
           if-no-files-found: error

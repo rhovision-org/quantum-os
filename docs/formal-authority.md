@@ -35,3 +35,24 @@ revocation and replay state before claiming refinement. Counterexamples
 to the abstraction are evidence, not a reason to weaken the specification.
 
 CI only. No room probes, deployment, or live infrastructure changes.
+
+
+## Phase IV — bounded refinement witness
+
+The six effective rights are encoded independently in Lean. The executable
+enumerator emits all 64 × 64 pairs, for matching and nonmatching process
+identities (8,192 decisions), and 384 right decisions. The comparator evaluates
+the actual TypeScript exports on canonical scopes and maps all 11 event types
+to the six rights (704 checks). It also checks 576 cases where irrelevant raw
+privileged event fields are added to a child: the runtime deliberately rejects
+these despite unchanged effective rights. Thus equivalence is only on the
+canonical subset; the wider representation is stricter, not equivalent.
+
+The Lean soundness theorem connects the finite Boolean subset check to the
+abstract Narrows proposition. Separate offline event-log fixtures exercise a
+delegated nomination, duplicate-envelope acknowledgment without append, and
+reducer denial of an out-of-scope operation after envelope acceptance. These
+are executable observations, not a trace refinement proof. They do not
+establish cryptographic authentication, global request uniqueness, concurrency,
+or runtime revocation. CI records the exact tested merge and PR head, vector
+digest and results. No default runtime behavior changes.
