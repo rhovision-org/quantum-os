@@ -3779,7 +3779,7 @@ function handleCommand(raw: string): string[] {
         "  /kill <name|id>  — terminate a process you own (owner-only alias)",
         "  /goal [sub]      — private personal goals: add · list · done · review · share",
         "  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)",
-        "  /agent [add [role] [name]]  — who's here, or the one command that adds an AI agent to this room",
+        "  /agent [sub]     — AI agents: add [role] [name] [--ai p] [--skill s] · grant · fork <grant> · revoke · roles",
         "  /<role|name> [cmd] — address any live agent by role or display name (e.g. /heckler help)",
         "  /probe [sub]     — discrepancy probe window state (status|clear)",
         "  /room [sub]      — multi-room tabs (new|list|join <cap>|leave|ref)",

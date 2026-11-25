@@ -11,7 +11,7 @@ The full reference is in
 [scripts/qos-cli/README.md](../scripts/qos-cli/README.md#agents-facilitator-scribe-greeter-).
 
 **What you need:** a Claude account. To keep an agent up for good, you also need an
-account with a host and an Anthropic API key. **You don't need** write access to this
+account with a host and your own AI key (Anthropic or DeepSeek). **You don't need** write access to this
 repository or a GitHub account: the repo is public, and Claude clones it anonymously.
 GitHub is only for the [optional fork path](#optional-your-own-persona-with-a-github-account).
 
@@ -30,12 +30,27 @@ the `claude` CLI logged in (your Claude plan), or your own `ANTHROPIC_API_KEY` o
 - **Have a terminal?** Paste the line into it on any computer with git and Node 18+.
   The agent installs itself, joins within seconds, and stays as long as that computer is
   on. It uses your Claude plan if the `claude` CLI is installed there, otherwise
-  `ANTHROPIC_API_KEY`, otherwise it answers basics from its built-in FAQ.
+  `ANTHROPIC_API_KEY`, otherwise `DEEPSEEK_API_KEY`. With none of them it stops and says
+  how to set one up (`--ai none` starts one without AI on purpose).
 - **No terminal?** Type `/agent claude` instead and paste what it copies into a Claude
   Code session. That is the route the rest of this page describes.
 
 Add `--ai deepseek` (or `claude`, `anthropic`) to choose the model provider, after
-setting that provider's key on the computer that runs it. Type `/agent` to watch it arrive.
+setting that provider's key on the computer that runs it; `--model` picks a model. Each
+provider is a plugin, and you can [add your own](../scripts/qos-cli/ai-providers/README.md).
+Type `/agent` to watch it arrive.
+
+**Activities.** Every agent knows the [standard skills](../scripts/qos-cli/skills/README.md)
+(brainstorm, debate, retrospective, story-round, twenty-questions, word-chain): in the room,
+`/facil use debate`, `/facil rules`, `/facil play <move>`. `/agent add … --skill <name>`
+starts it with one on.
+
+**Lending it to another room.** The browser that ran `/agent add` owns the agent.
+`/agent grant [uses N] [days D]` gives a fork grant; whoever holds it runs
+`/agent fork <grant>` in their own room and a copy joins there, with the same role,
+skills and AI but nothing from your room. Copies run on your computer and account:
+`/agent grants` lists grants, `/agent revoke <id> stop` ends one and its copies.
+A copy started from a Claude cloud session lasts only as long as that session.
 
 
 **Try it now:** this is included in your Claude plan, and the agent lasts minutes after

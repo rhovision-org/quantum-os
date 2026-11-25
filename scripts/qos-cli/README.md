@@ -291,9 +291,17 @@ else `ANTHROPIC_API_KEY`, else `DEEPSEEK_API_KEY` (`AI=<provider>` forces one, `
 starts it without AI on purpose), keeps the room's memory (`--persist`, `NO_MEMORY=1` to skip), starts the
 agent detached, and waits until it has joined. `/agent add … --ai deepseek` (or
 `claude`, `anthropic`, `none`) picks the model provider; each is a plugin in
-[`ai-providers/`](ai-providers/README.md), and `--ai-backend ./your-plugin.mjs` loads your own. `--skill twenty-questions`
-(`SKILL=` for the script, `--skill` for `agent.mjs`) gives it an activity's rules and context —
-see [`skills/`](skills/README.md) to write your own.
+[`ai-providers/`](ai-providers/README.md), and `--ai-backend ./your-plugin.mjs` loads your own.
+Every agent has the [standard skills](skills/README.md) (brainstorm, debate, retrospective,
+story-round, twenty-questions, word-chain): `/<cmd> use <skill>`, `/<cmd> rules`,
+`/<cmd> play <move>`. `--skill <name|/abs/path.md>` (`SKILL=` for the script) starts with one on
+or adds your own.
+
+**Forks.** The line `/agent add` copies carries the browser's owner capability in the
+agent's environment (`QOS_AGENT_OWNER`). The owner's `/agent grant` gets a `cap:fork:` grant;
+`/agent fork <grant>` in another room starts a detached copy there (`--fork-of`: same role,
+skills and AI; its own state under `<state>/forks/`; no room memory, no key, no owner cap).
+`/agent revoke <id> stop` ends it. [`fork-host.mjs`](fork-host.mjs) has the details.
 Keys are read from the agent machine's environment, never from the room. `bash stop-agents.sh <role>` stops
 it. Unlike `run-agents.sh` it has no default room and never turns on the faucet.
 

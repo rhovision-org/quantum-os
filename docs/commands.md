@@ -49,7 +49,7 @@ QLF slash commands:
   /ps              — QOS process table (pid · name · state · events · owner)
   /kill <name|id>  — terminate a QOS process you own (owner-only alias)
   /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)
-  /agent [add [role] [name]]  — who's here, or the one command that adds an AI agent to this room
+  /agent [add|grant|fork|revoke] — who's here, add an AI agent (your own key or plan), or fork yours into another room
   /goal [sub]      — private personal goals: add · list · done · review · share
   /probe [sub]     — joiner-local consensus probe (status|clear)
   /room [sub]      — multi-room tabs (new|list|join <cap>|leave|ref)
@@ -566,7 +566,7 @@ Finds a **live** AI agent in the room and relays `/<role> ask <question>` as cha
 
 Direct addressing is not limited to the built-in roles. If a live peer announced a custom role such as `heckler`, `/heckler help` (or any `/heckler …` line) is relayed exactly like `/skeptic …`. If `heckler` is the agent's display name but its role is `skeptic`, the browser relays `/skeptic …` to that agent instead. The lookup uses the live `peers` roster, not the sticky badge cache, so a departed agent does not become a phantom command.
 
-### `/agent [add|claude|roles|grant|grants|revoke|fork] [role] [name]`
+### `/agent`: AI agents in the room
 
 Getting an AI agent into the room. An agent is a headless peer (`scripts/qos-cli/agent.mjs`) that must run on *some* computer, so the browser cannot start one — but it can reduce that to one paste.
 
