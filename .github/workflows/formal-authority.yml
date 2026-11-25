@@ -1,0 +1,46 @@
+name: Formal authority model
+on:
+  pull_request:
+    branches: [work, main]
+    paths:
+      - 'formal/**'
+      - '.github/workflows/formal-authority.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  authority:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned Lean
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain leanprover/lean4:v4.34.0-rc1
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Check authority model and axiom footprint
+        run: |
+          set -euo pipefail
+          lean --version
+          if grep -nE '\b(sorry|admit|axiom)\b' formal/Authority.lean | grep -v '^.* /-' | grep -v '^.*--' | grep -v 'cryptographic axiom'; then exit 1; fi
+          lean formal/Authority.lean 2>&1 | tee authority-proof.txt
+          if grep -E 'sorryAx|error:' authority-proof.txt; then exit 1; fi
+          python3 - <<'PY'
+          import re
+          s=open('authority-proof.txt').read()
+          names=['path_non_amplification','authorized_root_bound','revoked_root_denies','replay_denied_after_trace','revoked_root_stays_denied']
+          for n in names:
+              line=next((l for l in s.splitlines() if f"QosAuthority.{n}'" in l),None)
+              assert line is not None,n
+              assert 'does not depend on any axioms' in line or ('depends on axioms:' in line and set(re.findall(r'[A-Za-z][A-Za-z0-9_.]*',line.split('depends on axioms:',1)[1])) <= {'propext','Quot.sound','Classical.choice'}),line
+          print('PASS: five selected theorem footprints checked')
+          PY
+          sha256sum formal/Authority.lean authority-proof.txt > authority.SHA256SUMS
+      - uses: actions/upload-artifact@v6
+        with:
+          name: authority-proof
+          path: |
+            authority-proof.txt
+            authority.SHA256SUMS
+          if-no-files-found: error
