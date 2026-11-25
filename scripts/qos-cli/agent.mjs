@@ -40,6 +40,8 @@ import { trustLevels, discreditedMembers, isMember, groupHasRatings, normalizeGr
 import { MACROS } from "./rholang-macros.mjs";
 import { DEFAULT_CONFIG as REV_DEFAULT_CONFIG, revAddressOf, deployTerm as revDeployTerm } from "./rholang-client.mjs";
 import { createFaucetServer } from "./faucet-http.mjs";
+import { createForkHost } from "./fork-host.mjs";
+import { spawn } from "node:child_process";
 
 const DEFAULT_SIGNAL = "wss://quantum-os-signaling.onrender.com";
 // "name" is always signed. When this agent carries the room's memory
@@ -88,6 +90,10 @@ Options:
                      AI follows, as a Markdown file — a built-in name (${listSkills().join(", ") || "none"})
                      or a path to your own .md (skills/README.md). Repeatable or
                      comma-separated. Players use \`/<cmd> play <move>\`. Needs --ai.
+  --fork-of <id>     Set by a fork grant when this agent is a copy started for
+                     another room (fork-host.mjs). A copy gives no grants itself.
+                     The owner capability comes from QOS_AGENT_OWNER (env), set by
+                     the line /agent add copies — never on the command line.
   --ai-model <m>     Model. Defaults: anthropic claude-haiku-4-5-20251001;
                      claude-code the CLI's configured model; deepseek deepseek-chat.
   --key <hex>        TEST-SYSTEM ONLY: a secp256k1 REV deploy key (64 hex
@@ -144,6 +150,7 @@ export function parseArgs(argv) {
     else if (x === "--key") a.key = argv[++i];
     else if (x === "--faucet-http") a.faucetHttp = Number(argv[++i]);
     else if (x === "--rnode") a.rnode = argv[++i];
+    else if (x === "--fork-of") a.forkOf = argv[++i];
     else if (x === "--verbose") a.verbose = true;
     else if (x === "--help" || x === "-h") a.help = true;
   }
@@ -575,7 +582,8 @@ export async function run(args) {
   const faucetHint = facilKey ? ` · \`/${CMD} faucet\` (sends ${FAUCET_REV} TEST REV to your own address, which your browser fills in; pass one to override — test systems only)` : "";
   const helpText = () => `I'm ${myName}, ${role.blurb} Commands: \`/${CMD}\` (am I here?) · \`/${CMD} help\` · \`/${CMD} ask <question>\`${askHint} · \`/${CMD} optimize <problem>\`${aiHint} (facilitate an annealing-style optimization round) · \`/${CMD} chair <topic>\`${aiHint} (chair a structured deliberation → define · alternatives · evaluate · disagreements · agreements · closure, then record the decision; \`/${CMD} next\`/\`back\`/\`close\`/\`cancel\` to steer) · \`/${CMD} start <label> [payoffs a,b,c,d] [stag=…] [hare=…] [predict: …]\` / \`/${CMD} stop\` (record a live game: every poll, estimate, lemma and message, timestamped and signed → a structured record; \`/${CMD} games\`, \`/${CMD} summarize\`${aiHint}, \`/${CMD} publish\`) · ${availableSkills.length ? `\`/${CMD} skills\` · \`/${CMD} use <activity>\` · \`/${CMD} rules\` · \`/${CMD} play <move>\` (activities: ${availableSkills.map((k) => k.name).join(", ")}) · ` : ""}\`/${CMD} list [n]\` (the room's screen history, oldest→newest — default 25, max 500) · \`/${CMD} trust\` (my standing) · \`/${CMD} health\` (uptime, peers, budget, CPU) · \`/${CMD} off\` / \`/${CMD} on\` (mute/unmute)${faucetHint}. I'm a full member — \`/gov trust\` me up or \`/gov censure\` me down. About this room (and how to make your own): ${ABOUT_URL}`;
   const statusText = () => `👋 Yes, I'm here — ${myName} (${role.name})${muted ? ` — currently muted (\`/${CMD} on\` to wake me)` : ""}.${standing.governed ? ` Trust ${standing.level}${standing.discredited ? " — stood down" : ` (≤${standing.budget}/5min)`}.` : ""} \`/${CMD} help\` · \`/${CMD} trust\`.`;
-  const introText = () => `Hi — I'm ${myName}, ${role.blurb} Say \`/${CMD}\` or \`/${CMD} help\` to reach me, or \`/${CMD} ask <q>\` for QuantumOS/decision basics${advisor.enabled ? " or anything else" : " (open-ended questions need `--ai`)"}. I'm a full room member — \`/gov trust\`/\`/gov censure\` me; \`/${CMD} trust\` shows my standing. About this room: ${ABOUT_URL}`;
+  const forkNote = args.forkOf ? " I'm a copy of an agent from another room, started with its owner's permission; I bring its skills, not that room's memory." : "";
+  const introText = () => `Hi — I'm ${myName}, ${role.blurb}${forkNote} Say \`/${CMD}\` or \`/${CMD} help\` to reach me, or \`/${CMD} ask <q>\` for QuantumOS/decision basics${advisor.enabled ? " or anything else" : " (open-ended questions need `--ai`)"}. I'm a full room member — \`/gov trust\`/\`/gov censure\` me; \`/${CMD} trust\` shows my standing. About this room: ${ABOUT_URL}`;
   // Self-introduce to a newly-identified human peer, once per peer per run (direct
   // message, so existing members aren't re-pinged each time someone joins).
   function introduceTo(id) {
@@ -1055,6 +1063,41 @@ export async function run(args) {
     onMessage: (from, d) => { onMessage(from, d); void mem?.ingest(from, d); },
   });
 
+  // ---- fork grants (fork-host.mjs): the owner lets another room have a copy ----
+  // A copy (args.forkOf) gives no grants; it never sees the owner capability.
+  const AGENT_FILE = fileURLToPath(import.meta.url);
+  const asPath = (s) => (/[\\/]/.test(s) || /\.m?js$|\.md$/.test(s) ? path.resolve(s) : s);
+  const forkHost = args.forkOf ? null : createForkHost({
+    stateDir, ownerToken: process.env.QOS_AGENT_OWNER || null, signal: args.signal,
+    log: (m) => console.log(`${TAG} ${m}`),
+    makePeer: (inboxRoom, onMsg) => new QOSPeer({
+      signalingUrl: args.signal, roomId: inboxRoom, peerId: generateCapability("peer"), noAutoTurn: true,
+      onMessage: onMsg, onError: (e) => noteError("fork-inbox", e),
+    }),
+    // A copy: same role, skills and AI provider; its own state directory, no
+    // room memory, no faucet key, no owner capability. Detached, so it outlives
+    // this process until revoked with stop.
+    spawnFork: async ({ room, name, grant }) => {
+      const dir = path.join(path.resolve(stateDir), "forks", `${grant.id}-${Date.now().toString(36)}`);
+      fs.mkdirSync(dir, { recursive: true });
+      const logFd = fs.openSync(path.join(dir, "agent.log"), "a");
+      const argv = [AGENT_FILE, "--room", room, "--role", roleKey, "--signal", args.signal, "--state", dir, "--fork-of", grant.id, "--name", name ?? myName];
+      if (args.ai) argv.push("--ai", "--ai-backend", asPath(args.aiBackend || "anthropic"));
+      if (args.aiModel) argv.push("--ai-model", args.aiModel);
+      for (const sk of args.skills ?? []) argv.push("--skill", asPath(sk));   // the standard skills come with every agent anyway
+      if (args.about) argv.push("--about", args.about);
+      const env = { ...process.env };
+      delete env.QOS_AGENT_OWNER;
+      const child = spawn(process.execPath, argv, { detached: true, stdio: ["ignore", logFd, logFd], env });
+      fs.closeSync(logFd);
+      await new Promise((res, rej) => { child.once("spawn", res); child.once("error", rej); });
+      child.unref();
+      return { pid: child.pid, dir };
+    },
+    alive: (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } },
+    kill: (pid) => process.kill(pid, "SIGTERM"),
+  });
+
   let signQueue = Promise.resolve();
   function signedSend(target, env) {
     signQueue = signQueue.then(async () => {
@@ -1207,6 +1250,14 @@ export async function run(args) {
         }
         break;
       }
+      case "agent-ctl": {
+        // Owner commands (fork grants) arrive as a DIRECT envelope carrying the
+        // owner capability — never as chat, which every peer would see.
+        const out = forkHost ? forkHost.handleCtl(d)
+          : { kind: "agent-ctl-reply", op: d.op ?? "?", ok: false, text: "I'm a copy started for this room; only the original agent gives fork grants. Ask its owner." };
+        if (out) peer.send(from, out);
+        break;
+      }
       case "sync-gov":
         if (Array.isArray(d.groups)) { for (const g of d.groups) if (g && g.id) groups.set(g.id, normalizeGroup(g)); updateStanding(); }
         break;
@@ -1314,6 +1365,7 @@ export async function run(args) {
   }
 
   peer.connect();
+  forkHost?.start();
   console.log(`${TAG} running as "${myName}" [role=${role.name}]  budget=${MAX_POSTS}/5min  min-gap=${Math.round(MIN_GAP_MS / 1000)}s  silent=${Math.round(SILENT_MS / 60000)}min  AI=${advisor.enabled ? advisor.model : "off"}  ask=faq+diagnostics. Ctrl-C to stop.`);
 
   let faucetHttp = null;
@@ -1322,7 +1374,7 @@ export async function run(args) {
     faucetHttp.listen(args.faucetHttp, () => console.log(`${TAG} faucet HTTP on :${args.faucetHttp} — POST /faucet {"address"} · GET /health`));
     faucetHttp.on("error", (e) => { console.error(`${TAG} faucet HTTP failed: ${e?.message ?? e}`); process.exit(1); });
   }
-  const shutdown = () => { console.log(`\n${TAG} shutting down…`); try { faucetHttp?.close(); } catch {} try { if (games?.current) games.stop(); } catch {} try { clearInterval(timer); saveIdentity(); saveKnown(); mem?.flush(); } catch {} try { peer.disconnect(); } catch {} setTimeout(() => process.exit(0), 200); };
+  const shutdown = () => { console.log(`\n${TAG} shutting down…`); try { faucetHttp?.close(); } catch {} try { if (games?.current) games.stop(); } catch {} try { clearInterval(timer); saveIdentity(); saveKnown(); mem?.flush(); } catch {} try { forkHost?.stop(); } catch {} try { peer.disconnect(); } catch {} setTimeout(() => process.exit(0), 200); };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 }
