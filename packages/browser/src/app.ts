@@ -6096,7 +6096,9 @@ function handleCommand(raw: string): string[] {
         () => sys("couldn't reach the clipboard — copy it from above" + (hideRoom ? " after /room show" : "")),
       );
       if (sub === "claude") {
-        sys(`To have Claude add a ${who} with no terminal on your side, paste this into a Claude Code session at https://claude.ai/code :`);
+        sys(`To have Claude add a ${who} with no terminal on your side, paste this into your own Claude Code session at https://claude.ai/code :`);
+        sys(prov?.key ? `  **You need your own ${prov.key}**, set in that session's environment — not in the room.`
+          : "  **It runs on your own Claude plan** (the session's Claude).");
         sys("```\n" + show(prompt) + "\n```");
         sys("  Its cloud environment must allow quantum-os-signaling.onrender.com, and an agent there lasts only minutes after the chat goes quiet — "
           + `for one that stays, use /agent add on a computer that stays on. Guide: ${AGENT_DOCS_URL}`);
@@ -6104,11 +6106,14 @@ function handleCommand(raw: string): string[] {
         sys(`To add a ${who} to this room, paste this into a terminal on any computer with git and Node 18+:`);
         sys("```\n" + show(shell) + "\n```");
         if (prov?.key) {
-          sys(`  First set ${prov.key} on that computer (export ${prov.key}=…). The key stays there — never type it into the room.`);
+          sys(`  **You need your own ${prov.key}.** Set it on that computer first (export ${prov.key}=…). It stays there — never type it into the room.`);
+        } else if (prov?.id === "claude") {
+          sys("  **You need your own Claude plan:** the claude CLI installed and logged in on that computer.");
+        } else if (!prov) {
+          sys("  **You need your own AI account on that computer:** the claude CLI logged in (your Claude plan), or ANTHROPIC_API_KEY or DEEPSEEK_API_KEY set there. "
+            + "The agent's AI runs on your account, not the room's. Without one the line stops and says how to set it up. Keys never go in the room.");
         }
-        sys("  It joins within seconds and stays while that computer is on. "
-          + (prov ? "" : "With no --ai it uses your Claude plan if the claude CLI is installed, else ANTHROPIC_API_KEY or DEEPSEEK_API_KEY, else its built-in FAQ. ")
-          + "Type /agent to see it arrive.");
+        sys("  It joins within seconds and stays while that computer is on. Type /agent to see it arrive.");
         sys("  No terminal? /agent claude gives the same request worded for Claude Code.");
       }
       sys("  ⚠ It carries this room's link — whoever you give it to can join the room.");

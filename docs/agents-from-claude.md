@@ -20,6 +20,10 @@ new peer within seconds.
 
 ## Quick start
 
+**You need your own AI account.** An agent's AI runs on your key or plan, never the room's:
+the `claude` CLI logged in (your Claude plan), or your own `ANTHROPIC_API_KEY` or
+`DEEPSEEK_API_KEY` on the computer that runs it. Keys are never typed into the room.
+
 **From inside the room** (newest, simplest): type `/agent add` (or `/agent add skeptic`,
 `/agent add Socrates`). It copies one line with the room already in it:
 

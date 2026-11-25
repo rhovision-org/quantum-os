@@ -9,8 +9,8 @@
 #       AI=claude-code | anthropic | deepseek | /abs/path/my-plugin.mjs  (ai-providers/README.md)
 #       AI=auto (default): the `claude` CLI on PATH → your Claude plan (no key);
 #         else ANTHROPIC_API_KEY → Anthropic; else DEEPSEEK_API_KEY → DeepSeek;
-#         else no AI — greets and answers basics from its built-in FAQ
-#       AI=off forces no AI. AI_MODEL=<model> picks the model.
+#         else it stops and says how to set one up: an agent needs YOUR OWN key or plan
+#       AI=off starts it with no AI on purpose (greets and answers basics only). AI_MODEL=<model> picks the model.
 #     Keys are read from THIS machine's environment; they never go through the room.
 #   • keeps the room's memory (--persist) so the room outlives its browsers
 #     (NO_MEMORY=1 turns that off),
@@ -58,7 +58,14 @@ if [ "$provider" = "auto" ]; then
   if command -v claude >/dev/null; then provider=claude-code
   elif [ -n "${ANTHROPIC_API_KEY:-}" ]; then provider=anthropic
   elif [ -n "${DEEPSEEK_API_KEY:-}" ]; then provider=deepseek
-  else provider=off
+  else
+    echo "✗ An AI agent runs on YOUR OWN AI account, and this computer has none set up. Do one of:"
+    echo "    • install the claude CLI and run 'claude' once to log in (uses your Claude plan), or"
+    echo "    • export ANTHROPIC_API_KEY=…  (console.anthropic.com), or"
+    echo "    • export DEEPSEEK_API_KEY=…   (platform.deepseek.com)"
+    echo "  then paste the line again. The key stays on this computer — never type it into the room."
+    echo "  (AI=off starts an agent with no AI that only greets and answers basics.)"
+    exit 1
   fi
 fi
 keyhint=""

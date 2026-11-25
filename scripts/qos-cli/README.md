@@ -275,12 +275,14 @@ optimum — the same loop a room runs collectively. No deps. See
 
 ## Agents (facilitator, scribe, greeter …)
 
-**The easy way:** in the room, type `/agent add [role] [name]`. It copies one line
+**The easy way:** in the room, type `/agent add [role] [name]`. You need your own AI
+account on the computer that runs it (the `claude` CLI logged in, or your own
+`ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY`); with none, the line stops and says how to set one up. It copies one line
 with the room already in it; paste that into a terminal on any computer with git
 and Node 18+. The line runs [`add-agent.sh`](add-agent.sh), which installs
 dependencies the first time, uses the `claude` CLI if present (your Claude plan),
-else `ANTHROPIC_API_KEY`, else the built-in FAQ (`AI=off|api|claude-code` forces
-one), keeps the room's memory (`--persist`, `NO_MEMORY=1` to skip), starts the
+else `ANTHROPIC_API_KEY`, else `DEEPSEEK_API_KEY` (`AI=<provider>` forces one, `AI=off`
+starts it without AI on purpose), keeps the room's memory (`--persist`, `NO_MEMORY=1` to skip), starts the
 agent detached, and waits until it has joined. `/agent add … --ai deepseek` (or
 `claude`, `anthropic`, `none`) picks the model provider; each is a plugin in
 [`ai-providers/`](ai-providers/README.md), and `--ai-backend ./your-plugin.mjs` loads your own.
