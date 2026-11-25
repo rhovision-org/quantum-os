@@ -106,3 +106,34 @@ a single database, compatible SQLite/VFS and storage durability. Process
 termination is not a physical power-loss test. No distributed consensus,
 authenticated revocation propagation, browser persistence, or production
 integration is supplied.
+
+
+## Phase VII — partition-aware authority replica candidate
+
+Immediate global revocation and autonomous offline execution cannot both be
+guaranteed in this model. An isolated replica has the same observations in two
+executions: one in which its parent grant remains live, and another in which
+the writer has revoked it after the partition. No local predicate can
+distinguish these executions without additional information. The candidate
+therefore sacrifices offline execution availability, not revocation safety.
+
+The research-only single-writer reference signs each accepted transition
+with Ed25519, binding the stream, ordinal, predecessor, actor, command and
+before/after state hashes. Replicas verify signatures and recompute transitions,
+refuse gaps and conflicting histories, and remain read-only even when caught
+up. A valid prefix is explicitly not evidence of freshness. Observed
+equivocation quarantines the replica; this does not detect an equivocation
+that remains hidden from it.
+
+CI models partition and ordered repair, exhausts all 720 permutations of a
+six-record fixture followed by complete ordered delivery (8,640 receive
+calls), tests stale grant replay, invalid signatures/stream, and signed
+prefix/state conflicts. It does not contact a network. Convergence is
+conditional on receiving the same valid complete prefix; the test is not a
+general consensus proof. Writer authentication here is distinct from actor
+authentication, which remains assumed. The in-memory writer is not coupled
+to Phase VI's durable journal, and its signing key is a synthetic fixture.
+A production design requires authenticated principal input, atomic durable
+writer/signature publication, trusted stream/key bootstrap, recovery and
+rotation, a consensus or trusted-writer policy, and separately tested runtime
+integration. No offline grant or execution is introduced.

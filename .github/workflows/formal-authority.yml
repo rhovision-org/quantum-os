@@ -80,6 +80,13 @@ jobs:
           set -euo pipefail
           node formal/test-authority-journal.mjs
           sha256sum authority-journal.json > authority-journal.SHA256SUMS
+      - name: Signed authority replica and partition semantics
+        env:
+          AUTHORITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node formal/test-authority-replica.mjs
+          sha256sum authority-replica.json > authority-replica.SHA256SUMS
       - uses: actions/upload-artifact@v6
         with:
           name: authority-proof
@@ -97,4 +104,6 @@ jobs:
             authority-lifecycle.SHA256SUMS
             authority-journal.json
             authority-journal.SHA256SUMS
+            authority-replica.json
+            authority-replica.SHA256SUMS
           if-no-files-found: error
