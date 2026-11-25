@@ -48,7 +48,7 @@ major="$(node -p 'process.versions.node.split(".")[0]')"
 [ "$major" -ge 18 ] || { echo "Node.js 18+ is needed (found $(node -v))."; exit 1; }
 if [ ! -d node_modules ]; then
   echo "• first run: installing the agent's dependencies…"
-  npm install --no-audit --no-fund --loglevel=error
+  npm install --no-audit --no-fund --no-update-notifier --loglevel=error
 fi
 
 ai=()
