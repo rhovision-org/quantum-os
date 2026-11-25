@@ -11,6 +11,7 @@ import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { readdirSync } from "node:fs";
 import assert from "node:assert/strict";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -107,6 +108,31 @@ ok("Claude request names the provider and where its key lives", () => {
   const p = agentClaudePrompt(LINK, { role: "facilitator", ai: "deepseek" });
   assert.ok(/DeepSeek/.test(p) && /DEEPSEEK_API_KEY/.test(p) && /never in the room/.test(p) && p.includes("AI=deepseek "));
 });
+
+ok("--skill parses, comma lists and repeats merge", () => {
+  const r = parseAgentRequest("greeter --skill twenty-questions Quizmaster --skill a-b,twenty-questions");
+  assert.deepEqual(r, { role: "greeter", name: "Quizmaster", skills: ["twenty-questions", "a-b"] });
+});
+ok("--skill takes an absolute .md path", () =>
+  assert.deepEqual(parseAgentRequest("--skill /home/me/my-game.md").skills, ["/home/me/my-game.md"]));
+ok("--skill refuses shell metacharacters and relative paths", () => {
+  for (const bad of ["x;rm", "../x.md", "$(id)", "Foo", "/a b.md"]) assert.ok("error" in parseAgentRequest(`--skill ${bad}`), bad);
+});
+ok("--skill with --ai none is refused", () => assert.ok("error" in parseAgentRequest("--ai none --skill twenty-questions")));
+ok("the skill reaches add-agent.sh as SKILL=", () => {
+  const cmd = agentShellCommand(CAP, { role: "greeter", skills: ["twenty-questions", "chess-ish"] });
+  const env = execFileSync("/bin/bash", ["-c", `git() { :; }; bash() { echo "$SKILL"; }; ${cmd}`],
+    { env: { HOME: "/nonexistent", PATH: process.env.PATH } }).toString().trim();
+  assert.equal(env, "twenty-questions,chess-ish");
+});
+ok("every shipped skill name passes the parser", () => {
+  const dir = join(here, "../../../scripts/qos-cli/skills");
+  const names = readdirSync(dir).filter((f) => f.endsWith(".md") && f !== "README.md").map((f) => f.slice(0, -3));
+  assert.ok(names.length > 0);
+  for (const n of names) assert.deepEqual(parseAgentRequest(`--skill ${n}`).skills, [n]);
+});
+ok("Claude request mentions the skill", () =>
+  assert.ok(agentClaudePrompt(LINK, { role: "greeter", skills: ["twenty-questions"] }).includes("twenty-questions")));
 
 ok("maskCap hides the cap, raw and URL-encoded", () => {
   const t = `a ${CAP} b ${encodeURIComponent(CAP)} c`;

@@ -6074,10 +6074,12 @@ function handleCommand(raw: string): string[] {
         sys("AI providers (--ai), each a plugin in scripts/qos-cli/ai-providers — or your own:");
         for (const p of AGENT_PROVIDERS) sys(`  ${p.id} — ${p.what}${p.key ? ` · needs ${p.key} on the agent's computer` : ""}`);
         sys("  Leave --ai out and the agent uses the claude CLI if it finds one, else whichever API key is set.");
+        sys("Skills (--skill <name>): rules and context an agent follows for an activity — a Markdown file in scripts/qos-cli/skills/, "
+          + "or an absolute path to your own. Shipped: twenty-questions. Then /<role> rules, /<role> play <move>.");
         break;
       }
       if (sub !== "add" && sub !== "claude") {
-        sys("usage: /agent · /agent add [role] [name] [--ai <provider>] [--model <m>] · /agent claude [role] [name] [--ai …] · /agent roles");
+        sys("usage: /agent · /agent add [role] [name] [--ai <provider>] [--model <m>] [--skill <s>] · /agent claude [role] [name] [--ai …] · /agent roles");
         break;
       }
       const req = parseAgentRequest(restWords.join(" "));
@@ -6089,7 +6091,8 @@ function handleCommand(raw: string): string[] {
       const show = (t: string) => (hideRoom ? maskCap(t, cap) : t);
       const prov = providerOf(req);
       const who = (req.name ? `${req.role} named ${req.name}` : req.role)
-        + (prov && prov.id !== "none" ? ` running on ${prov.id}${req.model ? ` (${req.model})` : ""}` : prov ? " with no AI" : "");
+        + (prov && prov.id !== "none" ? ` running on ${prov.id}${req.model ? ` (${req.model})` : ""}` : prov ? " with no AI" : "")
+        + (req.skills?.length ? ` that knows ${req.skills.join(", ")}` : "");
       const copied = sub === "claude" ? prompt : shell;
       navigator.clipboard?.writeText(copied).then(
         () => sys(`✓ copied the ${sub === "claude" ? "request for Claude" : "command"} to your clipboard${hideRoom ? " (in full — the room is hidden on screen)" : ""}`),
@@ -6114,6 +6117,10 @@ function handleCommand(raw: string): string[] {
             + "The agent's AI runs on your account, not the room's. Without one the line stops and says how to set it up. Keys never go in the room.");
         }
         sys("  It joins within seconds and stays while that computer is on. Type /agent to see it arrive.");
+        if (req.skills?.length) {
+          const c = agentCommand(req.role);
+          sys(`  Once it's here: /${c} rules shows the rules it follows, /${c} play <move> takes a turn.`);
+        }
         sys("  No terminal? /agent claude gives the same request worded for Claude Code.");
       }
       sys("  ⚠ It carries this room's link — whoever you give it to can join the room.");

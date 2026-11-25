@@ -37,7 +37,12 @@ export interface AgentRequest {
   /** An AGENT_PROVIDERS id; absent = let add-agent.sh pick what it can use. */
   ai?: string;
   model?: string;
+  /** Activity skills (scripts/qos-cli/skills/<name>.md): rules + context the agent follows. */
+  skills?: string[];
 }
+
+/** A skill is a shipped name (skills/<name>.md) or an absolute path to your own .md. */
+export const SKILL_RE = /^(?:[a-z0-9][a-z0-9-]{0,47}|\/[A-Za-z0-9._\/-]{1,200}\.md)$/;
 
 /**
  * Parse the argument of `/agent add [role] [display name…]`.
@@ -50,10 +55,19 @@ export function parseAgentRequest(arg: string): AgentRequest | { error: string }
   const words = arg.trim().split(/\s+/).filter(Boolean);
   let ai: string | undefined;
   let model: string | undefined;
-  // Flags may sit anywhere: --ai <provider>, --model <model>.
+  const skills: string[] = [];
+  // Flags may sit anywhere: --ai <provider>, --model <model>, --skill <name>[,<name>].
   for (let i = 0; i < words.length; ) {
     const w = words[i].toLowerCase();
-    if (w === "--ai" || w === "--model") {
+    if (w === "--skill") {
+      const v = words[i + 1];
+      if (!v) return { error: "--skill needs a skill name" };
+      for (const s of v.split(",").filter(Boolean)) {
+        if (!SKILL_RE.test(s)) return { error: `"${s}" isn't a skill — a name like twenty-questions, or an absolute path to a .md` };
+        if (!skills.includes(s)) skills.push(s);
+      }
+      words.splice(i, 2);
+    } else if (w === "--ai" || w === "--model") {
       const v = words[i + 1];
       if (!v) return { error: `${w} needs a value` };
       if (w === "--ai") {
@@ -70,6 +84,7 @@ export function parseAgentRequest(arg: string): AgentRequest | { error: string }
     } else i++;
   }
   if (model && ai === "none") return { error: "--model needs an AI provider, not none" };
+  if (skills.length && ai === "none") return { error: "--skill needs an AI provider — a skill is rules the AI follows" };
   let role = "facilitator";
   if (words.length && AGENT_ROLES.some((r) => r.role === words[0].toLowerCase())) {
     role = words.shift()!.toLowerCase();
@@ -78,6 +93,7 @@ export function parseAgentRequest(arg: string): AgentRequest | { error: string }
   const req: AgentRequest = { role };
   if (ai) req.ai = ai;
   if (model) req.model = model;
+  if (skills.length) req.skills = skills;
   if (!name) return req;
   if (name.length > 32 || !/^[A-Za-z][A-Za-z0-9 ._-]*$/.test(name)) {
     return { error: "an agent's name is up to 32 letters, digits, spaces, '.', '_' or '-', starting with a letter" };
@@ -93,7 +109,8 @@ export function providerOf(req: AgentRequest) {
 /** The environment prefix add-agent.sh reads for the provider and model. */
 function aiEnv(req: AgentRequest): string {
   const p = providerOf(req);
-  return (p ? `AI=${p.script} ` : "") + (req.model ? `AI_MODEL=${quote(req.model)} ` : "");
+  return (p ? `AI=${p.script} ` : "") + (req.model ? `AI_MODEL=${quote(req.model)} ` : "")
+    + (req.skills?.length ? `SKILL=${quote(req.skills.join(","))} ` : "");
 }
 
 const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -118,8 +135,12 @@ export function agentClaudePrompt(roomLink: string, req: AgentRequest, signalUrl
   const sig = signalUrl && signalUrl !== DEFAULT_SIGNAL ? `SIGNAL=${quote(signalUrl)} ` : "";
   const p = providerOf(req);
   const using = p && p.id !== "none" ? `, using ${p.what}${req.model ? ` (model ${req.model})` : ""}` : "";
+  const skillNote = req.skills?.length
+    ? `Give it the skill${req.skills.length > 1 ? "s" : ""} ${req.skills.join(", ")} (rules and context it follows, from scripts/qos-cli/skills/). `
+    : "";
   const keyNote = p?.key ? `It reads ${p.key} from your environment; if that is not set, ask me to set it there — never in the room. ` : "";
   return `Add a ${req.role} AI agent${named} to my QuantumOS room ${roomLink}${using}. `
+    + skillNote
     + keyNote
     + `Clone ${REPO_URL} and run: ${sig}${aiEnv(req)}bash scripts/qos-cli/add-agent.sh ${quote(roomLink)} ${req.role}`
     + `${req.name ? " " + quote(req.name) : ""} `

@@ -114,6 +114,7 @@ export const CMD_HELP: Record<string, string[]> = {
           "/agent add [role] [name] — copies the one command that adds an agent to this room: paste it into a terminal on any computer with git and Node 18+. It installs itself, joins within seconds, and stays while that computer is on. You need your own AI account on that computer: the claude CLI logged in, or your own ANTHROPIC_API_KEY or DEEPSEEK_API_KEY.",
           "/agent claude [role] [name] — the same request worded for a Claude Code session (claude.ai/code), for when you have no terminal. Its environment must allow the signaling server, and the agent lasts only while that session is active.",
           "--ai claude|anthropic|deepseek|none picks the model provider (each a plugin in scripts/qos-cli/ai-providers; add your own there), --model a model. Keys (DEEPSEEK_API_KEY, ANTHROPIC_API_KEY) are set on the agent's computer — never typed into the room. With no --ai it uses the claude CLI if present, else whichever key is set.",
+          "--skill <name> gives it an activity's rules and context — a Markdown file in scripts/qos-cli/skills/ (shipped: twenty-questions), or an absolute path to your own. In the room, /<role> rules shows them and /<role> play <move> takes a turn.",
           "Roles: facilitator (the default), skeptic, scribe, greeter, observer — /agent roles says what each does. Both outputs carry the room's link, so give them only to someone you'd invite. Local only — nothing is broadcast."],
   ask: ["/ask <question> — ask the room's AI agent.",
         "Routes to the facilitator when one is present; otherwise the lowest-peer-id other agent.",
@@ -305,6 +306,7 @@ const OTHER_ACTIONS: QuickAction[] = [
     args: [
       { prompt: "Which role? facilitator, skeptic, scribe, greeter or observer (blank for facilitator)", example: "facilitator", optional: true },
       { prompt: "Which AI? claude, deepseek, anthropic or none (blank: whatever that computer has)", example: "deepseek", optional: true, join: " --ai " },
+      { prompt: "Give it an activity's rules? A skill name like twenty-questions (blank for none)", example: "twenty-questions", optional: true, join: " --skill " },
     ],
     hint: "copies the one command that puts an AI agent in this room — run it on a computer with Node and your own AI key or Claude plan" },
   { label: "Show the invite link", ico: "✉", kind: "command", cmd: "/room ref", section: "Getting set up",

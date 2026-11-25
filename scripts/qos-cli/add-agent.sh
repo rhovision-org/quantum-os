@@ -18,6 +18,8 @@
 #
 # Roles: facilitator (default), skeptic, scribe, greeter, observer.
 # SIGNAL=<wss url> points it at a room's own signaling server.
+# SKILL=<name>[,…] gives it an activity's rules and context (skills/README.md);
+#   in the room: /<cmd> rules, /<cmd> play <move>.
 # Stop it with:  bash stop-agents.sh <role>   (same pidfiles as run-agents.sh)
 #
 # Unlike run-agents.sh this never turns on the test-REV faucet and has no
@@ -93,6 +95,22 @@ if [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
   exit 1
 fi
 
+# SKILL=<name>[,<name>…] — activity skills (rules + context, skills/*.md or an
+# absolute path to your own .md). A skill is read by the AI, so it needs one.
+skillarg=()
+if [ -n "${SKILL:-}" ]; then
+  [ "$provider" != "off" ] || { echo "✗ SKILL needs an AI provider — a skill is rules the AI follows. Drop AI=off."; exit 1; }
+  IFS=',' read -r -a skills <<< "$SKILL"
+  for s in "${skills[@]}"; do
+    case "$s" in
+      /*.md) [ -f "$s" ] || { echo "No skill file at $s"; exit 1; } ;;
+      *) [[ "$s" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "Skill '$s' should be a name like twenty-questions or an absolute path to a .md file."; exit 1; }
+         [ -f "skills/$s.md" ] || { echo "No skill named '$s'. Shipped: $(ls skills/*.md 2>/dev/null | xargs -n1 basename 2>/dev/null | grep -v '^README.md$' | sed 's/\.md$//' | tr '\n' ' ')"; exit 1; } ;;
+    esac
+    skillarg+=(--skill "$s")
+  done
+fi
+
 persist=()
 [ -n "${NO_MEMORY:-}" ] || persist=(--persist)
 namearg=()
@@ -104,7 +122,7 @@ log=".agents/$ROLE.log"
 start=0; [ -f "$log" ] && start="$(wc -l < "$log")"
 # ${a[@]+"${a[@]}"} so an empty array is not "unbound" under set -u on bash 3.2 (macOS).
 nohup node agent.mjs --room "$ROOM" --role "$ROLE" ${namearg[@]+"${namearg[@]}"} ${ai[@]+"${ai[@]}"} \
-  ${sigarg[@]+"${sigarg[@]}"} --state "./.qos-$ROLE" ${persist[@]+"${persist[@]}"} >> "$log" 2>&1 &
+  ${sigarg[@]+"${sigarg[@]}"} ${skillarg[@]+"${skillarg[@]}"} --state "./.qos-$ROLE" ${persist[@]+"${persist[@]}"} >> "$log" 2>&1 &
 pid=$!
 echo "$pid" > "$pidf"
 
@@ -121,7 +139,7 @@ done
 if [ ${#ai[@]} -eq 0 ]; then
   mode="no AI (built-in FAQ only — install the claude CLI, or set ANTHROPIC_API_KEY or DEEPSEEK_API_KEY, for full answers)"
 else
-  mode="AI via $provider${AI_MODEL:+ ($AI_MODEL)}"
+  mode="AI via $provider${AI_MODEL:+ ($AI_MODEL)}${SKILL:+, skill: $SKILL}"
 fi
 if [ -n "$joined" ]; then
   echo "✓ ${NAME:-$ROLE} joined the room (pid $pid) — $mode"

@@ -16,6 +16,7 @@
 // bounded by the same budget/cooldowns.
 
 import { resolveProvider } from "./ai-providers/index.mjs";
+import { skillsPrompt } from "./skills.mjs";
 
 // Persona = the role-specific "who you are" line (overridable per role via makeAdvisor's
 // `persona`); the norms / knowledge below are role-neutral and shared. The facilitator
@@ -93,7 +94,8 @@ command answers the question, name the exact command. You know:
 - AI AGENTS: \`/agent\` lists the agents in the room; \`/agent add [role] [name]\` copies one command (the room filled
   in) to paste into a terminal on any computer with git and Node 18+ — it installs and joins by itself;
   \`/agent claude\` gives the same as a request for a Claude Code session. \`--ai claude|deepseek|anthropic\` picks the
-  model provider (a plugin each; the key is set on the agent's computer, never typed into the room). \`/ask <q>\` reaches whichever agent is here.
+  model provider (a plugin each; the key is set on the agent's computer, never typed into the room). \`--skill <name>\` gives
+  it an activity's rules (\`/<role> rules\`, \`/<role> play <move>\`). \`/ask <q>\` reaches whichever agent is here.
 - VISUALIZE: \`/render\` opens an animation of THIS room — its perspectives (peers, you included) bound to
   the shared room closure, its closures (lemmas), and groups. That is the room's "simulation animation".
 - IDENTITY: \`/name\` sets your display name; \`/password\` + \`/login\` protect a persistent identity; \`/id\`,
@@ -173,6 +175,11 @@ function userPrompt(mode, ctx) {
     const ctxLine = t ? `\n\nRecent discussion (candidates / scores so far):\n${t}` : "";
     return `Optimization problem: "${ctx.problem}"${ctxLine}\n\nFacilitate the next step of the round.`;
   }
+  if (mode === "play") {
+    return `The room so far (oldest first; the game state is in here):\n${t || "(nothing yet)"}\n\n`
+      + `${ctx.player || "A participant"} says: "${ctx.move}"\n\n`
+      + `Respond as the activity's rules require, in one short chat message.`;
+  }
   if (mode === "ask") {
     const ctxLine = t ? `\n\nRecent room context (for reference):\n${t}` : "";
     return `A participant asks: "${ctx.question}"${ctxLine}\n\nAnswer briefly.`;
@@ -185,18 +192,26 @@ function userPrompt(mode, ctx) {
   return `Recent transcript:\n${t}\n\nIf there is a real disagreement, name the crux in one sentence and suggest the single question or next step that would move toward agreement. If people are converging or there is no real disagreement, reply NONE.`;
 }
 
-export function makeAdvisor({ ai = false, backend = "anthropic", provider = null, apiKey, model = null, claudeBin = "claude", env = process.env, persona = null, cmd = "facil", roleName = "facilitator", faucetActive = false, log = () => {}, fetchImpl } = {}) {
+export function makeAdvisor({ ai = false, backend = "anthropic", provider = null, apiKey, model = null, claudeBin = "claude", env = process.env, persona = null, cmd = "facil", roleName = "facilitator", faucetActive = false, skills = [], log = () => {}, fetchImpl } = {}) {
   // A plugin object wins; otherwise a built-in by name. An `apiKey` argument is
   // the Anthropic key (kept for callers and tests that pass it directly).
   const prov = provider ?? resolveProvider(backend);
   const penv = apiKey !== undefined ? { ...env, ANTHROPIC_API_KEY: apiKey } : env;
   // System prompt = role persona (or the facilitator default) + shared norms/knowledge.
+  // Activity skills (skills.mjs) ride in every system prompt, so the agent can
+  // answer a rules question in `ask` as well as run a move in `play`.
+  const skillText = skillsPrompt(skills);
   const sysFor = (mode) => {
+    const base = sysBase(mode);
+    return skillText ? `${base}\n\n${skillText}` : base;
+  };
+  const sysBase = (mode) => {
     const who = persona || DEFAULT_PERSONA;
     if (mode === "ask") return `${who}\n\n${askKnowledge(cmd, faucetActive)}`;
     if (mode === "optimize") return `${who}\n\n${optimizeKnowledge(cmd)}`;
     if (mode === "chair") return `${who}\n\n${chairKnowledge(cmd)}`;
     if (mode === "gamesummary") return `${who}\n\n${gameSummaryKnowledge()}`;
+    if (mode === "play") return who;
     return `${who}\n\n${NUDGE_NORMS}`;
   };
   const useModel = model || prov?.defaultModel || null;
@@ -219,13 +234,13 @@ export function makeAdvisor({ ai = false, backend = "anthropic", provider = null
     /// failed. The caller can surface this instead of a generic fallback.
     get lastError() { return lastError; },
     clearError() { lastError = null; },
-    /** mode: "ask" | "stimulate" | "synthesize" | "optimize" | "chair" | "gamesummary". Returns a short string, or null. */
+    /** mode: "ask" | "play" | "stimulate" | "synthesize" | "optimize" | "chair" | "gamesummary". Returns a short string, or null. */
     async advise(mode, ctx) {
       lastError = null;
       if (!enabled) return null;
       const system = sysFor(mode);
       const prompt = userPrompt(mode, ctx);
-      const max_tokens = mode === "gamesummary" ? 1200 : mode === "optimize" ? 400 : mode === "chair" ? (ctx?.phase === "closure" ? 400 : 256) : mode === "ask" ? 256 : 160;
+      const max_tokens = mode === "gamesummary" ? 1200 : mode === "optimize" ? 400 : mode === "chair" ? (ctx?.phase === "closure" ? 400 : 256) : mode === "ask" ? 256 : mode === "play" ? 400 : 160;
       const out = await prov.complete({
         system, prompt, maxTokens: max_tokens, model: useModel, env: penv, log, claudeBin,
         timeoutMs: mode === "gamesummary" ? 120_000 : 45_000,
@@ -234,14 +249,14 @@ export function makeAdvisor({ ai = false, backend = "anthropic", provider = null
       if (out?.error) { lastError = out.error; log(`[facil] ${out.error}`); return null; }
       const text = String(out?.text ?? "").trim();
       if (!text) { lastError = "advisor returned no text"; return null; }
-      if (mode !== "chair" && /^NONE\b/i.test(text)) {
+      if (mode !== "chair" && mode !== "play" && /^NONE\b/i.test(text)) {
         // NONE means "nothing to say" for the nudge modes, but for a direct
         // question it is a null answer the caller must report — otherwise
         // `/facil ask` falls back to "I don't have a good answer" with no reason.
         if (mode === "ask") lastError = "advisor returned NONE (no answer)";
         return null;
       }
-      return text.slice(0, mode === "gamesummary" ? 6000 : mode === "optimize" ? 1400 : mode === "chair" ? 1200 : mode === "ask" ? 700 : 400);   // optimize/chair are multi-part; ask a few sentences; nudges terse
+      return text.slice(0, mode === "gamesummary" ? 6000 : mode === "optimize" ? 1400 : mode === "chair" ? 1200 : mode === "ask" ? 700 : mode === "play" ? 1400 : 400);   // optimize/chair are multi-part; ask a few sentences; nudges terse
     },
   };
 }
