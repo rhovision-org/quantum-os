@@ -301,6 +301,15 @@
     .msg .from.self { color: #ff9d4a; }
     .msg .text { color: #ccc; }
     .msg.system-line .text { color: #bbb; }
+    /* A clock line wherever the minute changed between two messages. */
+    .msg.time-mark { text-align: center; color: #555; font-size: 0.68rem; margin: 0.35rem 0 0.1rem; user-select: none; }
+    /* A known room member named in a line; our own name stands out more, and
+       a peer's line that names us gets a gutter bar. */
+    .msg .mention { color: #7fdbca; background: rgba(127,219,202,0.10); border-radius: 3px; padding: 0 0.15rem; }
+    .msg .mention.me { color: #ffcf8a; background: rgba(255,157,74,0.18); font-weight: 600; }
+    .msg.mentions-me { border-left: 2px solid #ff9d4a; padding-left: 0.4rem; background: rgba(255,157,74,0.05); }
+    /* History merged from another peer's transcript on join. */
+    .msg.synced { opacity: 0.85; }
 
     .input-row {
       border-top: 1px solid #222;

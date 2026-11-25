@@ -96,6 +96,11 @@ jobs:
       - name: Faucet HTTP selftest
         run: node scripts/qos-cli/faucet-http.selftest.mjs
 
+      # An agent hands a joiner the conversation it heard (sync-chat); with
+      # --persist it reads it back from the room memory's transcript. No deps.
+      - name: Agent chat history selftest
+        run: node scripts/qos-cli/chat-history.mjs --selftest
+
       - name: Locker selftest
         run: node packages/browser/src/locker.js --selftest
 
@@ -173,6 +178,11 @@ jobs:
       # no agent means a clear refusal rather than a fake answer.
       - name: Ask agent routing test
         run: node packages/browser/test/agent-ask.test.mjs
+
+      # A joiner is handed the room's conversation by the peers present: lines
+      # merge in by time without duplicates; minute marks; mentions of names.
+      - name: Chat view test
+        run: node packages/browser/test/chat-view.test.mjs
 
       # `/goal` is identity-scoped and local-only; corrupt storage is tolerated,
       # and only the explicit share snapshot leaves the store.
