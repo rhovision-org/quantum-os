@@ -94,6 +94,13 @@ jobs:
           set -euo pipefail
           node formal/test-authority-identity.mjs
           sha256sum authority-identity.json > authority-identity.SHA256SUMS
+      - name: Integrated actor-to-replica authority witness
+        env:
+          AUTHORITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node formal/test-authority-integrated.mjs
+          sha256sum authority-integration.json > authority-integration.SHA256SUMS
       - uses: actions/upload-artifact@v6
         with:
           name: authority-proof
@@ -115,4 +122,6 @@ jobs:
             authority-replica.SHA256SUMS
             authority-identity.json
             authority-identity.SHA256SUMS
+            authority-integration.json
+            authority-integration.SHA256SUMS
           if-no-files-found: error

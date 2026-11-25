@@ -167,3 +167,32 @@ distributed ordering, rollback-resistant external checkpoint, or production
 migration. The separate Phase VI crash and Phase VII replica tests do not
 automatically transfer to this adapter. Integration of the candidates
 requires explicit maintainer approval and new evidence.
+
+
+## Phase IX — integrated research witness
+
+A separate experimental adapter composes the existing Phase V reference
+reducer and Phase VIII identity verifier with a serial SQLite writer and
+a dual-signature read-only replica. It neither replaces previous candidates
+nor imports or changes production code. The writer signature binds the
+actor's original signed envelope, pinned stream/registry/writer context,
+ordinal, predecessor and before/after state hashes. State and the complete
+signed record commit in one transaction. Publication is an audited snapshot
+export of committed records only; no external network or side effect is
+performed. Replicas re-verify both signatures and recompute the transition;
+a writer signature alone is insufficient. No new Lean refinement theorem
+is claimed by this integration.
+
+The CI fixture tests process death before and after commit, eight competing
+identical requests, revocation persistence, descendant denial and sibling
+independence, gap repair, replay, context/key substitution, and rejection of
+a writer-signed invalid actor or transition. The audit rejects corrupted
+stored records. Temporary fixture keys are not production credentials.
+Trusted storage and pinned registry/writer bootstrap remain assumptions;
+there is no external rollback checkpoint, key rotation, network consensus,
+physical power-loss experiment, or production/browser integration. A replica
+cannot authorize local execution or claim global freshness.
+
+All candidate adoption, integration with current Quantum OS and migration
+decisions remain with the maintainer. This experiment is not a security
+certification or recommendation to replace the current architecture.
