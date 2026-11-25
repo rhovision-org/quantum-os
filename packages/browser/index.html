@@ -42,7 +42,8 @@
       gap: 1rem;
     }
 
-    header h1 { font-size: 1rem; color: #7fdbca; letter-spacing: 0.05em; }
+    header h1 { font-size: 1rem; color: #7fdbca; letter-spacing: 0.05em; line-height: 0; }
+    header h1 .logo { height: 1.9rem; width: auto; display: block; }
     header .tag { font-size: 0.7rem; color: #555; flex: 1; }
 
     #sidebar-toggle {
@@ -629,7 +630,7 @@
 <body>
   <header>
     <button id="sidebar-toggle" aria-label="Toggle sidebar">☰</button>
-    <h1>⬡ QuantumOS</h1>
+    <h1><img class="logo" src="/qos-logo.svg" alt="QuantumOS" width="2200" height="500"></h1>
     <span class="tag geek-med" title="An intelligent gateway to each other and everything — the rho ZFA p2p layer, proven secure.">gateway to each other and everything · rho ZFA p2p, proven secure</span>
     <a href="https://github.com/rhovision-org/quantum-os#readme" class="geek-med"
        target="_blank" rel="noopener"
