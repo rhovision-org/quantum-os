@@ -137,3 +137,33 @@ A production design requires authenticated principal input, atomic durable
 writer/signature publication, trusted stream/key bootstrap, recovery and
 rotation, a consensus or trusted-writer policy, and separately tested runtime
 integration. No offline grant or execution is introduced.
+
+
+## Phase VIII — isolated cryptographic actor identity candidate
+
+This is an optional research experiment, not a replacement for dyncap,
+room identities, transport, token issuance or any production API.
+The maintainer decides whether this or another architecture is suitable.
+The experiment places a fixed, explicitly provisioned Ed25519 actor-key
+registry in front of the Phase V reference reducer and records original
+actor-signed envelopes in a separate SQLite journal. Registry order is
+canonical; duplicate actors and reused public keys are refused. The
+signature covers protocol domain, stream, registry digest, actor and
+complete command. The same transaction commits the verified envelope,
+request ID and next state. Full audit re-verifies signatures and replays
+the reducer. The registry is pinned externally, not discovered via TOFU.
+
+Authentication does not confer authority: wrong-holder, missing-right,
+owner-only, replay and revoked-lineage decisions are still enforced by
+the serial reference model. Request IDs are global within this candidate
+stream. Failed authentication or authorization does not consume an ID.
+
+The fixture uses temporary local keys and databases only. Trust in the
+initial registry, storage, key custody and the adapter itself remains
+explicit. Signature verification does not establish a person's identity
+or prevent key compromise. Ed25519 is classical public-key cryptography,
+not post-quantum. There is no key enrollment, rotation/recovery protocol,
+distributed ordering, rollback-resistant external checkpoint, or production
+migration. The separate Phase VI crash and Phase VII replica tests do not
+automatically transfer to this adapter. Integration of the candidates
+requires explicit maintainer approval and new evidence.
