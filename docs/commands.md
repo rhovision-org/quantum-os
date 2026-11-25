@@ -49,6 +49,7 @@ QLF slash commands:
   /ps              — QOS process table (pid · name · state · events · owner)
   /kill <name|id>  — terminate a QOS process you own (owner-only alias)
   /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)
+  /agent [add [role] [name]]  — who's here, or the one command that adds an AI agent to this room
   /goal [sub]      — private personal goals: add · list · done · review · share
   /probe [sub]     — joiner-local consensus probe (status|clear)
   /room [sub]      — multi-room tabs (new|list|join <cap>|leave|ref)
@@ -564,6 +565,17 @@ See [MultisigDemo.md](../MultisigDemo.md) for a worked example combining `/dynca
 Finds a **live** AI agent in the room and relays `/<role> ask <question>` as chat. Preference is the **facilitator** (`/facil ask …`) when one is present; otherwise the lowest-peer-id other present agent. The agent badge cache is filtered by the live peer roster, so a departed agent is not chosen. If no agent is present, it says so and sends nothing — it never pretends to have an answer locally. The chosen agent is addressed by its role prefix; the line is still room chat, so every peer sees it. The browser only picks the agent; it does not vouch for it, and the agent answers for itself.
 
 Direct addressing is not limited to the built-in roles. If a live peer announced a custom role such as `heckler`, `/heckler help` (or any `/heckler …` line) is relayed exactly like `/skeptic …`. If `heckler` is the agent's display name but its role is `skeptic`, the browser relays `/skeptic …` to that agent instead. The lookup uses the live `peers` roster, not the sticky badge cache, so a departed agent does not become a phantom command.
+
+### `/agent [add|claude|roles] [role] [name]`
+
+Getting an AI agent into the room. An agent is a headless peer (`scripts/qos-cli/agent.mjs`) that must run on *some* computer, so the browser cannot start one — but it can reduce that to one paste.
+
+- `/agent` lists the live agents (filtered by the roster, like `/ask`) and the command each answers to.
+- `/agent add [role] [name]` copies **one shell line** with this room already in it: it keeps its own checkout under `~/.qos-agents/quantum-os` (cloned once, `git pull`ed after), then runs [`scripts/qos-cli/add-agent.sh`](../scripts/qos-cli/add-agent.sh), which installs dependencies on first run, picks the AI backend it can use (the `claude` CLI → your Claude plan; else `ANTHROPIC_API_KEY`; else the built-in FAQ only), keeps the room's memory (`--persist`), starts the agent detached and waits until it has joined. A room on a non-default signaling server gets `SIGNAL=` added.
+- `/agent claude [role] [name]` copies the same request worded for a Claude Code session, for someone with no terminal ([docs/agents-from-claude.md](agents-from-claude.md)).
+- Roles: `facilitator` (default), `skeptic`, `scribe`, `greeter`, `observer`. A first word that is not a role is the start of the name (`/agent add Socrates`). Names are restricted to letters, digits, space, `.`, `_`, `-` so they quote into the shell line safely.
+
+Both outputs carry the room capability. Local only, never broadcast; with the room hidden (`/room hide`) the cap is masked on screen and only the clipboard holds it in full. Pure builder: `agent-invite.ts`, `test/agent-invite.test.mjs`.
 
 ### `/goal [sub]`
 

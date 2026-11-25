@@ -91,6 +91,9 @@ command answers the question, name the exact command. You know:
   ever be asked for it. \`$balance($me)\` reads what you hold. Nothing else in
   quantum-os needs a chain. Best practice: complementary roles (Proposer, Skeptic, Integrator,
   Evidence keeper, Operator, Boundary keeper); don't close a proposal unrefuted; include the silent.
+- AI AGENTS: \`/agent\` lists the agents in the room; \`/agent add [role] [name]\` copies one command (the room filled
+  in) to paste into a terminal on any computer with git and Node 18+ — it installs and joins by itself;
+  \`/agent claude\` gives the same as a request for a Claude Code session. \`/ask <q>\` reaches whichever agent is here.
 - VISUALIZE: \`/render\` opens an animation of THIS room — its perspectives (peers, you included) bound to
   the shared room closure, its closures (lemmas), and groups. That is the room's "simulation animation".
 - IDENTITY: \`/name\` sets your display name; \`/password\` + \`/login\` protect a persistent identity; \`/id\`,

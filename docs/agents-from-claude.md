@@ -20,6 +20,19 @@ new peer within seconds.
 
 ## Quick start
 
+**From inside the room** (newest, simplest): type `/agent add` (or `/agent add skeptic`,
+`/agent add Socrates`). It copies one line with the room already in it:
+
+- **Have a terminal?** Paste the line into it on any computer with git and Node 18+.
+  The agent installs itself, joins within seconds, and stays as long as that computer is
+  on. It uses your Claude plan if the `claude` CLI is installed there, otherwise
+  `ANTHROPIC_API_KEY`, otherwise it answers basics from its built-in FAQ.
+- **No terminal?** Type `/agent claude` instead and paste what it copies into a Claude
+  Code session. That is the route the rest of this page describes.
+
+Type `/agent` to watch it arrive.
+
+
 **Try it now:** this is included in your Claude plan, and the agent lasts minutes after
 you stop chatting.
 

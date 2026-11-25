@@ -37,7 +37,8 @@ import { parseDefinition, parseInvocation, expandCommand, expandCallSites,
          MACRO_NAME_RE, MAX_BODY } from "./macro-lang.js";
 import { createCalls, type Calls } from "./calls.js";
 import { QosCommand } from "./qos-command.js";
-import { pickAskAgent, agentAskText, liveAgentTarget } from "./agent-ask.js";
+import { pickAskAgent, agentAskText, liveAgentTarget, agentCommand } from "./agent-ask.js";
+import { AGENT_ROLES, AGENT_DOCS_URL, parseAgentRequest, agentShellCommand, agentClaudePrompt, maskCap } from "./agent-invite.js";
 import { GoalStore, parseGoalAdd } from "./goal-store.js";
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
@@ -3611,6 +3612,7 @@ function handleCommand(raw: string): string[] {
         "  /kill <name|id>  — terminate a process you own (owner-only alias)",
         "  /goal [sub]      — private personal goals: add · list · done · review · share",
         "  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)",
+        "  /agent [add [role] [name]]  — who's here, or the one command that adds an AI agent to this room",
         "  /<role|name> [cmd] — address any live agent by role or display name (e.g. /heckler help)",
         "  /probe [sub]     — discrepancy probe window state (status|clear)",
         "  /room [sub]      — multi-room tabs (new|list|join <cap>|leave|ref)",
@@ -6035,13 +6037,70 @@ function handleCommand(raw: string): string[] {
       const agent = pickAskAgent(presentAgents);
       if (!agent) {
         sys("no AI agent is in this room right now — /ask needs a facilitator, scribe, skeptic, or other agent present.");
-        sys("  Start one with scripts/qos-cli/run-agents.sh, then try /ask again.");
+        sys("  [/agent add](help:agent) gives you the one command that adds one, then try /ask again.");
         break;
       }
       const text = agentAskText(agent, question);
       qpeer.broadcast({ kind: "chat", text });
       const role = agent.role === "facilitator" ? "facilitator" : agent.role;
       sys(`→ asked the ${role} (${peerLabel(agent.peerId)}) — ${text}`);
+      break;
+    }
+
+    case "agent":
+    case "agents": {
+      // /agent            — who's here
+      // /agent add [role] [name]   — the one command that puts an agent in this room
+      // /agent claude [role] [name] — the same, worded for a Claude Code session
+      const [sub0, ...restWords] = arg.trim().split(/\s+/).filter(Boolean);
+      const sub = (sub0 ?? "list").toLowerCase();
+      if (sub === "list" || sub === "ls") {
+        const present = [...peerAgents].filter(([id]) => peers.has(id));
+        if (present.length === 0) {
+          sys("no AI agent is in this room right now.");
+        } else {
+          sys(`${present.length} AI agent${present.length === 1 ? "" : "s"} here:`);
+          for (const [id, role] of present) {
+            sys(`  ${peerLabel(id)} — ${role} · talk to it with /${agentCommand(role)} help`);
+          }
+        }
+        sys("  /agent add [role] [name] — add one. Roles: " + AGENT_ROLES.map((r) => r.role).join(", "));
+        break;
+      }
+      if (sub === "roles") {
+        for (const r of AGENT_ROLES) sys(`  ${r.role} — ${r.what}`);
+        break;
+      }
+      if (sub !== "add" && sub !== "claude") {
+        sys("usage: /agent · /agent add [role] [name] · /agent claude [role] [name] · /agent roles");
+        break;
+      }
+      const req = parseAgentRequest(restWords.join(" "));
+      if ("error" in req) { sys(`✗ ${req.error}`); break; }
+      const cap = activeRoom.roomId;
+      const sig = activeRoom.signalingUrl;
+      const shell = agentShellCommand(cap, req, sig);
+      const prompt = agentClaudePrompt(roomUrl(), req, sig);
+      const show = (t: string) => (hideRoom ? maskCap(t, cap) : t);
+      const who = req.name ? `${req.role} named ${req.name}` : req.role;
+      const copied = sub === "claude" ? prompt : shell;
+      navigator.clipboard?.writeText(copied).then(
+        () => sys(`✓ copied the ${sub === "claude" ? "request for Claude" : "command"} to your clipboard${hideRoom ? " (in full — the room is hidden on screen)" : ""}`),
+        () => sys("couldn't reach the clipboard — copy it from above" + (hideRoom ? " after /room show" : "")),
+      );
+      if (sub === "claude") {
+        sys(`To have Claude add a ${who} with no terminal on your side, paste this into a Claude Code session at https://claude.ai/code :`);
+        sys("```\n" + show(prompt) + "\n```");
+        sys("  Its cloud environment must allow quantum-os-signaling.onrender.com, and an agent there lasts only minutes after the chat goes quiet — "
+          + `for one that stays, use /agent add on a computer that stays on. Guide: ${AGENT_DOCS_URL}`);
+      } else {
+        sys(`To add a ${who} to this room, paste this into a terminal on any computer with git and Node 18+:`);
+        sys("```\n" + show(shell) + "\n```");
+        sys("  It joins within seconds and stays while that computer is on. It uses your Claude plan if the claude CLI is installed, "
+          + "else ANTHROPIC_API_KEY, else answers basics from its built-in FAQ. Type /agent to see it arrive.");
+        sys("  No terminal? /agent claude gives the same request worded for Claude Code.");
+      }
+      sys("  ⚠ It carries this room's link — whoever you give it to can join the room.");
       break;
     }
 
@@ -9002,7 +9061,7 @@ function send(): void {
     if (cmd !== "help" && cmd !== "dump") {
       sessionLog.push({ who: myName || "you", cmd, arg, summary: lines[0] ?? "" });
     }
-    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "ask" && cmd !== "goal" && cmd !== "ps" && cmd !== "kill" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
+    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "ask" && cmd !== "agent" && cmd !== "agents" && cmd !== "goal" && cmd !== "ps" && cmd !== "kill" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
       qpeer.broadcast({ kind: "qlf", cmd, arg, lines });
     }
     return;

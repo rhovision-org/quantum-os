@@ -174,6 +174,11 @@ jobs:
       - name: Ask agent routing test
         run: node packages/browser/test/agent-ask.test.mjs
 
+      # `/agent add` builds a shell line that parses, passes the room/role/name
+      # as add-agent.sh expects, and offers exactly add-agent.sh's roles.
+      - name: Agent invite test
+        run: node packages/browser/test/agent-invite.test.mjs
+
       # `/goal` is identity-scoped and local-only; corrupt storage is tolerated,
       # and only the explicit share snapshot leaves the store.
       - name: Goal store test

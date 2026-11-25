@@ -275,6 +275,16 @@ optimum — the same loop a room runs collectively. No deps. See
 
 ## Agents (facilitator, scribe, greeter …)
 
+**The easy way:** in the room, type `/agent add [role] [name]`. It copies one line
+with the room already in it; paste that into a terminal on any computer with git
+and Node 18+. The line runs [`add-agent.sh`](add-agent.sh), which installs
+dependencies the first time, uses the `claude` CLI if present (your Claude plan),
+else `ANTHROPIC_API_KEY`, else the built-in FAQ (`AI=off|api|claude-code` forces
+one), keeps the room's memory (`--persist`, `NO_MEMORY=1` to skip), starts the
+agent detached, and waits until it has joined. `bash stop-agents.sh <role>` stops
+it. Unlike `run-agents.sh` it has no default room and never turns on the faucet.
+
+
 `agent.mjs` is a sibling daemon that joins a room as a **full member** (stable
 `cap:peer` + dyncap identity) and posts **measured** nudges according to its
 `--role` — effectively the runtime of
