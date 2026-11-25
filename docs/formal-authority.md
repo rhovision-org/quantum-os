@@ -56,3 +56,32 @@ are executable observations, not a trace refinement proof. They do not
 establish cryptographic authentication, global request uniqueness, concurrency,
 or runtime revocation. CI records the exact tested merge and PR head, vector
 digest and results. No default runtime behavior changes.
+
+
+## Phase V — serial authority lifecycle candidate
+
+The research-only reference reducer in the formal directory registers unique
+grant IDs, binds grants to holders and processes, checks full ancestry for
+revocation, enforces narrowing and delegation rights, and consumes request IDs
+on successful grant, revoke and execute operations. A rejected request does
+not mutate state. Root-owner management revocation is a separate authority,
+even after the root's execution authority has been revoked. IDs are never
+reused; revocation has no undo operation. A sibling branch remains live unless
+its own ancestry is revoked.
+
+The Lean extension checks four selected lineage and revocation obligations
+against the abstract model. An independently implemented Python oracle uses
+parent pointers and sets of rights; the JavaScript reducer uses materialized
+lineages and bit masks. CI compares complete decisions and normalized next
+states over a fixed 22-command alphabet and all reachable states up to four
+accepted transitions, plus an explicit longer trace and malformed controls.
+This is bounded differential evidence, not a proof of equivalence between the
+Lean specification and both implementations.
+
+The candidate is not called by any production code. It assumes a trusted
+authenticated actor, a trusted initial state and serial state transitions.
+No durable journal, atomic external side effects, crash recovery, cross-replica
+ordering or authenticated revocation distribution is supplied. A successful
+execute marks a request as used but does not invoke any external action.
+Production revocation semantics and backwards-compatible migration require
+maintainer agreement and a separately reviewed integration.

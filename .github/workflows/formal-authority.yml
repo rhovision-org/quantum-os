@@ -56,6 +56,23 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/authority-tools" --no-save --no-package-lock esbuild@0.21.5
           AUTHORITY_ESBUILD="$RUNNER_TEMP/authority-tools/node_modules/esbuild/lib/main.js" node formal/compare-authority.mjs
           sha256sum authority-refinement-proof.txt authority-vectors.txt authority-refinement.json > authority-refinement.SHA256SUMS
+      - name: Authority lifecycle reference and independent oracle
+        env:
+          AUTHORITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          LEAN_PATH=formal lean formal/AuthorityLifecycle.lean | tee authority-lifecycle-proof.txt
+          if grep -E 'sorryAx|error:' authority-lifecycle-proof.txt; then exit 1; fi
+          python3 - <<'PYTHON'
+          import re
+          s=open('authority-lifecycle-proof.txt').read()
+          for name in ['live_extension_implies_parent','revoked_parent_blocks_grant','grant_child_live','revoked_ancestor_persists']:
+              line=next(l for l in s.splitlines() if f"QosAuthority.{name}'" in l)
+              assert 'does not depend on any axioms' in line or ('depends on axioms:' in line and set(re.findall(r'[A-Za-z][A-Za-z0-9_.]*',line.split('depends on axioms:',1)[1])) <= {'propext','Quot.sound','Classical.choice'}),line
+          PYTHON
+          python3 formal/lifecycle-oracle.py
+          node formal/compare-lifecycle.mjs
+          sha256sum authority-lifecycle-proof.txt authority-lifecycle-vectors.jsonl authority-lifecycle-commands.json authority-lifecycle.json > authority-lifecycle.SHA256SUMS
       - uses: actions/upload-artifact@v6
         with:
           name: authority-proof
@@ -66,4 +83,9 @@ jobs:
             authority-vectors.txt
             authority-refinement.json
             authority-refinement.SHA256SUMS
+            authority-lifecycle-proof.txt
+            authority-lifecycle-vectors.jsonl
+            authority-lifecycle-commands.json
+            authority-lifecycle.json
+            authority-lifecycle.SHA256SUMS
           if-no-files-found: error
