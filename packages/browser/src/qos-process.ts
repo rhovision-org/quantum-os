@@ -621,7 +621,7 @@ export function compareEvents(a: QosEvent, b: QosEvent): number {
     compareStrings(a.hash, b.hash);
 }
 
-export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version";
+export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier";
 export interface QosDependency { hash: string; kind: QosDependencyKind }
 /** Only schema-defined references are causal, never arbitrary payload strings. */
 export function eventDependencies(event: QosEvent): QosDependency[] {
@@ -643,6 +643,13 @@ export function eventDependencies(event: QosEvent): QosDependency[] {
       isRecord(event.payload.args) && typeof event.payload.args.targetVersion === "string" &&
       HEX64.test(event.payload.args.targetVersion)) {
     refs.push({ hash: event.payload.args.targetVersion, kind: "process-version" });
+  }
+  if (event.type === "syscall-request" && event.payload?.schema === "qos.syscall/1" &&
+      typeof event.payload.op === "string" && ["sched_step", "yield", "sleep", "sched_priority", "sched_wake"].includes(event.payload.op) &&
+      isRecord(event.payload.args) && Array.isArray(event.payload.args.scheduleFrontier) &&
+      event.payload.args.scheduleFrontier.length <= 4096) {
+    for (const hash of event.payload.args.scheduleFrontier) if (typeof hash === "string" && HEX64.test(hash))
+      refs.push({hash,kind:"scheduler-frontier"});
   }
   return refs;
 }

@@ -181,6 +181,8 @@ jobs:
       # and two independent kernels replaying the same operations to one digest.
       - name: QOS kernel ABI test
         run: node packages/browser/test/qos-kernel.test.mjs
+      - name: QOS deterministic scheduler test
+        run: node packages/browser/test/qos-scheduler.test.mjs
       - name: QOS isolated syscall trace test
         run: node packages/browser/test/qos-syscall-journal.test.mjs
 

@@ -192,7 +192,7 @@ causal dependencies first, then `(source anchor, seq, hash)` for otherwise-concu
 non-root capability `grant` links. It uses a deterministic topological order, applying the
 stable tuple only to the ready set. It returns missing-reference and cycle diagnostics;
 cyclic events are never accepted as a valid reducer input (the reducer returns a conflicted
-view). This slice recognizes only explicit syscall request, handle-version and process-version dependencies in the bounded ABI. Other object/version dependencies need schema-defined references; arbitrary payload strings are never treated as edges.
+view). This slice recognizes only explicit syscall request, handle-version, process-version and scheduler-frontier dependencies in the bounded ABI. Other object/version dependencies need schema-defined references; arbitrary payload strings are never treated as edges.
 The helper's total fallback order is diagnostic only when cycles are present.
 
 The local journal admission queue serializes asynchronous verification and commit,
