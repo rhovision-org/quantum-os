@@ -7,10 +7,12 @@
 // is the kernel seam that contract will call.
 //
 // Not implemented here (reserved by the ABI, tracked in the roadmap):
-// read/write/stat/VFS, scheduler ticks, devices, services, and broader syscall
+// read/write/stat/VFS, devices, services, and broader syscall
 // authority. The bounded root-attributed syscall event slice is below.
 
 import { canonicalJson, canonicalEventOrder, eventDependencies, type QosDependencyKind, brokenChainsIn, processIdFor, parseQosCapabilityScope, scopeAllows, sha256Hex, type QosEvent } from "./qos-process.js";
+
+import { QosScheduler, SCHEDULER_OPS, MAX_SCHEDULER_FRONTIER, type SchedulerOp, type ScheduleView } from "./qos-scheduler.js";
 
 export const QOS_ABI_VERSION = 0;
 
@@ -34,7 +36,7 @@ export const QOS_SYSCALLS = [
   "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open",
   "read", "write", "stat", "mkdir", "unlink", "rename", "mount", "unmount",
   "send", "recv", "listen", "connect", "accept",
-  "svc_register", "svc_lookup", "yield", "sleep", "log",
+  "svc_register", "svc_lookup", "yield", "sleep", "sched_step", "sched_priority", "sched_wake", "log",
 ] as const;
 export type QosSyscallName = (typeof QOS_SYSCALLS)[number];
 
@@ -109,6 +111,19 @@ function signalExitCode(sig: QosSignal): number {
 /** A deterministic, capability-based kernel object table. */
 export class QosKernel {
   private readonly processes = new Map<string, QosProcess>();
+  private scheduler = new QosScheduler();
+
+  scheduleView(): ScheduleView { return this.scheduler.view(); }
+  schedulerFrontier(): string[] { return this.scheduler.frontier(); }
+  schedulerTurn(pid: string, op: SchedulerOp, amount?: number): QosResult<ScheduleView> {
+    return this.scheduler.turn(pid, op, amount);
+  }
+  recordScheduler(eventHash: string, turn = false): void {
+    const changed = this.scheduler.sync(this.list());
+    if (turn) this.scheduler.commitTurn(eventHash);
+    else if (changed) this.scheduler.observe(eventHash);
+  }
+
   private nextPid = 1;
   private nextHandle = 1;
   // Closed handles are removed from the live table but their ancestry remains
@@ -412,6 +427,7 @@ export class QosKernel {
    * A speculative operation must never mutate the committed kernel. */
   cloneForReplay(): QosKernel {
     const copy = new QosKernel();
+    copy.scheduler = this.scheduler.clone();
     copy.nextPid = this.nextPid;
     copy.nextHandle = this.nextHandle;
     for (const [id, parent] of this.lineage) copy.lineage.set(id, parent);
@@ -431,6 +447,7 @@ export class QosKernel {
   state(): Record<string, unknown> {
     return {
       abi: QOS_ABI_VERSION,
+      scheduler: this.scheduler.state(),
       nextPid: this.nextPid,
       nextHandle: this.nextHandle,
       processVersions: [...this.processVersions.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
@@ -502,7 +519,7 @@ export class QosKernel {
 export type QosCanonicalSyscallRequest = {
   schema: "qos.syscall/1";
   caller: string;
-  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal";
+  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp;
   args: Record<string, unknown>;
 };
 export type QosCanonicalSyscallTrace = {
@@ -548,6 +565,17 @@ function parseSyscallRequest(payload: Record<string, unknown>, pid: string): Qos
       if (payload.op === "signal" && !QOS_SIGNALS.includes(args.signal as QosSignal)) return null;
       break;
     }
+    case "sched_step": case "yield": case "sleep": case "sched_priority": case "sched_wake": {
+      const keys = ["scheduleFrontier"];
+      if (payload.op === "sleep") keys.push("ticks");
+      if (payload.op === "sched_priority") keys.push("priority");
+      if (!exactKeys(args, keys) || !Array.isArray(args.scheduleFrontier) ||
+          args.scheduleFrontier.length === 0 || args.scheduleFrontier.length > MAX_SCHEDULER_FRONTIER ||
+          !args.scheduleFrontier.every((v,i,a) => typeof v === "string" && /^[0-9a-f]{64}$/.test(v) && (i === 0 || a[i-1] < v))) return null;
+      if (payload.op === "sleep" && (typeof args.ticks !== "number" || !Number.isSafeInteger(args.ticks))) return null;
+      if (payload.op === "sched_priority" && (typeof args.priority !== "number" || !Number.isSafeInteger(args.priority))) return null;
+      break;
+    }
     default: return null;
   }
   return payload as QosCanonicalSyscallRequest;
@@ -556,6 +584,9 @@ function executeCanonicalSyscall(kernel: QosKernel, request: QosCanonicalSyscall
   const pid = request.caller;
   if (kernel.getProcess(pid)?.state !== "running") return err("ENOENT", "caller is not running");
   switch (request.op) {
+    case "sched_step": case "yield": case "sched_wake": return kernel.schedulerTurn(pid, request.op);
+    case "sleep": return kernel.schedulerTurn(pid, request.op, request.args.ticks as number);
+    case "sched_priority": return kernel.schedulerTurn(pid, request.op, request.args.priority as number);
     case "getpid": return kernel.getpid(pid);
     case "getppid": return kernel.getppid(pid);
     case "cap_derive": return kernel.capDerive(pid, request.args.handle as string, request.args.rights as number, requestHash === undefined ? undefined : `h:request:${requestHash}`);
@@ -574,6 +605,8 @@ function executeCanonicalSyscall(kernel: QosKernel, request: QosCanonicalSyscall
 }
 function syscallVersionsMatch(kernel: QosKernel, request: QosCanonicalSyscallRequest): boolean {
   const args = request.args, pid = request.caller;
+  if (SCHEDULER_OPS.includes(request.op as SchedulerOp))
+    return canonicalJson(args.scheduleFrontier) === canonicalJson(kernel.schedulerFrontier());
   if (typeof args.handle === "string" && args.handleVersion !== kernel.handleVersion(pid, args.handle)) return false;
   if (request.op === "signal" || request.op === "signal_grant")
     return args.targetVersion === kernel.processVersion(args.target as string);
@@ -660,7 +693,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
       const beforeProcesses = kernel.snapshotProcessState();
       const result = kernel.createProcess({ name, owner: event.source, pid: event.process, rootId: `h:start:${event.hash}` });
       if (!result.ok) rejectSyscall(event, result.detail ?? result.errno);
-      else { kernel.recordHandleVersions(before, event.hash); kernel.recordProcessVersions(beforeProcesses, event.hash); starts.set(event.process, event); applied.push(event.hash); }
+      else { kernel.recordHandleVersions(before, event.hash); kernel.recordProcessVersions(beforeProcesses, event.hash); kernel.recordScheduler(event.hash); starts.set(event.process, event); applied.push(event.hash); }
       continue;
     }
     if (event.type === "syscall-request" || event.type === "syscall-result") {
@@ -677,7 +710,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         const request = parseSyscallRequest(event.payload, event.process);
         if (!request) { rejectSyscall(event, "invalid or unsupported syscall payload"); continue; }
         if (!syscallVersionsMatch(kernel, request)) {
-          rejectSyscall(event, "missing, stale or foreign handle/process version"); continue;
+          rejectSyscall(event, "missing, stale or foreign handle/process/scheduler version"); continue;
         }
         requests.set(event.hash, { event, request });
         applied.push(event.hash);
@@ -694,7 +727,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         rejectSyscall(event, "unmatched or repeated syscall result"); continue;
       }
       if (!syscallVersionsMatch(kernel, pending.request)) {
-        rejectSyscall(event, "handle/process version changed before result"); continue;
+        rejectSyscall(event, "handle/process/scheduler version changed before result"); continue;
       }
       const before = kernel.snapshotLiveHandles();
       const beforeProcesses = kernel.snapshotProcessState();
@@ -704,7 +737,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         rejectSyscall(event, "syscall outcome differs from deterministic execution"); continue;
       }
       // Refusals are traceable but cannot publish speculative mutation.
-      if (outcome.ok) { trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); kernel = trial; }
+      if (outcome.ok) { trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); kernel = trial; }
       consumed.add(requestHash);
       syscalls.push({ requestHash, resultHash: event.hash, caller: event.process, op: pending.request.op,
                       args: { ...pending.request.args }, outcome, position });
@@ -725,7 +758,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
     const beforeProcesses = kernel.snapshotProcessState();
     const result = kernel.replayLifecycle(event.process, transition);
     if (!result.ok) rejected.push({ hash: event.hash, reason: result.detail ?? result.errno });
-    else { kernel.recordHandleVersions(before, event.hash); kernel.recordProcessVersions(beforeProcesses, event.hash); applied.push(event.hash); }
+    else { kernel.recordHandleVersions(before, event.hash); kernel.recordProcessVersions(beforeProcesses, event.hash); kernel.recordScheduler(event.hash); applied.push(event.hash); }
   }
   return { kernel, applied, rejected, missingDependencies: order.missingDependencies, cyclicHashes: order.cyclicHashes, syscalls, pendingSyscalls: [...requests.keys()].filter(hash => !consumed.has(hash)) };
 }

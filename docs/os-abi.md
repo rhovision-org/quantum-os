@@ -93,7 +93,8 @@ lands.
 | `send` / `recv` | `handle`, bytes | — | reserved — IPC #281 |
 | `listen` / `connect` / `accept` | address | handle | reserved — `posix-net` adapter #283 |
 | `svc_register` / `svc_lookup` | name, handle | — / handle | reserved — init #284 |
-| `yield` / `sleep` | — / logical ticks | — | reserved — scheduler #278 |
+| `yield` / `sleep` | — / logical ticks | schedule | cooperative scheduler #278 |
+| `sched_step` / `sched_priority` / `sched_wake` | — / 0..3 / — | schedule | cooperative scheduler #278 |
 | `log` | `level`, `message` | — | v0 (kernel trace) |
 
 ## Errors
@@ -114,7 +115,7 @@ for control flow.
 ## Determinism
 
 - No wall clock; `sleep`/`yield` use logical ticks (scheduler #278).
-- No ambient randomness. PIDs and handle ids are monotonically allocated.
+- No ambient randomness. Canonical handle IDs are allocation-event-derived; standalone fixture IDs use counters.
 - Process iteration is sorted by `pid`; handle iteration by `handle id`.
 - `stateDigest()` canonicalizes the process/handle table (sorted keys, sorted arrays)
   and hashes it with SHA-256.
@@ -208,7 +209,37 @@ This is a bounded model of consensual control, not distributed authorization
 finality or cryptographic source authentication. Concurrent conflicting
 histories may invalidate prior speculative receipts; no monotonic acceptance
 is claimed. General cross-process delegation, shared-object conflict policy,
-scheduler and VFS remain open.
+actual execution dispatch, broader scheduler integration and VFS remain open.
+
+## Cooperative scheduler (#278)
+
+The pure `qos-scheduler.ts` model separates lifecycle authority from CPU-turn
+accounting. A running kernel process is eligible for a scheduler task in
+ready/running/blocked/zombie state. A suspended process is blocked; a sleeping
+task is blocked until its logical deadline; exited/reaped processes are zombies.
+Only accepted kernel lifecycle transitions change membership. The selected
+task may spend one logical tick via `sched_step`, rotate via `yield`, sleep
+for 1..1,000,000 logical ticks, or set its priority (0..3) and yield.
+A quantum contains priority+1 turns. Ready arrivals join the tail; simultaneous
+wakeups use bytewise PID order. With N continuously ready tasks a waiting task
+has at most 4(N-1) completed turns of other tasks before selection, assuming
+selected tasks cooperate; arrivals cannot jump ahead. Idle `sched_wake` by
+an active sleeping task moves exactly to the earliest active sleep deadline.
+No wall time or arbitrary caller-controlled clock advancement is used.
+
+The five scheduler operations use the existing embedded syscall request/result
+contract and an exact sorted `args.scheduleFrontier` of accepted event hashes.
+Lifecycle membership changes append receipts; a committed scheduler result
+compacts the frontier to its own hash. The input limit is 4096 outstanding
+receipts; larger uncheckpointed frontiers fail closed (compaction/scale policy
+beyond that bound is not implemented). References are explicit topological
+edges; stale/missing frontiers cannot commit results. The scheduler state,
+frontier and quotas are included in the kernel digest and speculative clone.
+The command adapter supplies the frontier and reports the scheduler view.
+Control-plane syscalls remain independent of CPU-turn accounting; this is
+not an instruction executor or preemptive scheduler. Cooperation is required
+for liveness. Late conflicting histories may invalidate unfinalized receipts.
+The ordinary room root is not a distributed scheduler/finality authority.
 
 ## Security invariants
 

@@ -181,6 +181,8 @@ jobs:
       # and two independent kernels replaying the same operations to one digest.
       - name: QOS kernel ABI test
         run: node packages/browser/test/qos-kernel.test.mjs
+      - name: QOS deterministic scheduler test
+        run: node packages/browser/test/qos-scheduler.test.mjs
       - name: QOS isolated syscall trace test
         run: node packages/browser/test/qos-syscall-journal.test.mjs
 
@@ -204,6 +206,11 @@ jobs:
       # merge in by time without duplicates; minute marks; mentions of names.
       - name: Chat view test
         run: node packages/browser/test/chat-view.test.mjs
+
+      # Room tab names: per-browser uniqueness (with a suggested alternative),
+      # the #/slug address, and invite links that carry the name.
+      - name: Room names test
+        run: node packages/browser/test/room-names.test.mjs
 
       # `/goal` is identity-scoped and local-only; corrupt storage is tolerated,
       # and only the explicit share snapshot leaves the store.
