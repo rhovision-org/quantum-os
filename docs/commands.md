@@ -625,11 +625,11 @@ The command is a thin adapter (`qos-command.ts`); `QosProcessRoom` signs and bro
 
 ### `/ps`
 
-The OS-style process table over the same tracked QOS processes: pid (short), name, status, event count, and owner. It is the same view as `/qos ps`. A locally started process shows `you`; a peer sees the signed owner label it received. The kernel ABI underneath is described in [os-roadmap.md](os-roadmap.md) and [os-abi.md](os-abi.md).
+The OS-style process table over the same tracked QOS processes: pid (short), name, status, event count, and owner. It is the same view as `/qos ps`. A locally started process shows `you`; a peer sees the dyncap-attributed owner label it received. The kernel ABI underneath is described in [os-roadmap.md](os-roadmap.md) and [os-abi.md](os-abi.md).
 
 ### `/kill <name|id>`
 
-Owner-only alias for `/qos terminate`. It emits the same signed lifecycle event; a non-owner is refused, and a process that is already terminated cannot be killed again. It is not a remote DOS primitive: there is no ambient process namespace, only processes this peer has observed and for which it holds the owner grant.
+Owner-only alias for `/qos terminate`. It emits the same dyncap-attributed lifecycle event; a non-owner is refused, and a process that is already terminated cannot be killed again. It is not a remote DOS primitive: there is no ambient process namespace, only processes this peer has observed and for which it holds the owner grant.
 
 ### `/probe [sub]`
 

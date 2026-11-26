@@ -186,6 +186,15 @@ The view exposes `stateDigest` (SHA-256 of the whole view) and `finalDigest`
 matter the arrival order or which peer runs the reducer. Arrival order is not the order:
 causal dependencies first, then `(source anchor, seq, hash)` for otherwise-concurrent events.
 
+`canonicalEventOrder` implements the currently explicit dependencies: event `prev` links and
+non-root capability `grant` links. It uses a deterministic topological order, applying the
+stable tuple only to the ready set. It returns missing-reference and cycle diagnostics;
+cyclic events are never accepted as a valid reducer input (the reducer returns a conflicted
+view). This slice does **not** infer object-version dependencies from arbitrary payloads:
+those require a schema-defined reference vocabulary and are still a #317 integration task.
+The helper's total fallback order is diagnostic only when cycles are present.
+
+
 ## Failure and partial participation
 
 There is no trusted orchestrator to ask, so the reducer reports what it can and

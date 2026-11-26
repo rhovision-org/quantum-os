@@ -2,7 +2,7 @@
 ///
 /// The gate's claim is that the room primitives are enough for long-lived,
 /// named processes: a process is a capability-guarded continuation over the
-/// room's ZFA process space, every lifecycle step is a signed event, and any
+/// room's ZFA process space, every lifecycle step is a dyncap-attributed event, and any
 /// peer can recompute the orchestration result from the same envelopes.
 ///
 /// This module is deliberately **pure and transport-free**:
@@ -554,9 +554,12 @@ export class QosEventLog {
   /// Accepted events in canonical order. Events from a forked source remain
   /// out: `forkedSources` is the quarantine list.
   events(): QosEvent[] {
-    return [...this.eventsByHash.values()]
-      .filter((event) => !this.forkedSources.has(event.source))
-      .sort(compareEvents);
+    const accepted = [...this.eventsByHash.values()]
+      .filter((event) => !this.forkedSources.has(event.source));
+    // The journal's public view is causal, not merely tuple-sorted. Consumers
+    // that need diagnostics must call canonicalEventOrder explicitly; this view
+    // remains total and deterministic for partial/offline logs.
+    return canonicalEventOrder(accepted).ordered;
   }
 
   eventsFor(process: string): QosEvent[] {
@@ -584,10 +587,77 @@ export function compareEvents(a: QosEvent, b: QosEvent): number {
     compareStrings(a.hash, b.hash);
 }
 
-/// Canonical event order used by every deterministic consumer. Arrival order
-/// never matters; source/seq/hash do.
+/**
+ * Causal canonicalization. `prev` and non-root `grant` are explicit hash
+ * dependencies. They are topologically ordered before stable tie-breaking; the
+ * `(source, seq, hash)` tuple is used only among currently-ready events.
+ * Missing references and cycles are returned as deterministic diagnostics rather
+ * than silently being treated as causal edges. Object/version dependencies must
+ * be encoded as explicit references before they can participate here.
+ */
+export function canonicalEventOrder(events: QosEvent[]): {
+  ordered: QosEvent[];
+  missingDependencies: { eventHash: string; dependencyHash: string; kind: "prev" | "grant" }[];
+  cyclicHashes: string[];
+} {
+  const unique = new Map<string, QosEvent>();
+  for (const event of events) if (!unique.has(event.hash)) unique.set(event.hash, event);
+  const nodes = [...unique.values()];
+  const byHash = unique;
+  const deps = new Map<string, Set<string>>();
+  const children = new Map<string, Set<string>>();
+  const missingDependencies: { eventHash: string; dependencyHash: string; kind: "prev" | "grant" }[] = [];
+  for (const event of nodes) {
+    const required = new Set<string>();
+    const refs: { hash: string; kind: "prev" | "grant" }[] = [];
+    if (event.prev !== "genesis") refs.push({ hash: event.prev, kind: "prev" });
+    if (event.grant !== "root") refs.push({ hash: event.grant, kind: "grant" });
+    for (const ref of refs) {
+      if (!byHash.has(ref.hash)) {
+        missingDependencies.push({ eventHash: event.hash, dependencyHash: ref.hash, kind: ref.kind });
+        continue;
+      }
+      if (ref.hash === event.hash) { required.add(ref.hash); continue; }
+      required.add(ref.hash);
+      const childSet = children.get(ref.hash) ?? new Set<string>();
+      childSet.add(event.hash);
+      children.set(ref.hash, childSet);
+    }
+    deps.set(event.hash, required);
+  }
+  missingDependencies.sort((a, b) => compareEvents(byHash.get(a.eventHash)!, byHash.get(b.eventHash)!) || compareStrings(a.kind, b.kind) || compareStrings(a.dependencyHash, b.dependencyHash));
+  const ready = nodes.filter((e) => (deps.get(e.hash)?.size ?? 0) === 0).sort(compareEvents);
+  const ordered: QosEvent[] = [];
+  const emitted = new Set<string>();
+  while (ready.length) {
+    const event = ready.shift()!;
+    if (emitted.has(event.hash)) continue;
+    emitted.add(event.hash);
+    ordered.push(event);
+    for (const childHash of children.get(event.hash) ?? []) {
+      const childDeps = deps.get(childHash);
+      childDeps?.delete(event.hash);
+      if (childDeps && childDeps.size === 0) {
+        const child = byHash.get(childHash)!;
+        ready.push(child);
+        ready.sort(compareEvents);
+      }
+    }
+  }
+  const cyclicHashes = nodes.filter((event) => !emitted.has(event.hash)).map((event) => event.hash).sort(compareStrings);
+  // Keep the result total and deterministic for diagnostic consumers. Cyclic nodes
+  // are appended in stable order, but the returned cycle list marks the order
+  // as invalid; callers must not interpret it as a valid causal replay.
+  ordered.push(...nodes.filter((event) => !emitted.has(event.hash)).sort(compareEvents));
+  return { ordered, missingDependencies, cyclicHashes };
+}
+
+
+/// Canonical order is causal first, stable tuple order among ready events.
+/// This convenience view is total; use canonicalEventOrder diagnostics to detect
+/// incomplete or cyclic dependency graphs before accepting a replay.
 export function canonicalEvents(events: QosEvent[]): QosEvent[] {
-  return [...events].sort(compareEvents);
+  return canonicalEventOrder(events).ordered;
 }
 
 // ---------------------------------------------------------------------------
@@ -822,6 +892,21 @@ export async function orchestrate(
   const conflictedSources = [...forked].sort(compareStrings);
   const rejected: { hash: string; type: string; reason: string }[] = [];
   const finish = (view: Omit<QosProcessView, "stateDigest" | "brokenChains">) => finishView(view, all);
+  const causalOrder = canonicalEventOrder(scoped);
+  if (causalOrder.cyclicHashes.length > 0) {
+    const cyclic = new Set(causalOrder.cyclicHashes);
+    const sources = all.filter((event) => cyclic.has(event.hash)).map((event) => event.source);
+    return finish({
+      process: "", name: "", question: "", status: "conflicted", phase: "conflicted",
+      blocked: "causal-dependency-cycle", quorum: { required: 1, sources: null, met: false, missing: [] },
+      participatingSources: [], nominations: [], poll: null, result: null,
+      winnerIds: [], winnerTexts: [], recordHash: null, finalDigest: null,
+      lemma: null, anchor: null, chainMode: "none", rejected: causalOrder.cyclicHashes.map((hash) => ({ hash, type: "?", reason: "event is part of a causal dependency cycle" })),
+      conflictedSources: [...new Set([...conflictedSources, ...sources])].sort(compareStrings),
+      invalidTransitions: [], eventCount: all.length,
+    });
+  }
+
 
   const starts = all.filter((event) => event.type === "process-start" && !forked.has(event.source));
   if (starts.length === 0) {
@@ -878,7 +963,7 @@ export async function orchestrate(
 
   const byHash = new Map(all.map((event) => [event.hash, event]));
 
-  // Resolve every event's authority first. An event with a valid signature but
+  // Resolve every event's authority first. An event with a valid dyncap chain but
   // no valid grant is not orchestration input; it is reported, not guessed at.
   const resolved = new Map<string, ResolvedCapability>();
   for (const event of all) {
@@ -894,7 +979,7 @@ export async function orchestrate(
   }
   rejected.sort((a, b) => compareStrings(a.hash, b.hash));
 
-  // Lifecycle transitions are root-signed. Invalid transitions are reported
+  // Lifecycle transitions must carry root-capability dyncap attribution. Invalid transitions are reported
   // and skipped; a later valid transition still applies.
   const lifecycle = all
     .filter((event) => LIFECYCLE_TYPES.has(event.type) && event.source === start.source && resolved.has(event.hash))

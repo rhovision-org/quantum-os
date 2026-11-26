@@ -7,7 +7,7 @@
 //
 // It stays deliberately thin. It does not sign anything itself, does not
 // change `/poll` or `/gov`, and does not call a chain. Every lifecycle
-// transition is the signed event `QosProcessRoom` already knows how to make.
+// transition is the dyncap-attributed event `QosProcessRoom` already knows how to make.
 
 import type { DynCapState } from "./dyncap.js";
 import {
@@ -26,7 +26,7 @@ export interface QosCommandHost {
   say: (text: string) => void;
   /** Another peer's display label, for the "who did it" part of a line. */
   label?: (source: string) => string;
-  /** Persist the dyncap sequence after a locally signed event. */
+  /** Persist the dyncap sequence after a locally dyncap-attributed event. */
   onSigned?: () => void;
 }
 
@@ -51,7 +51,7 @@ const USAGE = [
   "  /qos resume <name|id> [| reason]  — owner resumes it",
   "  /qos terminate <name|id> [| reason] — owner ends it",
   "  /qos kill <name|id> [| reason]    — alias for terminate (owner only)",
-  "The events are signed and broadcast; every peer recomputes the same digest.",
+  "The events are dyncap-attributed and broadcast; every peer recomputes the same digest.",
 ];
 
 export class QosCommand {
