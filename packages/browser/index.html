@@ -84,12 +84,13 @@
       cursor: pointer;
       white-space: nowrap;
       user-select: none;
-      max-width: 16rem;
+      flex-shrink: 0;
     }
     .tab:hover { color: #ccc; background: #111; }
     .tab.active { color: #7fdbca; background: #111; border-bottom: 2px solid #7fdbca; padding-bottom: calc(0.35rem - 2px); }
     .tab.unread { color: #ff9d4a; font-weight: 600; }
-    .tab .tab-label { overflow: hidden; text-overflow: ellipsis; }
+    /* A tab shows its whole name — the tab list scrolls rather than cutting one off. */
+    .tab .tab-label { white-space: nowrap; }
     .tab .tab-close {
       background: none;
       border: none;
@@ -110,8 +111,29 @@
       padding: 0 0.8rem;
       font-size: 0.9rem;
       line-height: 1;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      white-space: nowrap;
     }
+    .tab-add .tab-add-word { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.08em; }
     .tab-add:hover { background: #111; color: #aae0d5; }
+    /* The room-name dialog (roomNameDialog in app.ts). */
+    .room-name-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .room-name-card { background: #1b1d23; color: #e8e8ea; border: 1px solid #3a3d46; border-radius: 10px; max-width: 440px; width: 100%; padding: 18px 18px 14px; box-shadow: 0 8px 40px rgba(0,0,0,.5); font: 14px/1.5 system-ui, sans-serif; }
+    .room-name-title { font-weight: 600; font-size: 15px; margin-bottom: 10px; }
+    .room-name-label { display: block; font-size: 12px; opacity: .8; margin-bottom: 4px; }
+    .room-name-input { width: 100%; box-sizing: border-box; background: #0f1013; color: #e8e8ea; border: 1px solid #3a3d46; border-radius: 6px; padding: 8px 10px; font: 14px/1.4 system-ui, sans-serif; }
+    .room-name-input:focus { outline: none; border-color: #7fdbca; }
+    .room-name-preview { font: 11px/1.4 ui-monospace, monospace; color: #777; margin-top: 6px; min-height: 1.4em; word-break: break-all; }
+    .room-name-error { color: #ff9d4a; font-size: 12.5px; margin-top: 4px; min-height: 1.2em; }
+    .room-name-suggest { margin-top: 6px; background: none; border: 1px solid #2a8a76; color: #7fdbca; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12.5px; }
+    .room-name-suggest[hidden] { display: none; }
+    .room-name-suggest:hover { background: #12302a; }
+    .room-name-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+    .room-name-cancel { background: #2a2d35; color: #e8e8ea; border: 1px solid #3a3d46; border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+    .room-name-ok { background: #3b6ef5; color: #fff; border: none; border-radius: 6px; padding: 7px 14px; cursor: pointer; font-weight: 600; }
+    .room-name-ok:disabled { opacity: .45; cursor: not-allowed; }
     .tab-add-wrap { position: relative; display: flex; }
     .tab-menu {
       position: absolute;
@@ -653,9 +675,9 @@
   <div id="tab-bar" class="tab-bar">
     <div id="tab-list" class="tab-list"></div>
     <div class="tab-add-wrap">
-      <button id="tab-add" class="tab-add" title="Add a room tab" aria-haspopup="menu" aria-expanded="false">+</button>
+      <button id="tab-add" class="tab-add" title="Add a room tab" aria-haspopup="menu" aria-expanded="false">+<span class="tab-add-word">ROOM</span></button>
       <div id="tab-menu" class="tab-menu" role="menu" hidden>
-        <button id="tab-new" class="tab-menu-item" role="menuitem">New room<span>create a fresh room tab</span></button>
+        <button id="tab-new" class="tab-menu-item" role="menuitem">New room…<span>name it and open a fresh room tab</span></button>
         <button id="tab-join" class="tab-menu-item" role="menuitem">Join room…<span>paste a room link or capability</span></button>
       </div>
     </div>
