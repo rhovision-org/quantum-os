@@ -126,6 +126,31 @@ export function speakerTracker(threshold = 0.03, hold = 2) {
   };
 }
 
+/** How long a tile stays marked `speaking` after its voice was last heard. */
+export const SPEAKING_HOLD_MS = 3000;
+
+/**
+ * Who should carry the `speaking` highlight. The raw "loudest right now" drops
+ * out at every breath and pause, so the highlight blinked on and off mid-
+ * sentence; instead each peer stays marked until `holdMs` after they were last
+ * the loudest voice. Pure — the clock is passed in — so it can be tested.
+ */
+export function speakingHold(holdMs = SPEAKING_HOLD_MS) {
+  const lastHeard = new Map<string, number>();
+  return {
+    /** Feed the loudest peer now (or null) and the time; returns who is speaking. */
+    update(loud: string | null, now: number): Set<string> {
+      if (loud) lastHeard.set(loud, now);
+      const speaking = new Set<string>();
+      for (const [id, t] of lastHeard) {
+        if (now - t < holdMs) speaking.add(id); else lastHeard.delete(id);
+      }
+      return speaking;
+    },
+    drop(id: string): void { lastHeard.delete(id); },
+  };
+}
+
 export interface Calls {
   /** Start if idle, hang up if in a call. */
   toggle(): void;
@@ -189,8 +214,10 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
   let actx: AudioContext | null = null;
   const meters = new Map<string, Meter>();
   let meterTimer: ReturnType<typeof setInterval> | null = null;
-  /** The peer making sound right now (not sticky, unlike the speaker). */
-  let loudNow: string | null = null;
+  /** Peers heard within the last SPEAKING_HOLD_MS — the `speaking` highlight.
+   *  Held through pauses, but not sticky like the speaker. */
+  const speakingTracker = speakingHold();
+  let speakingNow = new Set<string>();
 
   function audioContext(): AudioContext | null {
     const g = globalThis as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext };
@@ -226,7 +253,8 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
     try { m.src.disconnect(); } catch { /* already gone */ }
     meters.delete(peerId);
     speaker.drop(peerId);
-    if (loudNow === peerId) loudNow = null;
+    speakingTracker.drop(peerId);
+    speakingNow.delete(peerId);
     if (meters.size === 0 && meterTimer !== null) { clearInterval(meterTimer); meterTimer = null; }
   }
 
@@ -244,7 +272,10 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
     }
     const before = speaker.current();
     const now = speaker.update(levels);
-    if (now !== before || loud !== loudNow) { loudNow = loud; layout(); }
+    const speaking = speakingTracker.update(loud, Date.now());
+    const changed = speaking.size !== speakingNow.size || [...speaking].some((id) => !speakingNow.has(id));
+    speakingNow = speaking;
+    if (now !== before || changed) layout();
   }
 
   // --- layout ---------------------------------------------------------------
@@ -264,7 +295,7 @@ export function createCalls(host: CallHost, els: CallElements): Calls {
       if (!wrap) continue;
       wrap.classList.remove(...STAGE);
       wrap.style.gridRow = "";
-      if (key === loudNow) wrap.classList.add("speaking"); else wrap.classList.remove("speaking");
+      if (speakingNow.has(key)) wrap.classList.add("speaking"); else wrap.classList.remove("speaking");
       const btn = wrap.querySelector(".call-zoom") as HTMLElement | null;
       if (!stage) {
         if (btn && expanded !== key) { btn.textContent = "⛶"; btn.title = "Show this big"; }
