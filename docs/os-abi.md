@@ -124,10 +124,10 @@ for control flow.
 - A replay is the same ordered operation sequence; two kernels that receive it must
   produce the same `stateDigest()`.
 
-## Planned syscall event payload
+## Canonical syscall event payload (bounded #317 slice)
 
-This is the payload shape carried inside a `qos.event/1` event; v0 does not emit it.
-`qos.syscall/1` never forms a parallel journal.
+This is the payload shape carried inside a `qos.event/1` event. The bounded root-attributed implementation accepts getpid, getppid, cap_derive, cap_close, cap_revoke, signal_grant and signal. Broader ops remain planned.
+`qos.syscall/1` never forms a parallel journal. The internal `qos.test-trace/1` harness is only a local test fixture: it is neither admitted to a room nor exposed as a public API. Its ordered test input does not establish network-order convergence; that remains a canonical event integration obligation.
 
 ```json
 {
@@ -139,10 +139,8 @@ This is the payload shape carried inside a `qos.event/1` event; v0 does not emit
   "payload": {
     "schema": "qos.syscall/1",
     "caller": "qos:proc:…",
-    "op": "open",
-    "handle": "h:3",
-    "args": { "object": "file:notes/plan.md", "rights": 3 },
-    "nonce": "…"
+    "op": "cap_derive",
+    "args": { "handle": "h:1", "rights": 3 }
   }
 }
 ```
@@ -160,12 +158,66 @@ Validation order:
 5. the operation mutates only the caller's namespace or an object the handle names.
 
 A refused syscall is a recorded `syscall-result` event carrying the errno, not a local-only
-error, so every peer can audit and replay it.
+error, so every peer can audit and replay it. The result payload is
+`{schema:"qos.syscall/1", requestHash, outcome}` and must directly follow that
+request on the same process/source chain. A request is inert until a valid result
+recomputes at its canonical position; false results cannot commit trial state.
+A refused operation is a deterministic outcome, not a malformed-envelope rejection.
+New process roots explicitly include both event types; existing roots without the
+scope stay unauthorized. Older clients reject this event-vocabulary extension:
+coordinate support before deployment. `/qos syscall <name|id> | <op> | <JSON args>`
+exercises the bounded path; `/qos status` exposes the replayed kernel digest.
+Replay refuses multiple starts for the same PID rather than selecting an owner,
+requires the declared process identity/root scope, and checks lifecycle rights.
+Canonical replay roots use `h:start:<process-start hash>`, and cap_derive
+successes use `h:request:<syscall-request hash>`. Neither consumes the local
+sequential handle allocator. This keeps IDs and outcomes stable when unrelated
+earlier event chains arrive. The standalone kernel fixture API still uses local
+numbered handles. Existing experimental canonical histories containing numbered
+handle IDs have no automatic migration: coordinated clients must start a new
+journal or explicitly migrate its receipts rather than reinterpret them.
+A known caller-owned handle must additionally carry `args.handleVersion`, the
+hash of its latest accepted creation or mutation event. Roots are stamped by
+process-start; derived handles by successful results; close/revoke/termination
+stamp affected handles, including tombstones. The dispatcher supplies the
+observed version by default. Missing/stale/foreign versions fail replay;
+a genuinely unknown caller handle without a version may yield EBADF. The
+version index lives in the replay digest and is copied with speculative state.
+Request/result and handle-version hashes are explicit causal dependencies,
+not inferred from arbitrary strings. The bounded cross-process extension permits only target-owner consent:
+`signal_grant` runs as the target process and names its own root as `handle`,
+and the recipient PID as `target`. It creates a target-side SIGNAL|REVOKE
+parent and a recipient-side SIGNAL-only handle to exactly the granting process,
+with stable allocation IDs derived from the request hash. The recipient uses
+`signal` with the exact handle, target PID, and finite signal name. Per #278, SIGKILL additionally requires the target owner (the caller and target share the owner anchor); delegated cross-owner SIGNAL alone cannot authorize SIGKILL. A refusal is journaled as EACCES. The
+target-side revoker can revoke the delegated handle using `cap_revoke`.
+A root with room-wide rights cannot itself signal a different process, and
+generic `open` is not exposed as a journal syscall. Self-signal requires the
+caller root. Terminating signals clear target handles; suspended children
+cannot be reaped by wait.
+
+Both new operations carry `targetVersion`, the observed receipt for the
+target/recipient process lifecycle state (state, exit code, pending signals).
+The process version index is replay-derived, cloned and hashed with kernel
+state. Explicit process-version edges are included in the causal graph, and
+both handle and process versions are rechecked before result commit. The
+command adapter fills observed versions and rejects stale inputs before
+publication. Kernel status is displayed separately from governance orchestration.
+
+This is a bounded model of consensual control, not distributed authorization
+finality or cryptographic source authentication. Concurrent conflicting
+histories may invalidate prior speculative receipts; no monotonic acceptance
+is claimed. General cross-process delegation, shared-object conflict policy,
+scheduler and VFS remain open.
 
 ## Security invariants
 
 1. A handle never outlives its process.
 2. Kernel-handle revocation invalidates descendants; a revoked handle returns `EACCES`.
+   Preserve allocation lineage even when an intermediate handle is closed or a
+   process is reaped; closing a handle is not a revocation boundary. A spawned
+   root inherits the image handle's lineage. The lineage ledger is part of the
+   replay digest and speculative clone. Compaction is not yet implemented.
    Distributed proxy revocation for already-disclosed bearer capabilities is a separate
    mechanism ([#107](https://github.com/rhovision-org/quantum-os/issues/107)).
 3. Closing a handle returns it to `EBADF`; it is not silently reissued with old rights.

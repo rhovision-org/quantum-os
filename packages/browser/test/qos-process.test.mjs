@@ -92,7 +92,7 @@ console.log("\nevent model");
 eq("the event vocabulary is finite and explicit", Q.QOS_EVENT_TYPES, [
   "process-start", "process-suspend", "process-resume", "process-terminate",
   "capability-grant", "nomination", "poll-open", "ballot", "poll-close",
-  "lemma", "anchor",
+  "lemma", "anchor", "syscall-request", "syscall-result",
 ]);
 ok("an unknown type is rejected", Q.parseQosEvent({ kind: "qos-event", schema: Q.QOS_EVENT_SCHEMA, type: "unknown" }) === null);
 ok("a non-event is rejected", Q.parseQosEvent(null) === null);
@@ -371,6 +371,33 @@ console.log("\nsource fork");
   ok("the forked source is quarantined", log.forkedSources.has(stA.anchor) && log.events().length === 0);
   const view = await Q.orchestrate(log.events(), { forkedSources: log.forkedSources });
   ok("a quarantined source cannot make the reducer guess", view.finalDigest === null && view.conflictedSources.includes(stA.anchor));
+  const simultaneous = new Q.QosEventLog(ROOM);
+  const results = await Promise.all([simultaneous.ingest(eventA), simultaneous.ingest(eventB)]);
+  ok("concurrent conflicting admissions cannot race past the fork gate", results.filter(r => r.fork).length === 1 && simultaneous.events().length === 0 && simultaneous.forkedSources.has(stA.anchor));
+  const recovered = new Q.QosEventLog(ROOM);
+  await recovered.ingest(eventA);
+  await recovered.mergeFrom(simultaneous);
+  ok("merge relays both branches and independently reproduces quarantine", recovered.forkedSources.has(stA.anchor) && recovered.events().length === 0);
+  const isolated = new Q.QosEventLog(ROOM);
+  const mutable = clone(eventA);
+  const intake = isolated.ingest(mutable);
+  mutable.payload.question = "changed during admission";
+  ok("admission owns a snapshot before the first await", (await intake).ok && isolated.events()[0].payload.question === "one");
+  isolated.events()[0].payload.question = "changed after admission";
+  ok("journal reads cannot mutate retained verified envelopes", isolated.events()[0].payload.question === "one");
+  const same = new Q.QosEventLog(ROOM);
+  const duplicates = await Promise.all([same.ingest(eventA), same.ingest(eventA)]);
+  ok("concurrent duplicate deliveries are idempotent", duplicates.every(r => r.ok) && duplicates.filter(r => r.duplicate).length === 1 && same.events().length === 1);
+  const concurrentSigner = new Q.QosEventSigner(await D.newDynCapState(new Uint8Array(32).fill(33)), ROOM);
+  const mutablePayload = {...payloadA};
+  const signing = concurrentSigner.sign(pid, cap, "root", "process-start", mutablePayload);
+  mutablePayload.question = "changed during signing";
+  const next = concurrentSigner.sign(pid, cap, "root", "process-suspend", {});
+  const [firstSigned, secondSigned] = await Promise.all([signing, next]);
+  ok("signer snapshots payload and serializes predecessor assignment", firstSigned.payload.question === "one" && secondSigned.prev === firstSigned.hash && secondSigned.seq > firstSigned.seq);
+  const special = JSON.parse('{"__proto__":{"x":1},"a":2}');
+  ok("canonical JSON commits to prototype-named own keys", Q.canonicalJson(special) === '{"__proto__":{"x":1},"a":2}' && Q.canonicalJson(special) !== Q.canonicalJson({a:2}));
+
 }
 // The reducer must fail closed on explicit causal cycles even when supplied raw
 // events (the room log normally rejects/diagnoses them before this boundary).
