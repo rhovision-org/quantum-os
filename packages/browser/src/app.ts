@@ -9543,9 +9543,11 @@ function showWelcome(): void {
   const div = document.createElement("div");
   div.className = "welcome";
   div.innerHTML =
-    "<h3>⬡ Welcome to QuantumOS</h3>" +
+    // Relative, so it resolves under the /quantum-os/ base in production and
+    // at the root in dev (the page is always the app root; rooms are the hash).
+    "<h3><img class=\"welcome-icon\" src=\"qos-icon.svg\" alt=\"\">Welcome to QuantumOS</h3>" +
     "<p>A peer-to-peer room — no server holds your data.</p>" +
-    "<p>Please first choose your geek level on the top right. Then:</p>" +           
+    "<p>Please first choose your geek level on the top right. Then:</p>" +
     "<ol>" +
     "<li>Set a <strong>display name</strong> in the left sidebar.</li>" +
     "<li>Click <strong>Connect</strong>, then <strong>copy</strong> the share link and send it to a peer.</li>" +
@@ -9560,7 +9562,7 @@ function showWelcome(): void {
   const plain = document.createElement("div");
   plain.className = "welcome geek-low";
   plain.innerHTML =
-    "<h3>👋 Welcome</h3>" +
+    "<h3><img class=\"welcome-icon\" src=\"qos-icon.svg\" alt=\"\">Welcome</h3>" +
     "This is a private room. Nothing is stored on a server — it lives with the people in it." +
     "<ol>" +
     "<li>Type <strong>your name</strong> on the left.</li>" +

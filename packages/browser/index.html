@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
   <meta name="description" content="QuantumOS (QOS): an intelligent gateway to each other and everything — the rho ZFA peer-to-peer layer, proven secure. No server, no accounts: possessing a capability token is authorization." />
   <title>QuantumOS — P2P Room</title>
+  <link rel="icon" type="image/svg+xml" href="/qos-icon.svg" />
   <!-- Geek level (src/geek.ts), applied before first paint so a "low" page
        never flashes the full one. -->
   <script>
@@ -42,7 +43,8 @@
       gap: 1rem;
     }
 
-    header h1 { font-size: 1rem; color: #7fdbca; letter-spacing: 0.05em; }
+    header h1 { font-size: 1rem; color: #7fdbca; letter-spacing: 0.05em; line-height: 0; }
+    header h1 .logo { height: 1.9rem; width: auto; display: block; }
     header .tag { font-size: 0.7rem; color: #555; flex: 1; }
 
     #sidebar-toggle {
@@ -622,7 +624,8 @@
 
     /* Onboarding / empty state */
     .welcome { color:#9a9a9a; font-size:0.78rem; line-height:1.7; border:1px dashed #262626; border-radius:8px; padding:1rem 1.1rem; margin:0.5rem 0; }
-    .welcome h3 { color:#7fdbca; font-size:0.85rem; margin-bottom:0.5rem; }
+    .welcome h3 { color:#7fdbca; font-size:0.85rem; margin-bottom:0.5rem; display:flex; align-items:center; gap:0.5rem; }
+    .welcome h3 .welcome-icon { height:2em; width:2em; flex:none; }
     .welcome ol { margin:0.4rem 0 0.4rem 1.1rem; }
     .welcome li { margin:0.2rem 0; }
     .welcome code { background:#1a1a1a; border:1px solid #262626; border-radius:3px; padding:0 0.25rem; color:#aae0d5; }
@@ -632,7 +635,7 @@
 <body>
   <header>
     <button id="sidebar-toggle" aria-label="Toggle sidebar">☰</button>
-    <h1>⬡ QuantumOS</h1>
+    <h1><img class="logo" src="/qos-logo.svg" alt="QuantumOS" width="2200" height="500"></h1>
     <span class="tag geek-med" title="An intelligent gateway to each other and everything — the rho ZFA p2p layer, proven secure.">gateway to each other and everything · rho ZFA p2p, proven secure</span>
     <a href="https://github.com/rhovision-org/quantum-os#readme" class="geek-med"
        target="_blank" rel="noopener"
