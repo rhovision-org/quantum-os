@@ -2266,6 +2266,7 @@ function pickFreeNote(currency: string, N: number): NoteEntry | null {
 }
 
 function detachFromFree(chosen: NoteEntry, N: number): { outgoing: string; change: NoteEntry | null } | null {
+  if (!validateCapability(chosen.token)) return null;
   if (chosen.denomination === N) {
     noteStore.delete(chosen.token);
     return { outgoing: chosen.token, change: null };
@@ -2273,6 +2274,7 @@ function detachFromFree(chosen: NoteEntry, N: number): { outgoing: string; chang
   const split = splitNote(chosen.token, N);
   if (!split) return null;
   const [paid, changeTok] = split;
+  if (noteStore.has(paid) || noteStore.has(changeTok) || lockedNotes.has(paid) || lockedNotes.has(changeTok)) return null;
   const change: NoteEntry = { token: changeTok, currency: chosen.currency, denomination: chosen.denomination - N };
   noteStore.delete(chosen.token);
   noteStore.set(changeTok, change);
@@ -5473,6 +5475,7 @@ function handleCommand(raw: string): string[] {
       // outgoing token and (if split) the change note already re-registered.
       // Always undoable by re-adding `chosen` and removing `change`.
       const detach = (chosen: NoteEntry, N: number): { outgoing: string; change: NoteEntry | null } | null => {
+        if (!validateCapability(chosen.token)) return null;
         if (chosen.denomination === N) {
           noteStore.delete(chosen.token);
           return { outgoing: chosen.token, change: null };
@@ -5480,6 +5483,7 @@ function handleCommand(raw: string): string[] {
         const split = splitNote(chosen.token, N);
         if (!split) return null;
         const [paid, changeTok] = split;
+        if (noteStore.has(paid) || noteStore.has(changeTok) || lockedNotes.has(paid) || lockedNotes.has(changeTok)) return null;
         const change: NoteEntry = { token: changeTok, currency: chosen.currency, denomination: chosen.denomination - N };
         noteStore.delete(chosen.token);
         noteStore.set(changeTok, change);
@@ -5601,6 +5605,7 @@ function handleCommand(raw: string): string[] {
             unit = currency;
             note = mintNote(currency, N);
           }
+          if (noteStore.has(note) || lockedNotes.has(note)) { sys("mint refused: token collision; no new note issued"); break; }
           noteStore.set(note, { token: note, currency: unit, denomination: N });
           saveNotes();
           renderNotes();
@@ -5686,8 +5691,9 @@ function handleCommand(raw: string): string[] {
           const held = noteStore.get(tokenArg);
           if (!held) { sys(`you don't hold that note`); break; }
           const split = splitNote(tokenArg, a);
-          if (!split) { sys(`invalid split: a must be 1..${held.denomination - 1}`); break; }
+          if (!split) { sys("split refused: invalid amount, closure, or identical children; original retained"); break; }
           const [t1, t2] = split;
+          if (noteStore.has(t1) || noteStore.has(t2) || lockedNotes.has(t1) || lockedNotes.has(t2)) { sys("split refused: token collision; original retained"); break; }
           noteStore.delete(tokenArg);
           noteStore.set(t1, { token: t1, currency: held.currency, denomination: a });
           noteStore.set(t2, { token: t2, currency: held.currency, denomination: held.denomination - a });
@@ -5708,7 +5714,7 @@ function handleCommand(raw: string): string[] {
           if (!h1 || !h2) { sys("both tokens must be notes you hold"); break; }
           if (h1.currency !== h2.currency) { sys(`currency mismatch: ${h1.currency} vs ${h2.currency}`); break; }
           const merged = mergeNotes(t1Arg, t2Arg);
-          if (!merged) { sys("merge failed"); break; }
+          if (!merged || noteStore.has(merged) || lockedNotes.has(merged)) { sys("merge refused: invalid input or token collision; originals retained"); break; }
           noteStore.delete(t1Arg);
           noteStore.delete(t2Arg);
           noteStore.set(merged, { token: merged, currency: h1.currency, denomination: h1.denomination + h2.denomination });
