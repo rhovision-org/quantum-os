@@ -40,8 +40,8 @@ import { QosCommand } from "./qos-command.js";
 import { pickAskAgent, agentAskText, liveAgentTarget, agentCommand } from "./agent-ask.js";
 import { AGENT_ROLES, STANDARD_SKILLS, AGENT_PROVIDERS, AGENT_DOCS_URL, parseAgentRequest, providerOf, agentShellCommand, agentClaudePrompt, maskCap,
          parseGrantArgs, parseRevokeArgs, parseForkArgs, OWNER_TOKEN_RE, FORK_TOKEN_RE } from "./agent-invite.js";
-import { GoalStore, parseGoalAdd } from "./goal-store.js";
 import { successSnapshot, renderSuccessPanel } from "./success-panel.js";
+import { GoalStore, parseGoalAdd } from "./goal-store.js";
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
 import { hashBlob, entryFromWire, sortEntries, findEntry, describeEntry, shortHash,
