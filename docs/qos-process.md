@@ -78,6 +78,8 @@ The finite event vocabulary:
 | `poll-close` | Root-attributed: stop accepting ballots. |
 | `lemma` | Root-attributed lemma-of-record carrying the tally `recordHash`. |
 | `anchor` | Optional, anchor-authorized event carrying a deploy reference. |
+| `syscall-request` | Root-attributed embedded qos.syscall/1 request; no mutation yet. |
+| `syscall-result` | Root-attributed matching deterministic outcome, including errno; replay commits only a verified success. |
 
 Canonical JSON sorts object keys recursively and preserves array order. Both a
 room peer and a rholo/rholalc consumer hash the same bytes, so a payload hash
@@ -185,6 +187,24 @@ The view exposes `stateDigest` (SHA-256 of the whole view) and `finalDigest`
 (the record hash once a lemma is recorded). Same envelopes ⇒ same digests, no
 matter the arrival order or which peer runs the reducer. Arrival order is not the order:
 causal dependencies first, then `(source anchor, seq, hash)` for otherwise-concurrent events.
+
+`canonicalEventOrder` implements the currently explicit dependencies: event `prev` links and
+non-root capability `grant` links. It uses a deterministic topological order, applying the
+stable tuple only to the ready set. It returns missing-reference and cycle diagnostics;
+cyclic events are never accepted as a valid reducer input (the reducer returns a conflicted
+view). This slice recognizes only explicit syscall request, handle-version, process-version and scheduler-frontier dependencies in the bounded ABI. Other object/version dependencies need schema-defined references; arbitrary payload strings are never treated as edges.
+The helper's total fallback order is diagnostic only when cycles are present.
+
+The local journal admission queue serializes asynchronous verification and commit,
+so simultaneous arrivals at the same source/sequence cannot both pass an earlier
+empty check. Signing also snapshots the payload and serializes predecessor
+assignment per signer. Accepted event values and returned views are isolated
+JSON snapshots. Canonical JSON preserves own keys named `__proto__`.
+Merge between same-room log instances carries the retained conflicting envelopes,
+so the recipient detects the conflict locally rather than trusting a quarantine
+flag. This does not implement a network fork-evidence gossip protocol or add
+cryptographic authenticity to dyncap.
+
 
 ## Failure and partial participation
 

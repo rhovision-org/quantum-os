@@ -166,35 +166,6 @@ AI is an assistant, not an authority:
 - personal goals/habits are not sent to a model without explicit consent;
 - deterministic recipes work with no AI at all.
 
-## RhoQu authoring preview / explicit approval
-
-An agent may draft a source program, but it never obtains the room execution
-authority. The owner must inspect the exact lowered commands through:
-
-    /rhoqu preview process P(x) { /lemma $x; } P(example);
-    /rhoqu approve <24-hex-token>
-    /rhoqu cancel <token>
-    /rhoqu pending
-
-Preview is side-effect-free: any on-handler registration is captured, not
-installed. The exact expanded commands and handlers are presented in the
-local transcript. Approving requires both the opaque one-use token and a
-browser confirmation dialog. Approval tokens are bound to room, dyncap
-identity, and a snapshot of relevant room state and expire after 10 minutes.
-A room/identity change, intervening state drift, expiration or replay causes
-a refusal. Source containing a raw room capability is refused; input length
-and expanded command counts are bounded. Dispatch still uses the ordinary
-per-command capability/authorization checks. Asynchronous results are not
-represented as completed until observed separately.
-
-A directly typed /rhoqu <source> remains available for backwards
-compatibility. An imported or generated program should be treated as
-untrusted and must use preview/approve, not that legacy direct path.
-The system does not autonomously run messages returned by /ask.
-
-Test: node packages/browser/test/rhoqu-preview.test.mjs. This tests the
-preflight state machine, not browser confirmation UX.
-
 ## What is implemented
 
 - identity-scoped, private `/goal` store and explicit `/goal share`;

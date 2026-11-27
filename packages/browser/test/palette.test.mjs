@@ -76,7 +76,7 @@ input.value = ""; ran.length = 0;
 button("ask").fire("click");
 check("fill does not run anything itself", ran.length === 0, JSON.stringify(ran));
 check("fill does not start a guided collection", !palette.guiding(), "started guiding");
-check("fill leaves the command in the box to finish typing", input.value === "/ask ", input.value);
+check("fill leaves the command in the box to finish typing", input.value === "/facil ask ", input.value);
 
 // --- an action with arguments asks for them ----------------------------------
 ran.length = 0;

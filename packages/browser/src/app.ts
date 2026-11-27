@@ -37,9 +37,10 @@ import { parseDefinition, parseInvocation, expandCommand, expandCallSites,
          MACRO_NAME_RE, MAX_BODY } from "./macro-lang.js";
 import { createCalls, type Calls } from "./calls.js";
 import { QosCommand } from "./qos-command.js";
-import { pickAskAgent, agentAskText, liveAgentTarget } from "./agent-ask.js";
+import { pickAskAgent, agentAskText, liveAgentTarget, agentCommand } from "./agent-ask.js";
+import { AGENT_ROLES, STANDARD_SKILLS, AGENT_PROVIDERS, AGENT_DOCS_URL, parseAgentRequest, providerOf, agentShellCommand, agentClaudePrompt, maskCap,
+         parseGrantArgs, parseRevokeArgs, parseForkArgs, OWNER_TOKEN_RE, FORK_TOKEN_RE } from "./agent-invite.js";
 import { GoalStore, parseGoalAdd } from "./goal-store.js";
-import { RhoQuPreviewStore } from "./rhoqu-preview.js";
 import { successSnapshot, renderSuccessPanel } from "./success-panel.js";
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
@@ -60,11 +61,16 @@ import { loadConfig as loadNodeConfig, saveConfig as saveNodeConfig, describeCon
          registryUriOf, powerboxUsed, DEFAULT_CONFIG as DEFAULT_NODE_CONFIG,
          readResult, readResultRecord, syncResultNonce, deployAnswer, deployVerdict,
          type NodeConfig } from "./rholang.js";
+import { transcriptForSync, sanitizeTranscript, mergeTranscript, needsTimeMark, timeMarkText, findMentions,
+         type TranscriptLine } from "./chat-view.js";
 import { qucalcSearch, qucalcSolve,
          type SearchDone as QucalcSearchDone } from "./qucalc-search.js";
+import { checkRoomName, slugify, findRoomBySlug, parseRoomHash, buildRoomHash,
+         nameFromInvite, ROOM_NAME_MAX } from "./room-names.js";
 
 // ---------------------------------------------------------------------------
-// Room ID from URL hash: #room=cap:..., or generate a new one and set hash.
+// Room ID from URL hash: #/slug?room=cap:..., #room=cap:... (legacy), or a
+// bare #/slug naming a room this browser has joined — else generate a new one.
 //
 // A room cap is a bearer capability: reading it IS joining. The address bar is
 // therefore the leakiest surface in the app — it is in every screen share,
@@ -81,36 +87,103 @@ const ACTIVE_ROOM_KEY = "qos-active-room";
 /** Keep the room cap out of the address bar. On unless explicitly turned off. */
 let hideRoom = localStorage.getItem(HIDE_ROOM_KEY) !== "no";
 
+// ---------------------------------------------------------------------------
+// Room names — what a tab is called (room-names.ts)
+//
+// roomId → name, per browser (`qos-room-names`). A name is a label, never an
+// authority: it rides an invite link as `name=` beside the cap so the joiner's
+// tab reads the same, and its slug is what the address bar shows when the cap
+// is hidden (`#/my-room`). Unique among the rooms this browser has joined.
+// ---------------------------------------------------------------------------
+
+const ROOM_NAMES_KEY = "qos-room-names";
+const roomNames: Map<string, string> = (() => {
+  try {
+    const obj = JSON.parse(localStorage.getItem(ROOM_NAMES_KEY) || "{}");
+    if (obj && typeof obj === "object") {
+      return new Map(Object.entries(obj).filter((e): e is [string, string] => typeof e[1] === "string"));
+    }
+  } catch { /* corrupt store: start empty */ }
+  return new Map<string, string>();
+})();
+
+function saveRoomNames(): void {
+  try { localStorage.setItem(ROOM_NAMES_KEY, JSON.stringify(Object.fromEntries(roomNames))); }
+  catch { /* storage refused: names last for this session */ }
+}
+
+function setRoomName(roomId: string, name: string | null): void {
+  if (name) roomNames.set(roomId, name); else roomNames.delete(roomId);
+  saveRoomNames();
+}
+
+/** What a tab, a list line or a message calls a room. */
+function roomDisplayName(roomId: string): string {
+  return roomNames.get(roomId) ?? shortId(roomId);
+}
+
+/**
+ * Take the name an invite link carries for a room this browser has not named.
+ * A name already used here by another room gets the suggested variant instead,
+ * so names stay unique; returns a line saying so, or null.
+ */
+function adoptInviteName(roomId: string, invited: string | null): string | null {
+  if (!invited || roomNames.has(roomId)) return null;
+  const check = checkRoomName(invited, roomNames, roomId);
+  if (check.ok) { setRoomName(roomId, check.name); return null; }
+  if (check.suggestion) {
+    setRoomName(roomId, check.suggestion);
+    return `this browser already has a room named “${invited}” — calling the new one “${check.suggestion}” here (/room name to change it)`;
+  }
+  return null;
+}
+
+/** Said once the chat is up: the address bar named a room this browser doesn't know. */
+let pendingRoomNotice: string | null = null;
+
 function getRoomId(): string {
-  const params = new URLSearchParams(window.location.hash.slice(1));
+  const { slug, params } = parseRoomHash(window.location.hash);
   const existing = params.get("room");
   if (existing) return existing;
+  const joined = loadJoinedRooms();
+  // `#/my-room`: a room this browser has joined, by name. A slug is not a
+  // capability, so one this browser doesn't know can't be opened — say so.
+  if (slug) {
+    const byName = findRoomBySlug(slug, roomNames);
+    if (byName && joined.includes(byName)) return byName;
+    pendingRoomNotice = `no room called “${slug}” in this browser — a name only opens rooms you've joined here; `
+      + "to join someone else's, use their invite link (it carries the room capability)";
+  }
   // No room in the URL is the ordinary case once the cap is hidden, so the
   // room you were last in has to be remembered somewhere else — otherwise a
   // reload would mint a fresh room and leave the real one as a stray tab.
   const last = localStorage.getItem(ACTIVE_ROOM_KEY);
-  if (last && loadJoinedRooms().includes(last)) return last;
-  const id = generateCapability("room");
-  params.set("room", id);
-  if (!hideRoom) window.location.hash = params.toString();
-  return id;
+  if (last && joined.includes(last)) return last;
+  return generateCapability("room");
+}
+
+/** The hash for a room: `#/slug` always (when named), plus name + cap unless hidden. */
+function roomHash(roomId: string, withCap: boolean): string {
+  const name = roomNames.get(roomId) ?? null;
+  const params = new URLSearchParams();
+  if (withCap) {
+    if (name) params.set("name", name);
+    params.set("room", roomId);
+  }
+  return buildRoomHash(name ? slugify(name) : null, params);
 }
 
 /**
- * The address bar follows the active room — or carries nothing, in which case
- * this is also the only record of which room that was.
+ * The address bar follows the active room — its name as a slug, and the cap
+ * only when it isn't hidden. Always replaceState: switching rooms never reloads
+ * the page or adds a history entry per tab click. When the cap is hidden this
+ * is also the only record of which room that was.
  */
 function syncRoomHash(): void {
   localStorage.setItem(ACTIVE_ROOM_KEY, activeRoom.roomId);
-  if (hideRoom) {
-    if (window.location.hash) {
-      history.replaceState(null, "", window.location.pathname + window.location.search);
-    }
-    return;
-  }
-  const params = new URLSearchParams(window.location.hash.slice(1));
-  params.set("room", activeRoom.roomId);
-  history.replaceState(null, "", `#${params.toString()}`);
+  const url = window.location.pathname + window.location.search + roomHash(activeRoom.roomId, !hideRoom);
+  const current = window.location.pathname + window.location.search + window.location.hash;
+  if (url !== current) history.replaceState(null, "", url);
 }
 
 function setHideRoom(on: boolean): void {
@@ -216,7 +289,15 @@ interface ProbeWindow {
 
 // Per-room chat history so tab switching can replay the messages area.
 type ChatKind = "peer" | "self" | "system";
-interface ChatLine { from: string; text: string; kind: ChatKind; label?: string; media?: MediaAttachment; pollId?: string; groupId?: string; issueId?: string }
+interface ChatLine {
+  from: string; text: string; kind: ChatKind; label?: string; media?: MediaAttachment; pollId?: string; groupId?: string; issueId?: string;
+  /** When this browser saw it (epoch ms). Older saved lines have none and get no time mark. */
+  at?: number;
+  /** A conversation line (typed chat, ours or a peer's) — what `sync-chat` hands a joiner. */
+  chat?: boolean;
+  /** Merged from another peer's transcript: that peer's label, shown on hover. */
+  via?: string;
+}
 
 // A persist request is an offer from another peer asking us to also store
 // their lemma / currency declaration so the room's public state has more
@@ -420,9 +501,6 @@ const qosCommands = new Map<string, QosCommand>();
 // /login replaces the identity; never written into room state.
 let goalStore: GoalStore | null = null;
 let goalStoreAnchor = "";
-// A preview is a transient local approval intent, never a room message or
-// persistent signing authority. Old intent is consumed before dispatch.
-const rhoquPreviews = new RhoQuPreviewStore<RhoQuOnHandler>();
 let posixNet: PosixNet | null = null;
 let socketListeners: Map<string, { port: number; type: SocketType; unlisten: () => void }> = new Map();
 let socketConns: Map<string, QosSocket> = new Map();
@@ -1451,7 +1529,68 @@ function unreachablePeers(): string[] {
   return [...peers].filter((id) => !qpeer!.isReachable(id));
 }
 
+// The time of the last mark on screen. Reset whenever the transcript is
+// repainted from empty, which renderChatLine notices for itself.
+let lastTimeMarkAt: number | null = null;
+
+function renderTimeMark(at: number): void {
+  if (!messagesEl.firstChild) lastTimeMarkAt = null;
+  if (!needsTimeMark(at, lastTimeMarkAt)) return;
+  const mark = document.createElement("div");
+  mark.className = "msg time-mark";
+  mark.textContent = timeMarkText(at, lastTimeMarkAt, Date.now());
+  mark.title = new Date(at).toLocaleString();
+  messagesEl.appendChild(mark);
+  lastTimeMarkAt = at;
+}
+
+/** Everyone this browser knows by name in the active room, us included. */
+function knownNames(): string[] {
+  const out = new Set<string>();
+  for (const n of peerNames.values()) if (n && n.trim()) out.add(n.trim());
+  for (const n of lastKnownNames.values()) if (n && n.trim()) out.add(n.trim());
+  if (myName && myName.trim()) out.add(myName.trim());
+  return [...out];
+}
+
+/**
+ * Wrap mentions of known people in `<span class="mention">` — ours as
+ * `mention me` — walking text nodes only, so markup, links and code are left
+ * alone. Returns whether we were mentioned.
+ */
+function highlightMentions(el: HTMLElement, names: string[]): boolean {
+  if (!names.length) return false;
+  const me = (myName || "").trim().toLowerCase();
+  let mentionedMe = false;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement?.closest("a, code, pre, .mention") ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  const nodes: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text);
+  for (const node of nodes) {
+    const text = node.data;
+    const found = findMentions(text, names);
+    if (!found.length) continue;
+    const frag = document.createDocumentFragment();
+    let pos = 0;
+    for (const m of found) {
+      if (m.start > pos) frag.appendChild(document.createTextNode(text.slice(pos, m.start)));
+      const span = document.createElement("span");
+      const isMe = me !== "" && m.name.toLowerCase() === me;
+      if (isMe) mentionedMe = true;
+      span.className = isMe ? "mention me" : "mention";
+      span.textContent = text.slice(m.start, m.end);
+      frag.appendChild(span);
+      pos = m.end;
+    }
+    if (pos < text.length) frag.appendChild(document.createTextNode(text.slice(pos)));
+    node.replaceWith(frag);
+  }
+  return mentionedMe;
+}
+
 function renderChatLine(line: ChatLine): void {
+  if (line.at) renderTimeMark(line.at);
   const div = document.createElement("div");
   div.className = `msg${line.kind === "system" ? " system-line" : ""}`;
   if (line.pollId) {
@@ -1487,6 +1626,13 @@ function renderChatLine(line: ChatLine): void {
     renderMedia(textEl, line.media);
   } else {
     textEl.innerHTML = renderMarkdown(line.text);
+    if (line.kind !== "system" && highlightMentions(textEl, knownNames()) && line.kind === "peer") {
+      div.classList.add("mentions-me");
+    }
+  }
+  if (line.via) {
+    div.classList.add("synced");
+    div.title = `from ${line.via}'s transcript — relayed, not signed by the author`;
   }
   div.appendChild(fromEl);
   div.appendChild(textEl);
@@ -1516,7 +1662,15 @@ function showPrivateGoalOutput(text: string): void {
 }
 
 function addMessage(from: string, text: string, kind: "peer" | "self" | "system" = "peer", label?: string): void {
-  const line: ChatLine = { from, text, kind, label };
+  pushChatLine({ from, text, kind, label, at: Date.now() });
+}
+
+/** A conversation line — typed chat, ours or a peer's — which a joiner is handed in `sync-chat`. */
+function addChat(from: string, text: string, kind: "peer" | "self", label?: string): void {
+  pushChatLine({ from, text, kind, label, at: Date.now(), chat: true });
+}
+
+function pushChatLine(line: ChatLine): void {
   activeRoom.chatLog.push(line);
   trimChatLog(activeRoom);
   saveChat(activeRoom);
@@ -1587,10 +1741,11 @@ function renderTabs(): void {
     tab.className = "tab"
       + (isActive ? " active" : "")
       + (ctx.hasUnread && !isActive ? " unread" : "");
-    tab.title = ctx.roomId + (ctx.hasUnread && !isActive ? " (unread)" : "");
+    const named = roomNames.get(ctx.roomId);
+    tab.title = (named ?? ctx.roomId) + (ctx.hasUnread && !isActive ? " (unread)" : "");
     const label = document.createElement("span");
     label.className = "tab-label";
-    label.textContent = (ctx.hasUnread && !isActive ? "● " : "") + shortId(ctx.roomId);
+    label.textContent = (ctx.hasUnread && !isActive ? "● " : "") + roomDisplayName(ctx.roomId);
     tab.appendChild(label);
     // Only show the close button when there's more than one tab open.
     if (rooms.size > 1) {
@@ -1621,6 +1776,13 @@ function switchToRoom(roomId: string): void {
   refreshSuccessPanel();
 }
 
+/** Repaint the visible transcript from the active room's log. */
+function repaintChat(): void {
+  messagesEl.innerHTML = "";
+  for (const line of activeRoom.chatLog) renderChatLine(line);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
 function applyActiveRoomToUI(): void {
   // Sidebar identity / room display
   // Signaling URL field reflects this room's last-used URL.
@@ -1637,10 +1799,7 @@ function applyActiveRoomToUI(): void {
     msgInput.disabled = true;
     sendBtn.disabled  = true;
   }
-  // Chat history replay
-  messagesEl.innerHTML = "";
-  for (const line of activeRoom.chatLog) renderChatLine(line);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  repaintChat();
   // Sidebar lists
   renderPeers();
   renderLemmas();
@@ -1675,6 +1834,9 @@ function closeRoomTab(roomId: string): void {
   if (ctx.posixNet) { ctx.posixNet.close(); ctx.posixNet = null; }
   rooms.delete(roomId);
   saveJoinedRooms();
+  // Leaving frees the name: uniqueness is among the rooms you're in, and a
+  // name held by a room with no tab would be "taken" by something invisible.
+  setRoomName(roomId, null);
   // If we closed the visible one, pick another to activate.
   if (uiActiveRoom.roomId === roomId) {
     const next = rooms.values().next().value as RoomContext;
@@ -1733,16 +1895,161 @@ function promptJoinRoom(): void {
   // Same reasoning as /room join: a legacy (pre-Pauli-closure) cap is still a
   // real room — the public room is one — so warn rather than refuse.
   if (!validateCapability(roomId)) addMessage("", `⚠ room cap is not ZFA-closed (a legacy token?) — joining anyway: ${roomId}`, "system");
+  const note = adoptInviteName(roomId, nameFromInvite(input));
   openRoomTab(roomId);
+  if (note) addMessage("", note, "system");
 }
 
-/// Mint a fresh room capability and open it as a tab. A room is a bearer
-/// capability, so this is local generation only; inviting someone still means
-/// sharing the URL from the room panel.
-function newRoomTab(): void {
+/**
+ * Ask for a room name in a modal, checking it against the names this browser
+ * already uses as it's typed. A taken name keeps the dialog open with the
+ * reason and a one-click alternative. Resolves to the accepted name, or null
+ * if cancelled. `selfRoomId` is the room being renamed (its own name is fine).
+ */
+function roomNameDialog(title: string, okLabel: string, initial = "", selfRoomId?: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "room-name-overlay";
+    const card = document.createElement("div");
+    card.className = "room-name-card";
+    card.setAttribute("role", "dialog");
+    card.setAttribute("aria-modal", "true");
+    const h = document.createElement("div");
+    h.className = "room-name-title";
+    h.textContent = title;
+    const lab = document.createElement("label");
+    lab.className = "room-name-label";
+    lab.textContent = "Room name";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "room-name-input";
+    input.maxLength = ROOM_NAME_MAX + 20;   // room to type past it and be told, not silently cut
+    input.placeholder = "e.g. Design review";
+    input.value = initial;
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    lab.htmlFor = input.id = "room-name-input";
+    const preview = document.createElement("div");
+    preview.className = "room-name-preview";
+    const err = document.createElement("div");
+    err.className = "room-name-error";
+    err.setAttribute("role", "alert");
+    const suggestBtn = document.createElement("button");
+    suggestBtn.type = "button";
+    suggestBtn.className = "room-name-suggest";
+    suggestBtn.hidden = true;
+    const row = document.createElement("div");
+    row.className = "room-name-row";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "room-name-cancel";
+    cancel.textContent = "Cancel";
+    const ok = document.createElement("button");
+    ok.type = "button";
+    ok.className = "room-name-ok";
+    ok.textContent = okLabel;
+    row.append(cancel, ok);
+    card.append(h, lab, input, preview, err, suggestBtn, row);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const base = `${window.location.host}${window.location.pathname}`;
+    let shownError = false;   // only complain once they've tried, or typed a duplicate
+    const refresh = (forceError = false): ReturnType<typeof checkRoomName> => {
+      const check = checkRoomName(input.value, roomNames, selfRoomId);
+      const slug = slugify(input.value);
+      preview.textContent = slug ? `address: ${base}#/${slug}` : "";
+      // A duplicate is said as soon as it's typed; anything else (empty, too
+      // long) only once they've tried to submit, so the dialog doesn't open scolding.
+      if (forceError) shownError = true;
+      const say = !check.ok && (shownError || !!check.suggestion);
+      err.textContent = !check.ok && say ? check.error : "";
+      if (!check.ok && check.suggestion) {
+        suggestBtn.hidden = false;
+        suggestBtn.textContent = `Use “${check.suggestion}” instead`;
+        suggestBtn.dataset.name = check.suggestion;
+      } else {
+        suggestBtn.hidden = true;
+      }
+      ok.disabled = !check.ok;
+      return check;
+    };
+
+    let done = false;
+    const close = (result: string | null): void => {
+      if (done) return;
+      done = true;
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      resolve(result);
+    };
+    const submit = (): void => {
+      const check = refresh(true);
+      if (check.ok) close(check.name);
+      else input.focus();
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") { e.preventDefault(); close(null); }
+      else if (e.key === "Enter") { e.preventDefault(); submit(); }
+    };
+    document.addEventListener("keydown", onKey, true);
+    input.addEventListener("input", () => refresh());
+    suggestBtn.addEventListener("click", () => {
+      input.value = suggestBtn.dataset.name ?? input.value;
+      refresh();
+      input.focus();
+    });
+    cancel.addEventListener("click", () => close(null));
+    ok.addEventListener("click", submit);
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(null); });
+    refresh();
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  });
+}
+
+/// Mint a fresh room capability under a chosen name and open it as a tab. A
+/// room is a bearer capability, so this is local generation only; inviting
+/// someone still means sharing the link (which carries the name along).
+function createNamedRoom(name: string): string {
   const roomId = generateCapability("room");
+  setRoomName(roomId, name);     // before opening, so the first hash sync has the slug
   openRoomTab(roomId);
-  addMessage("", "created a new room tab — use the share link to invite someone", "system");
+  return roomId;
+}
+
+async function newRoomTab(): Promise<void> {
+  const name = await roomNameDialog("New room", "Create room");
+  if (!name) return;
+  createNamedRoom(name);
+  addMessage("", `created room “${name}” — use Copy invite link to bring someone in`, "system");
+}
+
+/** Rename a joined room (the active one by default). */
+function renameRoom(roomId: string, name: string): void {
+  setRoomName(roomId, name);
+  renderTabs();
+  if (roomId === activeRoom.roomId) { syncRoomHash(); updateShareLink(); }
+}
+
+/**
+ * The address bar changed without a reload — someone typed a `#/slug`, or
+ * pasted an invite link into this tab. Open or switch to that room; the hash
+ * is then rewritten to the room's own form (which hides the cap again).
+ */
+function onRoomHashChange(): void {
+  const { slug, params } = parseRoomHash(window.location.hash);
+  const cap = params.get("room");
+  if (cap && cap.startsWith("cap:room:")) {
+    const note = adoptInviteName(cap, nameFromInvite(window.location.href));
+    if (!validateCapability(cap)) addMessage("", `⚠ room cap is not ZFA-closed (a legacy token?) — joining anyway: ${cap}`, "system");
+    openRoomTab(cap);
+    if (note) addMessage("", note, "system");
+  } else if (slug) {
+    const target = findRoomBySlug(slug, roomNames);
+    if (target && rooms.has(target)) switchToRoom(target);
+    else addMessage("", `no room called “${slug}” in this browser — an invite link carries the room capability, a name alone can't open one`, "system");
+  }
+  syncRoomHash();
 }
 
 function setTabMenuOpen(open: boolean): void {
@@ -2247,6 +2554,7 @@ function pickFreeNote(currency: string, N: number): NoteEntry | null {
 }
 
 function detachFromFree(chosen: NoteEntry, N: number): { outgoing: string; change: NoteEntry | null } | null {
+  if (!validateCapability(chosen.token)) return null;
   if (chosen.denomination === N) {
     noteStore.delete(chosen.token);
     return { outgoing: chosen.token, change: null };
@@ -2254,6 +2562,7 @@ function detachFromFree(chosen: NoteEntry, N: number): { outgoing: string; chang
   const split = splitNote(chosen.token, N);
   if (!split) return null;
   const [paid, changeTok] = split;
+  if (noteStore.has(paid) || noteStore.has(changeTok) || lockedNotes.has(paid) || lockedNotes.has(changeTok)) return null;
   const change: NoteEntry = { token: changeTok, currency: chosen.currency, denomination: chosen.denomination - N };
   noteStore.delete(chosen.token);
   noteStore.set(changeTok, change);
@@ -3624,7 +3933,83 @@ function runChainChannel(parts: string[], rawRest: string, sys: (t: string) => v
   }
 }
 
-function handleCommand(raw: string, directUserInput = false): string[] {
+// ---- agent ownership and fork grants (/agent grant · grants · revoke · fork) ----
+const sys = (text: string) => addMessage("", text, "system");
+// One owner capability per browser: every agent added from here carries it
+// (QOS_AGENT_OWNER), so this browser can ask any of them for a fork grant.
+const AGENT_OWNER_KEY = "qos-agent-owner";
+function agentOwnerCap(create: boolean): string | null {
+  try {
+    const have = localStorage.getItem(AGENT_OWNER_KEY);
+    if (have && OWNER_TOKEN_RE.test(have)) return have;
+    if (!create) return null;
+    const fresh = generateCapability("owner");
+    localStorage.setItem(AGENT_OWNER_KEY, fresh);
+    return fresh;
+  } catch {
+    return create ? generateCapability("owner") : null;   // no storage: owner for this line only
+  }
+}
+/** Agents we asked something, and until when an answer is expected — an unasked reply is ignored. */
+const pendingAgentCtl = new Map<string, number>();
+function pickAgentFor(which?: string): { peerId: string } | { error: string } {
+  const present = [...peerAgents].filter(([id]) => peers.has(id));
+  if (!present.length) return { error: "no AI agent is in this room right now" };
+  if (which) {
+    const t = liveAgentTarget(present, peerNames, which);
+    return t ? { peerId: t.peerId } : { error: `no agent "${which}" here — /agent lists them` };
+  }
+  if (present.length > 1) return { error: `${present.length} agents here — say which: ${present.map(([id, r]) => `${r} (${peerLabel(id)})`).join(", ")}` };
+  return { peerId: present[0][0] };
+}
+function onAgentCtlReply(from: string, d: Record<string, unknown>): void {
+  const until = pendingAgentCtl.get(from);
+  if (!until || until < Date.now()) return;
+  pendingAgentCtl.delete(from);
+  const who = peerLabel(from);
+  const text = String(d.text ?? "").slice(0, 2000);
+  if (!d.ok) { sys(`✗ ${who}: ${text}`); return; }
+  const token = typeof d.token === "string" && FORK_TOKEN_RE.test(d.token) ? d.token : null;
+  if (d.op === "grant" && token) {
+    const line = `/agent fork ${token}`;
+    sys(`✓ ${who}: ${text}`);
+    sys("Give this line to whoever should have a copy; they paste it in their own room:");
+    sys("```\n" + (hideRoom ? maskCap(line, token) : line) + "\n```");
+    navigator.clipboard?.writeText(line).then(() => sys("✓ copied to your clipboard"), () => {});
+    sys(`  The copy brings ${who}'s role and skills, not this room's memory. It runs on that agent's computer and AI account. `
+      + `/agent revoke ${String(d.id ?? "")} stops new copies; add stop to remove the running ones.`);
+    return;
+  }
+  sys(`${who}:`);
+  for (const l of text.split("\n")) sys(`  ${l}`);
+}
+/** Ask the agent behind a fork grant for a copy of itself in the active room. */
+function forkAgentHere(token: string, name?: string): void {
+  const room = activeRoom;
+  const say = (t: string) => { const prev = activeRoom; setActiveRoom(room); try { sys(t); } finally { setActiveRoom(prev); } };
+  let done = false;
+  // The grant is a room capability: the agent listens in the room it names, so
+  // joining it for a moment is how a request reaches the agent from here.
+  const tp: QOSPeer = new QOSPeer({
+    signalingUrl: room.signalingUrl, roomId: token, peerId: generateCapability("peer"), iceServers: [],
+    onPeerReady: (id) => { tp.send(id, { kind: "fork-request", room: room.roomId, signal: room.signalingUrl, ...(name ? { name } : {}) }); },
+    onMessage: (_from, data) => {
+      const d = data as Record<string, unknown> | null;
+      if (done || !d || d.kind !== "fork-reply") return;
+      done = true; clearTimeout(timer); tp.disconnect();
+      say(d.ok ? `✓ ${String(d.text ?? "")}` : `✗ ${String(d.text ?? "")}`);
+    },
+  });
+  const timer = setTimeout(() => {
+    if (done) return;
+    done = true; tp.disconnect();
+    say("✗ no answer from the agent behind that grant — its computer may be off, or the grant revoked.");
+  }, 20_000);
+  say("asking the agent behind that grant for a copy in this room… (its owner's agent will hold this room's link, like any member)");
+  void tp.connect().catch(() => { if (!done) { done = true; clearTimeout(timer); say("✗ couldn't connect to ask"); } });
+}
+
+function handleCommand(raw: string, commandOptions: { directInput?: boolean; recordId?: (id: string) => void } = {}): string[] {
   const body = raw.slice(1).trim();
   const parts = body.split(/\s+/);
   const cmd = parts[0].toLowerCase();
@@ -3690,6 +4075,7 @@ function handleCommand(raw: string, directUserInput = false): string[] {
         "  /kill <name|id>  — terminate a process you own (owner-only alias)",
         "  /goal [sub]      — private personal goals: add · list · done · review note|history · habit add|tick|list|remove · share",
         "  /ask <question>  — ask the room's AI agent (facilitator first; reports if none is present)",
+        "  /agent [sub]     — AI agents: add [role] [name] [--ai p] [--skill s] · grant · fork <grant> · revoke · roles",
         "  /<role|name> [cmd] — address any live agent by role or display name (e.g. /heckler help)",
         "  /probe [sub]     — discrepancy probe window state (status|clear)",
         "  /room [sub]      — multi-room tabs (new|list|join <cap>|leave|ref)",
@@ -5383,6 +5769,7 @@ function handleCommand(raw: string, directUserInput = false): string[] {
       // outgoing token and (if split) the change note already re-registered.
       // Always undoable by re-adding `chosen` and removing `change`.
       const detach = (chosen: NoteEntry, N: number): { outgoing: string; change: NoteEntry | null } | null => {
+        if (!validateCapability(chosen.token)) return null;
         if (chosen.denomination === N) {
           noteStore.delete(chosen.token);
           return { outgoing: chosen.token, change: null };
@@ -5390,6 +5777,7 @@ function handleCommand(raw: string, directUserInput = false): string[] {
         const split = splitNote(chosen.token, N);
         if (!split) return null;
         const [paid, changeTok] = split;
+        if (noteStore.has(paid) || noteStore.has(changeTok) || lockedNotes.has(paid) || lockedNotes.has(changeTok)) return null;
         const change: NoteEntry = { token: changeTok, currency: chosen.currency, denomination: chosen.denomination - N };
         noteStore.delete(chosen.token);
         noteStore.set(changeTok, change);
@@ -5511,6 +5899,7 @@ function handleCommand(raw: string, directUserInput = false): string[] {
             unit = currency;
             note = mintNote(currency, N);
           }
+          if (noteStore.has(note) || lockedNotes.has(note)) { sys("mint refused: token collision; no new note issued"); break; }
           noteStore.set(note, { token: note, currency: unit, denomination: N });
           saveNotes();
           renderNotes();
@@ -5596,8 +5985,9 @@ function handleCommand(raw: string, directUserInput = false): string[] {
           const held = noteStore.get(tokenArg);
           if (!held) { sys(`you don't hold that note`); break; }
           const split = splitNote(tokenArg, a);
-          if (!split) { sys(`invalid split: a must be 1..${held.denomination - 1}`); break; }
+          if (!split) { sys("split refused: invalid amount, closure, or identical children; original retained"); break; }
           const [t1, t2] = split;
+          if (noteStore.has(t1) || noteStore.has(t2) || lockedNotes.has(t1) || lockedNotes.has(t2)) { sys("split refused: token collision; original retained"); break; }
           noteStore.delete(tokenArg);
           noteStore.set(t1, { token: t1, currency: held.currency, denomination: a });
           noteStore.set(t2, { token: t2, currency: held.currency, denomination: held.denomination - a });
@@ -5618,7 +6008,7 @@ function handleCommand(raw: string, directUserInput = false): string[] {
           if (!h1 || !h2) { sys("both tokens must be notes you hold"); break; }
           if (h1.currency !== h2.currency) { sys(`currency mismatch: ${h1.currency} vs ${h2.currency}`); break; }
           const merged = mergeNotes(t1Arg, t2Arg);
-          if (!merged) { sys("merge failed"); break; }
+          if (!merged || noteStore.has(merged) || lockedNotes.has(merged)) { sys("merge refused: invalid input or token collision; originals retained"); break; }
           noteStore.delete(t1Arg);
           noteStore.delete(t2Arg);
           noteStore.set(merged, { token: merged, currency: h1.currency, denomination: h1.denomination + h2.denomination });
@@ -6082,7 +6472,7 @@ function handleCommand(raw: string, directUserInput = false): string[] {
         break;
       }
       if (sub === "share") {
-        if (!directUserInput) { sys("share requires direct /goal share input; automation cannot publish private goals"); break; }
+        if (!commandOptions.directInput) { sys("share requires direct /goal share input; automation cannot publish private goals"); break; }
         if (!rest) { sys("usage: /goal share <id>"); break; }
         const shared = goals.share(rest);
         if (!shared) { sys(`no goal ${rest} — /goal list`); break; }
@@ -6168,13 +6558,121 @@ function handleCommand(raw: string, directUserInput = false): string[] {
       const agent = pickAskAgent(presentAgents);
       if (!agent) {
         sys("no AI agent is in this room right now — /ask needs a facilitator, scribe, skeptic, or other agent present.");
-        sys("  Start one with scripts/qos-cli/run-agents.sh, then try /ask again.");
+        sys("  [/agent add](help:agent) gives you the one command that adds one, then try /ask again.");
         break;
       }
       const text = agentAskText(agent, question);
       qpeer.broadcast({ kind: "chat", text });
       const role = agent.role === "facilitator" ? "facilitator" : agent.role;
       sys(`→ asked the ${role} (${peerLabel(agent.peerId)}) — ${text}`);
+      break;
+    }
+
+    case "agent":
+    case "agents": {
+      // /agent            — who's here
+      // /agent add [role] [name]   — the one command that puts an agent in this room
+      // /agent claude [role] [name] — the same, worded for a Claude Code session
+      const [sub0, ...restWords] = arg.trim().split(/\s+/).filter(Boolean);
+      const sub = (sub0 ?? "list").toLowerCase();
+      if (sub === "list" || sub === "ls") {
+        const present = [...peerAgents].filter(([id]) => peers.has(id));
+        if (present.length === 0) {
+          sys("no AI agent is in this room right now.");
+        } else {
+          sys(`${present.length} AI agent${present.length === 1 ? "" : "s"} here:`);
+          for (const [id, role] of present) {
+            sys(`  ${peerLabel(id)} — ${role} · talk to it with /${agentCommand(role)} help`);
+          }
+        }
+        sys("  /agent add [role] [name] [--ai claude|deepseek|…] — add one. Roles: " + AGENT_ROLES.map((r) => r.role).join(", ")
+          + " · AI: " + AGENT_PROVIDERS.map((p) => p.id).join(", ") + " (/agent roles for what each is)");
+        break;
+      }
+      if (sub === "roles" || sub === "providers") {
+        sys("Roles:");
+        for (const r of AGENT_ROLES) sys(`  ${r.role} — ${r.what}`);
+        sys("AI providers (--ai), each a plugin in scripts/qos-cli/ai-providers — or your own:");
+        for (const p of AGENT_PROVIDERS) sys(`  ${p.id} — ${p.what}${p.key ? ` · needs ${p.key} on the agent's computer` : ""}`);
+        sys("  Leave --ai out and the agent uses the claude CLI if it finds one, else whichever API key is set.");
+        sys("Skills: rules and context an agent follows for an activity. Every agent has the standard ones: " + STANDARD_SKILLS.join(", ")
+          + ". In the room, /<role> use <skill> starts one, /<role> rules shows it, /<role> play <move> plays. "
+          + "--skill <name> makes one the starting activity; --skill /abs/path.md adds your own.");
+        break;
+      }
+      if (sub === "grant" || sub === "grants" || sub === "revoke") {
+        // Owner commands go to the agent as a DIRECT envelope carrying this
+        // browser's owner capability — never as chat, which every peer sees.
+        const owner = agentOwnerCap(false);
+        if (!owner) { sys("✗ this browser isn't the owner of an agent. The agent you add with /agent add is yours — its owner is whoever added it."); break; }
+        const parsed = sub === "grant" ? parseGrantArgs(restWords) : sub === "revoke" ? parseRevokeArgs(restWords) : { agent: restWords[0] };
+        if ("error" in parsed) { sys(`✗ ${parsed.error}`); break; }
+        const target = pickAgentFor(parsed.agent);
+        if ("error" in target) { sys(`✗ ${target.error}`); break; }
+        const env: Record<string, unknown> = { kind: "agent-ctl", op: sub, owner };
+        if (sub === "grant") { const g = parsed as { uses?: number; days?: number }; if (g.uses) env.uses = g.uses; if (g.days) env.days = g.days; }
+        if (sub === "revoke") { const r = parsed as { id: string; stop: boolean }; env.id = r.id; env.stop = r.stop; }
+        pendingAgentCtl.set(target.peerId, Date.now() + 30_000);
+        if (!qpeer?.send(target.peerId, env)) { sys(`✗ couldn't reach ${peerLabel(target.peerId)} right now`); break; }
+        sys(`asking ${peerLabel(target.peerId)}…`);
+        break;
+      }
+      if (sub === "fork") {
+        const f = parseForkArgs(restWords);
+        if ("error" in f) { sys(`✗ ${f.error}`); break; }
+        forkAgentHere(f.token, f.name);
+        break;
+      }
+      if (sub !== "add" && sub !== "claude") {
+        sys("usage: /agent · /agent add [role] [name] [--ai <provider>] [--model <m>] [--skill <s>] · /agent claude [role] [name] [--ai …] · /agent roles");
+        break;
+      }
+      const req = parseAgentRequest(restWords.join(" "));
+      if ("error" in req) { sys(`✗ ${req.error}`); break; }
+      const cap = activeRoom.roomId;
+      const sig = activeRoom.signalingUrl;
+      const owner = agentOwnerCap(true)!;
+      const shell = agentShellCommand(cap, req, sig, owner);
+      const prompt = agentClaudePrompt(roomUrl(), req, sig, owner);
+      // The owner capability never shows on screen (it is in every screen share);
+      // the clipboard holds it in full.
+      const show = (t: string) => maskCap(hideRoom ? maskCap(t, cap) : t, owner);
+      const prov = providerOf(req);
+      const who = (req.name ? `${req.role} named ${req.name}` : req.role)
+        + (prov && prov.id !== "none" ? ` running on ${prov.id}${req.model ? ` (${req.model})` : ""}` : prov ? " with no AI" : "")
+        + (req.skills?.length ? ` that knows ${req.skills.join(", ")}` : "");
+      const copied = sub === "claude" ? prompt : shell;
+      navigator.clipboard?.writeText(copied).then(
+        () => sys(`✓ copied the ${sub === "claude" ? "request for Claude" : "command"} to your clipboard${hideRoom ? " (in full — the room is hidden on screen)" : ""}`),
+        () => sys("couldn't reach the clipboard — copy it from above" + (hideRoom ? " after /room show" : "")),
+      );
+      if (sub === "claude") {
+        sys(`To have Claude add a ${who} with no terminal on your side, paste this into your own Claude Code session at https://claude.ai/code :`);
+        sys(prov?.key ? `  **You need your own ${prov.key}**, set in that session's environment — not in the room.`
+          : "  **It runs on your own Claude plan** (the session's Claude).");
+        sys("```\n" + show(prompt) + "\n```");
+        sys("  Its cloud environment must allow quantum-os-signaling.onrender.com, and an agent there lasts only minutes after the chat goes quiet — "
+          + `for one that stays, use /agent add on a computer that stays on. Guide: ${AGENT_DOCS_URL}`);
+      } else {
+        sys(`To add a ${who} to this room, paste this into a terminal on any computer with git and Node 18+:`);
+        sys("```\n" + show(shell) + "\n```");
+        if (prov?.key) {
+          sys(`  **You need your own ${prov.key}.** Set it on that computer first (export ${prov.key}=…). It stays there — never type it into the room.`);
+        } else if (prov?.id === "claude") {
+          sys("  **You need your own Claude plan:** the claude CLI installed and logged in on that computer.");
+        } else if (!prov) {
+          sys("  **You need your own AI account on that computer:** the claude CLI logged in (your Claude plan), or ANTHROPIC_API_KEY or DEEPSEEK_API_KEY set there. "
+            + "The agent's AI runs on your account, not the room's. Without one the line stops and says how to set it up. Keys never go in the room.");
+        }
+        sys("  It joins within seconds and stays while that computer is on. Type /agent to see it arrive.");
+        if (req.skills?.length) {
+          const c = agentCommand(req.role);
+          sys(`  Once it's here: /${c} rules shows the rules it follows, /${c} play <move> takes a turn.`);
+        }
+        sys("  No terminal? /agent claude gives the same request worded for Claude Code.");
+      }
+      sys("  ⚠ It carries this room's link — whoever you give it to can join the room.");
+      sys("  This browser becomes the agent's owner: /agent grant lets someone in another room have a copy of it.");
       break;
     }
 
@@ -6393,10 +6891,6 @@ function handleCommand(raw: string, directUserInput = false): string[] {
         sys("usage: /rhoqu <source>");
         sys("  /rhoqu list                          — show registered on-handlers");
         sys("  /rhoqu clear                         — drop all on-handlers in this room");
-        sys("  /rhoqu preview <source>              — review expanded commands without running");
-        sys("  /rhoqu approve <token>               — explicit one-use approval + confirmation");
-        sys("  /rhoqu cancel <token>                — discard a preview");
-        sys("  /rhoqu pending                       — count unexpired local previews");
         sys("  process P(a, b) { /grant $a; /lemma $b; } P(fork-a, alice);");
         sys("  if has(@met-bob) { /qucalc @met-bob; } else { /lemma met-bob ^v; }");
         sys("  on forks(msg) { /qucalc @msg; }      — register a channel-msg handler");
@@ -6418,75 +6912,6 @@ function handleCommand(raw: string, directUserInput = false): string[] {
         myCurrentSeq: () => dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
         registerOnHandler: (h) => { rhoquHandlers.push(h); },
       };
-      // A reviewable source snapshot. This excludes bearer room caps and
-      // secret seeds; it is only a drift check for the current room state.
-      const fingerprint = (): string => JSON.stringify({
-        room: activeRoom.roomId, identity: dyncapState?.anchor,
-        peers: [...peers].sort(), connected: Boolean(qpeer),
-        seq: dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
-        lemmas: [...lemmaStore.entries()].map(([name, value]) => [name, value.twists])
-          .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-        notes: [...noteStore.values()].map(n => [n.currency, n.denomination, n.token])
-          .sort((a, b) => String(a[2]).localeCompare(String(b[2]))),
-        currencies: [...knownCurrencies.values()].map(c => c.currency).sort(),
-        polls: [...pollStore.values()].map(p => [p.id, p.status, p.options.length])
-          .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-      });
-      const scopedRoom = activeRoom.roomId;
-      const scopedAnchor = dyncapState?.anchor ?? "";
-      if (src.startsWith("preview ")) {
-        try {
-          const source = src.slice("preview ".length).trim();
-          const handlers: RhoQuOnHandler[] = [];
-          const commands = rhoquTranspile(source, {
-            ...rhoCtx, registerOnHandler: h => handlers.push(h),
-          });
-          const plan = rhoquPreviews.prepare(
-            source, commands, handlers, scopedRoom, scopedAnchor, fingerprint(),
-          );
-          sys("RhoQu preview " + plan.token + " · " + commands.length +
-            " commands · " + handlers.length + " handlers" +
-            (plan.highImpact ? " · state-changing / high-impact" : " · read-only"));
-          for (const [index, command] of commands.entries()) {
-            sys("  " + (index + 1) + ". " + command);
-          }
-          for (const h of handlers) sys("  handler: on " + h.channel + "(" + h.binding + ")");
-          sys("No command executed. Explicitly inspect, then /rhoqu approve " + plan.token +
-            " (single-use, expires in 10m).");
-        } catch (error) { sys("preview refused: " + String(error)); }
-        break;
-      }
-      if (src.startsWith("approve ")) {
-        try {
-          const token = src.slice("approve ".length).trim();
-          const plan = rhoquPreviews.take(token, scopedRoom, scopedAnchor, fingerprint());
-          const approved = confirm("Execute " + plan.commands.length +
-            " previewed RhoQu commands" + (plan.highImpact ?
-              " with state-changing / potentially sensitive effects" : "") +
-            " in this room? This may sign or broadcast actions.");
-          if (!approved) { sys("RhoQu approval declined; token consumed."); break; }
-          for (const h of plan.handlers) rhoquHandlers.push(h);
-          // Existing runInput remains the *only* dispatcher; individual
-          // /commands continue to enforce their original capability checks.
-          let dispatched = 0;
-          for (const c of plan.commands) {
-            try { runInput(c); dispatched++; }
-            catch (error) { sys("RhoQu command failed: " + c + " — " + String(error)); break; }
-          }
-          sys("RhoQu approved: " + dispatched + "/" + plan.commands.length +
-            " dispatched; asynchronous command outcomes must be checked separately.");
-        } catch (error) { sys("approval refused: " + String(error)); }
-        break;
-      }
-      if (src.startsWith("cancel ")) {
-        sys(rhoquPreviews.cancel(src.slice("cancel ".length).trim()) ?
-          "RhoQu preview cancelled" : "RhoQu preview not found");
-        break;
-      }
-      if (src === "pending") {
-        sys("pending previews in this room: " + rhoquPreviews.pending(scopedRoom));
-        break;
-      }
       let cmds: string[];
       try {
         cmds = rhoquTranspile(src, rhoCtx);
@@ -6639,7 +7064,8 @@ function handleCommand(raw: string, directUserInput = false): string[] {
           const active = ctx.roomId === activeRoom.roomId ? " ←" : "";
           const connected = ctx.qpeer ? "  ●" : "";
           const full = hideRoom ? "" : `  ${ctx.roomId}`;
-          sys(`  ${shortId(ctx.roomId)}${full}${connected}${active}`);
+          const named = roomNames.has(ctx.roomId) ? `“${roomNames.get(ctx.roomId)}”  ` : "";
+          sys(`  ${named}${shortId(ctx.roomId)}${full}${connected}${active}`);
         }
       } else if (sub === "join") {
         const target = rParts.slice(1).join(" ").trim();
@@ -6653,12 +7079,40 @@ function handleCommand(raw: string, directUserInput = false): string[] {
         // public room unjoinable by command while its link worked, which
         // read as "0 peers" with no explanation.
         if (!validateCapability(roomId)) sys(`⚠ room cap is not ZFA-closed (a legacy token?) — joining anyway: ${roomId}`);
+        const note = adoptInviteName(roomId, nameFromInvite(target));
         openRoomTab(roomId);
-        sys(`joined room ${shortId(roomId)} (switched to new tab)`);
+        if (note) sys(note);
+        sys(`joined room ${roomDisplayName(roomId)} (switched to new tab)`);
       } else if (sub === "new") {
-        const newId = generateCapability("room");
-        openRoomTab(newId);
-        sys(`created room ${shortId(newId)} (new tab — share its link to invite someone)`);
+        // `/room new <name>` names it inline; bare `/room new` asks, like the + ROOM menu.
+        const wanted = arg.trim().slice(rParts[0].length).trim();
+        const created = (name: string): void => {
+          createNamedRoom(name);
+          sys(`created room “${name}” (new tab — Copy invite link to bring someone in)`);
+        };
+        if (wanted) {
+          const check = checkRoomName(wanted, roomNames);
+          if (check.ok) created(check.name);
+          else sys(`⚠ ${check.error}${check.suggestion ? ` Try “${check.suggestion}”.` : ""} — no room was created`);
+        } else {
+          void roomNameDialog("New room", "Create room").then((name) => { if (name) created(name); });
+        }
+      } else if (sub === "name" || sub === "rename") {
+        const wanted = arg.trim().slice(rParts[0].length).trim();
+        const roomId = activeRoom.roomId;
+        const current = roomNames.get(roomId) ?? "";
+        const renamed = (name: string): void => {
+          renameRoom(roomId, name);
+          sys(`this room is now called “${name}” here — invite links carry the new name`);
+        };
+        if (wanted) {
+          const check = checkRoomName(wanted, roomNames, roomId);
+          if (check.ok) renamed(check.name);
+          else sys(`⚠ ${check.error}${check.suggestion ? ` Try “${check.suggestion}”.` : ""} — name unchanged`);
+        } else {
+          void roomNameDialog(current ? "Rename room" : "Name this room", "Save", current, roomId)
+            .then((name) => { if (name) renamed(name); });
+        }
       } else if (sub === "leave") {
         if (rooms.size <= 1) { sys("cannot leave the last room"); break; }
         const leavingId = activeRoom.roomId;
@@ -6674,10 +7128,12 @@ function handleCommand(raw: string, directUserInput = false): string[] {
         const target = rParts.slice(1).join(" ").trim();
         const roomId = extractRoomCap(target) || activeRoom.roomId;
         sys(`room: ${roomId}`);
-        sys(`  share URL: ${window.location.origin}${window.location.pathname}#room=${roomId}`);
+        if (roomNames.has(roomId)) sys(`  name: ${roomNames.get(roomId)}`);
+        sys(`  share URL: ${roomUrl(roomId)}`);
       } else {
         sys(`unknown subcommand: /room ${sub}`);
-        sys("  /room new                        — mint a fresh room and open it in a new tab");
+        sys("  /room new [name]                 — mint a fresh room under a name and open it in a new tab");
+        sys("  /room name [name]                — rename the active room (no name opens the dialog)");
         sys("  /room list                       — list joined rooms");
         sys("  /room join <cap:room:…|url>      — open a new tab for the named room");
         sys("  /room leave                      — close the active tab");
@@ -7805,6 +8261,7 @@ async function connect(): Promise<void> {
         // for isReachable) — nothing to do here, receiving it at all is the
         // point (it updates lastHeardVia inside peer.ts before this fires).
         if (d.kind === "presence") return;
+        if (d.kind === "agent-ctl-reply") { onAgentCtlReply(from, d); return; }
         if (d.kind === "name") {
           const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
           const nm = String(d.name ?? "");
@@ -8547,6 +9004,13 @@ async function connect(): Promise<void> {
           addMessage("", `📊 estimate round closed by ${peerLabel(from)} — “${estimateRound.question}” (type /estimate status)`, "system");
           return;
         }
+        if (d.kind === "sync-chat") {
+          const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
+          if (status.startsWith("  · refused")) return;
+          if (ignoredForSync.has(from)) return;
+          mergeChatFromPeer(from, d.lines);
+          return;
+        }
         if (d.kind === "sync-polls") {
           const status = await verifyDyncapIfPresent(from, d); setActiveRoom(ctx);
           if (status.startsWith("  · refused")) return;
@@ -8925,7 +9389,7 @@ async function connect(): Promise<void> {
         }
         if (d.kind === "chat" || "text" in d) {
           const text = "text" in d ? String(d.text) : String(d.message ?? JSON.stringify(d));
-          addMessage(from, text, "peer", peerLabel(from));
+          addChat(from, text, "peer", peerLabel(from));
           return;
         }
       }
@@ -8961,6 +9425,10 @@ async function connect(): Promise<void> {
         peers.add(peerId);
         renderPeers();
         signedSend(peerId, { kind: "name", name: myName });
+        // The conversation so far, as this browser saw it, so a joiner reads
+        // the room from where it is rather than from an empty screen.
+        const said = transcriptForSync(chatLinesForSync());
+        if (said.length > 0) signedSend(peerId, { kind: "sync-chat", lines: said });
         if (lemmaStore.size > 0) {
           const entries = Array.from(lemmaStore.entries()).map(([name, e]) => ({
             name, twists: e.twists, who: e.who, cap: e.cap, dyncap: e.dyncap, event: e.event, text: e.text,
@@ -9172,7 +9640,7 @@ function send(): void {
   if (isPrivateGoalCommand(text)) {
     msgInput.value = "";
     palette.hide();
-    try { handleCommand(text, true); }
+    try { handleCommand(text, { directInput: true }); }
     catch { showPrivateGoalOutput("Personal goal operation failed; inspect the private overview."); }
     return;
   }
@@ -9188,14 +9656,14 @@ function send(): void {
   if (text.startsWith("//")) {
     const escaped = text.slice(1);
     qpeer.broadcast({ kind: "chat", text: escaped });
-    addMessage("", escaped, "self");
+    addChat("", escaped, "self");
     return;
   }
   // `++text` escapes a literal `+` line into chat, the way `//` does for `/`.
   if (text.startsWith("++")) {
     const escaped = text.slice(1);
     qpeer.broadcast({ kind: "chat", text: escaped });
-    addMessage("", escaped, "self");
+    addChat("", escaped, "self");
     return;
   }
   // `+name` is a user-defined command. Only an identifier-shaped name is taken
@@ -9223,13 +9691,13 @@ function send(): void {
     if (cmd !== "help" && cmd !== "dump") {
       sessionLog.push({ who: myName || "you", cmd, arg, summary: lines[0] ?? "" });
     }
-    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "ask" && cmd !== "goal" && cmd !== "ps" && cmd !== "kill" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
+    if (lines.length > 0 && cmd !== "help" && cmd !== "grant" && cmd !== "lemma" && cmd !== "note" && cmd !== "rdv" && cmd !== "forget" && cmd !== "remove" && cmd !== "retract" && cmd !== "rm" && cmd !== "gov" && cmd !== "dyncap" && cmd !== "qos" && cmd !== "ask" && cmd !== "agent" && cmd !== "agents" && cmd !== "goal" && cmd !== "ps" && cmd !== "kill" && cmd !== "probe" && cmd !== "room" && cmd !== "share" && cmd !== "channel" && cmd !== "script" && cmd !== "persist" && cmd !== "rhoqu" && cmd !== "macro" && cmd !== "macros" && cmd !== "rholang" && cmd !== "estimate" && cmd !== "facil" && cmd !== "facilitator" && cmd !== "scribe" && cmd !== "skeptic" && cmd !== "observer" && cmd !== "greeter" && cmd !== "password" && cmd !== "login" && cmd !== "name" && cmd !== "render" && cmd !== "animate" && cmd !== "record" && cmd !== "ice" && cmd !== "conn" && cmd !== "socket" && cmd !== "search" && cmd !== "solve" && cmd !== "reset") {
       qpeer.broadcast({ kind: "qlf", cmd, arg, lines });
     }
     return;
   }
   qpeer.broadcast({ kind: "chat", text });
-  addMessage("", text, "self");
+  addChat("", text, "self");
 }
 
 // ---------------------------------------------------------------------------
@@ -9240,8 +9708,8 @@ function send(): void {
  * The URL that lets someone else in. Built from the active room rather than
  * read off the address bar, which may deliberately no longer carry it.
  */
-function roomUrl(): string {
-  return `${window.location.origin}${window.location.pathname}#room=${activeRoom.roomId}`;
+function roomUrl(roomId: string = activeRoom.roomId): string {
+  return `${window.location.origin}${window.location.pathname}${roomHash(roomId, true)}`;
 }
 
 function updateShareLink(): void {
@@ -9375,8 +9843,49 @@ function saveChat(room: RoomContext): void {
   } catch { /* storage quota — drop silently */ }
 }
 
+/** This room's conversation lines as `sync-chat` carries them — ours under our own peer id. */
+function chatLinesForSync(): TranscriptLine[] {
+  const me = myPeerId();
+  const out: TranscriptLine[] = [];
+  for (const l of activeRoom.chatLog) {
+    if (!l.chat || !l.at || !l.text) continue;
+    const self = l.kind === "self";
+    out.push({ from: self ? me : l.from, label: self ? (myName || undefined) : l.label, text: l.text, at: l.at });
+  }
+  return out;
+}
+
+/**
+ * Merge a peer's transcript (`sync-chat`) into this room's log: lines we
+ * already have are skipped, the rest go in at their time and are marked as
+ * relayed by that peer, since a line in their transcript is their account of
+ * who said it.
+ */
+function mergeChatFromPeer(relayer: string, raw: unknown): void {
+  const incoming = sanitizeTranscript(raw, Date.now());
+  if (!incoming.length) return;
+  const me = myPeerId();
+  const via = peerLabel(relayer);
+  const { log, added } = mergeTranscript(activeRoom.chatLog, incoming, (l): ChatLine => {
+    const self = l.from === me;
+    // A name we already know for that id beats the one we were handed.
+    const known = peerNames.get(l.from) || lastKnownNames.get(l.from);
+    return {
+      from: self ? "" : l.from, text: l.text, kind: self ? "self" : "peer",
+      label: self ? undefined : (known || l.label || shortId(l.from)),
+      at: l.at, chat: true, via,
+    };
+  }, me);
+  if (!added) return;
+  activeRoom.chatLog.splice(0, activeRoom.chatLog.length, ...log);
+  trimChatLog(activeRoom);
+  saveChat(activeRoom);
+  if (isUiActive()) repaintChat(); else markUnread(activeRoom);
+  addMessage("", `  · ${added} earlier message${added === 1 ? "" : "s"} from ${via}'s transcript`, "system");
+}
+
 function addMedia(from: string, media: MediaAttachment, kind: "peer" | "self", label?: string): void {
-  const line: ChatLine = { from, text: "", kind, label, media };
+  const line: ChatLine = { from, text: "", kind, label, media, at: Date.now() };
   activeRoom.chatLog.push(line);
   trimChatLog(activeRoom);
   saveChat(activeRoom);
@@ -9434,8 +9943,11 @@ function showWelcome(): void {
   const div = document.createElement("div");
   div.className = "welcome";
   div.innerHTML =
-    "<h3>⬡ Welcome to QuantumOS</h3>" +
-    "A peer-to-peer room — no server holds your data. To get started:" +
+    // Relative, so it resolves under the /quantum-os/ base in production and
+    // at the root in dev (the page is always the app root; rooms are the hash).
+    "<h3><img class=\"welcome-icon\" src=\"qos-icon.svg\" alt=\"\">Welcome to QuantumOS</h3>" +
+    "<p>A peer-to-peer room — no server holds your data.</p>" +
+    "<p>Please first choose your geek level on the top right. Then:</p>" +
     "<ol>" +
     "<li>Set a <strong>display name</strong> in the left sidebar.</li>" +
     "<li>Click <strong>Connect</strong>, then <strong>copy</strong> the share link and send it to a peer.</li>" +
@@ -9450,7 +9962,7 @@ function showWelcome(): void {
   const plain = document.createElement("div");
   plain.className = "welcome geek-low";
   plain.innerHTML =
-    "<h3>👋 Welcome</h3>" +
+    "<h3><img class=\"welcome-icon\" src=\"qos-icon.svg\" alt=\"\">Welcome</h3>" +
     "This is a private room. Nothing is stored on a server — it lives with the people in it." +
     "<ol>" +
     "<li>Type <strong>your name</strong> on the left.</li>" +
@@ -10940,6 +11452,9 @@ async function init(): Promise<void> {
   // space. A bug report that names a version is worth several that do not.
   if (appVersionEl) appVersionEl.textContent = `version ${__APP_VERSION__} · build ${__APP_BUILD__}`;
   const roomId = getRoomId();
+  // An invite link names the room it opens; take that before the hash is
+  // rewritten (and the cap hidden) below.
+  const inviteNote = adoptInviteName(roomId, nameFromInvite(window.location.href));
 
   // The URL-hash room is the first joined room and becomes the active one.
   const firstRoom = createRoom(roomId);
@@ -11037,7 +11552,12 @@ async function init(): Promise<void> {
     e.stopPropagation();
     setTabMenuOpen(tabMenuEl.hidden);
   });
-  tabNewBtn.addEventListener("click", () => { setTabMenuOpen(false); newRoomTab(); });
+  tabNewBtn.addEventListener("click", () => { setTabMenuOpen(false); void newRoomTab(); });
+  // Editing the address bar's #/slug, or pasting an invite link into this tab,
+  // changes only the hash — no reload — so the switch has to be done here.
+  window.addEventListener("hashchange", onRoomHashChange);
+  if (inviteNote) addMessage("", inviteNote, "system");
+  if (pendingRoomNotice) { addMessage("", pendingRoomNotice, "system"); pendingRoomNotice = null; }
   tabJoinBtn.addEventListener("click", () => { setTabMenuOpen(false); promptJoinRoom(); });
   document.addEventListener("click", (e) => {
     if (tabMenuEl.hidden) return;
