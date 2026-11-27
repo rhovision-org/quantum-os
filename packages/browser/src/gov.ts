@@ -34,7 +34,13 @@ export interface Member { peerId: string; role: Role; label: string; at: number;
  * contracts upgrade separately; a directory registration replaces this later
  * with a single constant and three names.
  */
-export interface ChainRefs { inbox?: string; group?: string; issue?: string }
+export interface ChainRefs {
+  inbox?: string; group?: string; issue?: string;
+  /** Last independently read-back success-charter/1 handoff, not approval. */
+  charterHash?: string;
+  charterProposalId?: string;
+  charterIssueUri?: string;
+}
 
 // A member's password-encrypted identity, replicated in the group so they can
 // recover it (with the password) by rejoining the group's room in a new browser.

@@ -1,0 +1,98 @@
+{
+  "schema": "qos291-real-chain-evidence/1",
+  "scope": "DISPOSABLE local Rholo node on an isolated GitHub Actions runner; NOT public Rholo #584 validators",
+  "stages": [
+    {
+      "name": "actual-disposable-rholo-http",
+      "verdict": "PASS",
+      "nodeSource": "RChain Node 0.1.0 (bc80abbba42661f0252c04f931e6a4ac58bb6737)"
+    },
+    {
+      "name": "install-group-4",
+      "verdict": "PROCESSED_WITH_SUCCESS",
+      "resultExprPresent": true,
+      "deployResultLength": 1
+    },
+    {
+      "name": "install-issue-4",
+      "verdict": "PROCESSED_WITH_SUCCESS",
+      "resultExprPresent": true,
+      "deployResultLength": 1
+    },
+    {
+      "name": "create-group",
+      "verdict": "PROCESSED_WITH_SUCCESS",
+      "resultExprPresent": true,
+      "deployResultLength": 1
+    },
+    {
+      "name": "independent-onchain-admin-lookup",
+      "verdict": "PASS",
+      "readAt": "latest-block-unfinalized-possible",
+      "observedBlockHash": "bf505e23ec33e720c65de7a748a399aed492fedab726323bc2ec28680a422b23"
+    },
+    {
+      "name": "wallet-signature-and-identity",
+      "verdict": "PASS",
+      "authorizationType": "secp256k1 wallet + self-asserted TOFU dyncap anchor"
+    },
+    {
+      "name": "read-before-write",
+      "verdict": "PASS",
+      "proposalId": "success-charter-007425c05ecd576a47648a5400bacfa98cdebab5d610ed544f72e68936cd6f05"
+    },
+    {
+      "name": "handoff-signed-open",
+      "verdict": "PROCESSED_WITH_SUCCESS"
+    },
+    {
+      "name": "immutable-onchain-read-back",
+      "verdict": "PASS",
+      "status": "pending",
+      "readAt": "latest-block-unfinalized-possible"
+    },
+    {
+      "name": "idempotency-no-second-deploy",
+      "verdict": "PASS"
+    },
+    {
+      "name": "read-only-lookup-by-hash",
+      "verdict": "PASS",
+      "status": "pending"
+    },
+    {
+      "name": "tampered-artifact-rejected",
+      "verdict": "PASS"
+    }
+  ],
+  "finalityVerified": false,
+  "multiStakeholderRatificationVerified": false,
+  "disposableNode": true,
+  "noPublicValidatorModification": true,
+  "githubWorkflowTestedMergeSha": "ca60f1b525d4f27dd163e35fa25d53c51ec1d8d8",
+  "quantumOsSource": "5b165d9195642de71928d5ad1a4cf19fba2af4c0",
+  "githubRunId": "44160911903",
+  "githubRunAttempt": "1",
+  "nodeExecutableVersion": "rnode 0.1.0 (bc80abbba42661f0252c04f931e6a4ac58bb6737)",
+  "nodeExecutableSha256": "a22e0ead719fd81397afd534491caf1f32426c0f7565e504f9277c897b98ab76",
+  "startedUtc": "2026-11-17T19:40:19.090Z",
+  "networkId": "testnet",
+  "shardId": "/root",
+  "groupContract": "rho:id:j7yhqr1ee65jixjhw35xnhifjhwo5ggptmaoqmsrm6ehummo9gay",
+  "issueContract": "rho:id:y5y5cwitpziukxrgm31we54em6zh3oneoed11ym33p554wxgwjiy",
+  "charterHash": "007425c05ecd576a47648a5400bacfa98cdebab5d610ed544f72e68936cd6f05",
+  "proposalId": "success-charter-007425c05ecd576a47648a5400bacfa98cdebab5d610ed544f72e68936cd6f05",
+  "immutableTitleSha256": "be95acb07ec3032fe5d1d22a8813b0e0f59004d42d60d89b82d083f687e5eeae",
+  "observedBlockHash": "265afd9f39ca02c3cc29a10b53fa3ee58a4448e75ce04bf4f620a56acb9496b2",
+  "observedBlockNumber": 10,
+  "readAt": "latest-block-unfinalized-possible",
+  "proposalState": "pending",
+  "result": "PASS_REAL_DISPOSABLE_ISSUE_4_SUBMISSION",
+  "unproven": [
+    "not the current rholo dev source unless node version is explicitly pinned",
+    "no independently verified multi-stakeholder native tally/quorum",
+    "read from latest tip may be unfinalized, never settlement proof",
+    "CI fixture is not a live human UI click, browser handoff awaits separate review"
+  ],
+  "recordedUtc": "2026-11-17T19:40:30.016Z"
+}

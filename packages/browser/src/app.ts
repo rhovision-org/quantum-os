@@ -20,7 +20,7 @@ import { findDiscrepancies, losingPeersIn, normalizeValue,
          type Observation } from "./probe.js";
 import { transpile as rhoquTranspile, RhoQuError, type RhoQuContext, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
 import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
-         type Poll, type PollMethod, type PollOption } from "./polls.js";
+         tallyApproval, type Poll, type PollMethod, type PollOption } from "./polls.js";
 import { canonLemma, parseRefTokens, parseLemmaDecl, splitLemmaNameArg } from "./lemma-parse.js";
 import { issueId, isMember, isAdmin, memberLabel, findIssue, resolveWeights, delegatorsOf,
          delegationMapFor, trustWeightsFor, trustLevels, discreditedMembers, TRUST_MAX, govCurrency,
@@ -41,6 +41,10 @@ import { pickAskAgent, agentAskText, liveAgentTarget, agentCommand } from "./age
 import { AGENT_ROLES, STANDARD_SKILLS, AGENT_PROVIDERS, AGENT_DOCS_URL, parseAgentRequest, providerOf, agentShellCommand, agentClaudePrompt, maskCap,
          parseGrantArgs, parseRevokeArgs, parseForkArgs, OWNER_TOKEN_RE, FORK_TOKEN_RE } from "./agent-invite.js";
 import { GoalStore, parseGoalAdd } from "./goal-store.js";
+import { buildSuccessCharter, validateSuccessCharter, type SuccessCharter } from "./success-charter.js";
+import { signCharterAuthorization, verifyCharterAuthorizations, charterProposalId } from "./charter-chain.js";
+import { readCharterStatusByHash, readRhoGovGroup, submitCharter } from "./charter-rhogov.js";
+
 import { mountGeekToggle, readGeekLevel, type GeekLevel } from "./geek.js";
 import { createRecorder, type Recorder } from "./record.js";
 import { hashBlob, entryFromWire, sortEntries, findEntry, describeEntry, shortHash,
@@ -536,6 +540,8 @@ let rhoquHandlers: RhoQuOnHandler[] = [];
 let pollStore: Map<string, Poll> = new Map();
 let pollCards: Map<string, HTMLElement> = new Map();
 let groupStore: Map<string, Group> = new Map();
+// #291: transient, room-scoped explicit previews. Never persisted or auto-submitted.
+const charterDrafts = new Map<string, SuccessCharter>();
 // Macros are a per-BROWSER store, not per-room: a `+command` or `$name` you
 // define (or pick up from a peer) follows you into every room. Loaded once at
 // startup, contributed to each room via the join `sync-macros`.
@@ -4456,7 +4462,7 @@ function handleCommand(raw: string): string[] {
                      : "  you have no deploy key — /rholang key generate");
           const known = Object.values(g.members).filter((m) => m.revAddr).length;
           sys(`  ${known}/${Object.keys(g.members).length} members have published a chain address`);
-          sys("  /gov chain install · push · pull · <inbox|group|issue> <uri>");
+          sys("  /gov chain install · push · pull · <inbox|group|issue> <uri> · charter prepare|handoff|status");
           break;
         }
 
@@ -4471,6 +4477,159 @@ function handleCommand(raw: string): string[] {
           saveGroups(); refreshGroupCard(g);
           signedBroadcast({ kind: "group-meta", groupId: g.id, chain: g.chain });
           sys(`📇 ${g.name}'s ${verb} contract: ${want}`);
+          break;
+        }
+
+        // #291. Explicit human-gated charter handoff; never an automatic
+        // consequence of /gov vote, /goal, /charter or agent advice.
+        if (verb === "charter") {
+          const op = (parts[1] ?? "status").toLowerCase();
+          const key = activeRoom.roomId + ":" + g.id;
+          if (op === "prepare") {
+            const iid = parts[2];
+            const iss = g.issues.find((i) => i.id === iid);
+            const poll = iss?.pollId ? pollStore.get(iss.pollId) : undefined;
+            if (!isAdmin(g, meId, meAnchor)) { sys("charter handoff requires a group admin"); break; }
+            if (!cfg.key || !meAnchor) { sys("a dyncap identity and /rholang deploy key are required"); break; }
+            if (!refs.issue || !refs.group) { sys("install and push RhoGov contracts first: /gov chain install, then /gov chain push"); break; }
+            if (!iss || !poll || poll.status !== "closed" || poll.method !== "approval") {
+              sys("usage: /gov chain charter prepare <closed-issue-id> (linked closed approval poll required)"); break;
+            }
+            const yes = poll.options.find((o) => /^(approve|adopt|yes|ratify)$/i.test(o.text.trim()));
+            const no = poll.options.find((o) => /^(reject|no)$/i.test(o.text.trim()));
+            if (!yes || !no || poll.options.length !== 2) {
+              sys("the ratification poll must contain exactly 'approve' and 'reject' options"); break;
+            }
+            const weights = govWeights(g, iss, poll);
+            const count = tallyApproval(poll, weights);
+            const y = count.counts[yes.id] ?? 0, n = count.counts[no.id] ?? 0;
+            if (count.totalBallots <= 0 || y <= n || y * 2 <= count.totalBallots) {
+              sys("no ratified approval: requires a closed poll with a strict approving majority"); break;
+            }
+            const mine = memberKeyFor(g, meId, meAnchor);
+            if (!mine || g.members[mine]?.revAddr !== revAddressOf(cfg.key)) {
+              sys("first publish the current deploy-key's REV address with /gov chain push"); break;
+            }
+            const membership = Object.values(g.members);
+            if (!membership.every((m) => /^[a-f0-9]{64}$/.test(m.anchor ?? ""))) {
+              sys("all charter members need recorded dyncap anchors; no silent identity inference"); break;
+            }
+            void (async () => {
+              try {
+                const input = {
+                  group: { id:g.id, name:g.name, ...(g.uri ? {uri:g.uri} : {}) },
+                  objectives: [{ id:iss.id, title:iss.title, keyResults:[] }],
+                  decisions: [{ issueId:iss.id, pollId:poll.id, result:"adopted",
+                    quorum:{yes:y, no:n, total:count.totalBallots, method:"approval"} }],
+                  members: membership.map((m) => ({anchor:m.anchor!,role:m.role})),
+                  ratifiedAtSeq:dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
+                  proposer:meAnchor,
+                };
+                const draft = await buildSuccessCharter(input);
+                const signature = signCharterAuthorization(draft.charterHash, meAnchor, cfg.key!);
+                const charter = {...draft, signatures:[signature]};
+                const validation = await validateSuccessCharter(charter, {requireSignatures:true});
+                if (!validation.ok) throw new Error(validation.errors.join("; "));
+                verifyCharterAuthorizations(charter, membership);
+                // The on-chain RhoGov Group record must also recognize the
+                // submitter as an admin; don't trust an off-chain label alone.
+                const rg = await readRhoGovGroup(cfg.url, refs.group!, g.id);
+                const addr = revAddressOf(cfg.key!);
+                if (!rg.group.members?.[addr] || !rg.group.admins?.[addr])
+                  throw new Error("the current wallet is not an admin in the on-chain RhoGov Group/4");
+                charterDrafts.set(key, charter);
+                addMessage("", "PREVIEW ONLY — nothing submitted.\n"
+                  + "Group: " + g.name + "\nProposal ID: " + charterProposalId(charter.charterHash)
+                  + "\nSHA-256: " + charter.charterHash
+                  + "\nTarget node: " + cfg.url + "\nIssue/4: " + refs.issue
+                  + "\nPoll evidence: " + iss.id + " / " + poll.id + " (yes=" + y + ", no=" + n + ")"
+                  + "\nDyncap sequence is the submitter's observed sequence, not an independent ratification receipt."
+                  + "\nExact signed artifact:\n" + JSON.stringify(charter, null, 2)
+                  + "\nTo explicitly confirm: /gov chain charter handoff", "system");
+              } catch (e) {
+                addMessage("", "charter prepare BLOCKED: " + String(e), "system");
+              }
+            })();
+            break;
+          }
+          if (op === "handoff") {
+            const charter = charterDrafts.get(key);
+            if (!charter) { sys("prepare and inspect first: /gov chain charter prepare <closed-issue-id>"); break; }
+            if (!isAdmin(g, meId, meAnchor) || !cfg.key || !refs.issue || !refs.group
+                || charter.proposer !== meAnchor || charter.group.id !== g.id) {
+              sys("admin, signer, group or RhoGov contract changed; prepare again"); break;
+            }
+            const iss = g.issues.find((i) => i.id === charter.decisions[0]?.issueId);
+            const poll = iss?.pollId ? pollStore.get(iss.pollId) : undefined;
+            if (!poll || poll.status !== "closed" || poll.id !== charter.decisions[0]?.pollId
+                || !iss || poll.method !== "approval") {
+              sys("ratification evidence changed; prepare again"); break;
+            }
+            // The prepared charter is a snapshot. Do not allow the off-chain
+            // ballots/tally to change between preview and actual signing.
+            const original = charter.decisions[0].quorum as {yes?:number;no?:number;total?:number} | undefined;
+            const approve = poll.options.find((o) => /^(approve|adopt|yes|ratify)$/i.test(o.text.trim()));
+            const reject = poll.options.find((o) => /^(reject|no)$/i.test(o.text.trim()));
+            const current = tallyApproval(poll, govWeights(g, iss, poll));
+            const yesNow = approve ? current.counts[approve.id] ?? 0 : 0;
+            const noNow = reject ? current.counts[reject.id] ?? 0 : 0;
+            if (!original || poll.options.length !== 2 || !approve || !reject
+                || original.yes !== yesNow || original.no !== noNow
+                || original.total !== current.totalBallots
+                || current.totalBallots <= 0 || yesNow <= noNow || yesNow * 2 <= current.totalBallots) {
+              sys("ratification changed since preview; prepare again"); break;
+            }
+            const prompt = "Submit this EXACT signed success-charter/1 artifact to RhoGov Issue/4?\n"
+              + "Group: " + g.name + "\nSHA-256: " + charter.charterHash
+              + "\nProposal ID: " + charterProposalId(charter.charterHash)
+              + "\nNode: " + cfg.url + "\nIssue contract: " + refs.issue
+              + "\nThis creates a signed charged deploy. NO automatic retry.";
+            if (!window.confirm(prompt)) { sys("charter handoff cancelled; no deploy"); break; }
+            charterDrafts.delete(key);
+            void (async () => {
+              try {
+                const membership = Object.values(g.members);
+                const validation = await validateSuccessCharter(charter,{requireSignatures:true});
+                if (!validation.ok) throw new Error(validation.errors.join("; "));
+                verifyCharterAuthorizations(charter, membership);
+                const rg = await readRhoGovGroup(cfg.url, refs.group!, g.id);
+                const addr = revAddressOf(cfg.key!);
+                if (!rg.group.members?.[addr] || !rg.group.admins?.[addr])
+                  throw new Error("wallet no longer authorized in on-chain RhoGov Group");
+                const result = await submitCharter(cfg.url, refs.issue!, charter,
+                  (term: string) => deployTerm(cfg, term));
+                addMessage("", "RhoGov handoff result: " + JSON.stringify(result), "system");
+                if ("storedHash" in result && result.storedHash === charter.charterHash) {
+                  const gg=groupStore.get(g.id);
+                  if (gg) {
+                    gg.chain = { ...gg.chain, charterHash:charter.charterHash,
+                      charterProposalId:charterProposalId(charter.charterHash), charterIssueUri:refs.issue };
+                    saveGroups(); refreshGroupCard(gg);
+                    signedBroadcast({kind:"group-meta",groupId:gg.id,chain:gg.chain});
+                    addMessage("", "Recorded proposal ID and hash in group metadata (pending approval, not a ratification verdict).", "system");
+                  }
+                } else addMessage("", "Submission not yet independently readable. DO NOT RE-SUBMIT; use /gov chain charter status.", "system");
+              } catch (e) {
+                addMessage("", "RhoGov handoff BLOCKED/UNKNOWN; do not retry without status inspection: " + String(e), "system");
+              }
+            })();
+            break;
+          }
+          if (op === "status") {
+            const h = parts[2] || refs.charterHash;
+            if (!h || !refs.issue) { sys("usage: /gov chain charter status <64-hex-hash> (or prepare a handoff first)"); break; }
+            void (async () => {
+              try {
+                const v = await readCharterStatusByHash(cfg.url, refs.issue!, h, g.id);
+                addMessage("", "READ-ONLY RhoGov charter status:\n" + JSON.stringify(v, null, 2)
+                  + "\nA pending/open or claimed result is NOT a verified native tally or finalized settlement.", "system");
+              } catch (e) {
+                addMessage("", "RhoGov status unavailable/mismatched: " + String(e), "system");
+              }
+            })();
+            break;
+          }
+          sys("usage: /gov chain charter prepare <closed-issue-id> | handoff | status [64-hex-hash]");
           break;
         }
 
@@ -4693,7 +4852,7 @@ function handleCommand(raw: string): string[] {
           break;
         }
 
-        sys("usage: /gov chain · install · push · pull · inbox · send <peer> <msg> · inbox|group|issue <uri>");
+        sys("usage: /gov chain · install · push · pull · inbox · send <peer> <msg> · inbox|group|issue <uri> · charter prepare|handoff|status");
         break;
       }
       if (gsub === "say") {
@@ -10200,6 +10359,16 @@ function sanitizeChain(raw: Record<string, unknown>): ChainRefs {
     const v = raw[k];
     if (typeof v === "string" && looksLikeRegistryUri(v)) out[k] = v.trim();
   }
+  const hash = raw.charterHash;
+  const id = raw.charterProposalId;
+  const uri = raw.charterIssueUri;
+  if (typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash)
+      && id === "success-charter-" + hash
+      && typeof uri === "string" && looksLikeRegistryUri(uri)) {
+    out.charterHash = hash;
+    out.charterProposalId = id;
+    out.charterIssueUri = uri;
+  }
   return out;
 }
 
@@ -10248,6 +10417,13 @@ function mergeGroupFromSync(raw: unknown): boolean {
     const inc = sanitizeChain(r.chain as Record<string, unknown>);
     for (const k of ["inbox", "group", "issue"] as const) {
       if (inc[k] && !existing.chain?.[k]) { existing.chain = { ...existing.chain, [k]: inc[k] }; changed = true; }
+    }
+    if (inc.charterHash && inc.charterIssueUri === (existing.chain?.issue ?? inc.issue)) {
+      if (existing.chain?.charterHash !== inc.charterHash) {
+        existing.chain = { ...existing.chain, charterHash:inc.charterHash,
+          charterProposalId:inc.charterProposalId, charterIssueUri:inc.charterIssueUri };
+        changed=true;
+      }
     }
   }
   for (const [pid, m] of Object.entries(inMembers)) {

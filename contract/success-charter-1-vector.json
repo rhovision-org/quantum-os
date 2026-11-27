@@ -1,0 +1,42 @@
+{
+  "charterHash": "007425c05ecd576a47648a5400bacfa98cdebab5d610ed544f72e68936cd6f05",
+  "content": {
+    "decisions": [
+      {
+        "issueId": "i-ratified",
+        "pollId": "p-ratified",
+        "quorum": {
+          "no": 0,
+          "total": 2,
+          "yes": 2
+        },
+        "result": "adopted"
+      }
+    ],
+    "group": {
+      "id": "g-291-fixture",
+      "name": "Rho handoff fixture"
+    },
+    "members": [
+      {
+        "anchor": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "role": "admin"
+      }
+    ],
+    "objectives": [
+      {
+        "id": "obj-1",
+        "keyResults": [
+          "One immutable RhoGov Issue/4 record"
+        ],
+        "title": "Verify deterministic charter handoff"
+      }
+    ],
+    "proposer": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "ratifiedAtSeq": 7,
+    "schema": "success-charter/1",
+    "version": 1
+  },
+  "proposalId": "success-charter-007425c05ecd576a47648a5400bacfa98cdebab5d610ed544f72e68936cd6f05",
+  "record_type": "success-charter/1-cross-repo-vector"
+}

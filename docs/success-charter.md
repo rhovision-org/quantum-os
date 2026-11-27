@@ -1,5 +1,7 @@
 # Success charter handoff
 
+The [identity boundary](success-charter-identity-boundary.md) describes the relationship between room identity and the chain signer.
+
 `success-charter/1` is the canonical artifact for the **required** handoff from a
 ratified QuantumOS group charter to RhoGov/Rholo. The builder and validator live
 in `packages/browser/src/success-charter.ts` and are pure: no DOM, storage,
@@ -91,3 +93,100 @@ automatic re-handoff and no silent chain write.
 | compact group panel | later |
 
 Tests: `packages/browser/test/success-charter.test.mjs`.
+
+
+## Concrete RhoGov Issue/4 transport — #291
+
+This is a **human-authorized**, never automatic chain action. A group must
+already have a known `Group/4` and `Issue/4` registry URI, and the signer's
+existing REV wallet must be a member and admin of that on-chain group. A signed
+room announcement of a wallet address does **not** substitute for the on-chain
+Group membership check.
+
+### Interactive commands
+
+After `/gov show <group>`, `/gov chain install` (if necessary), and
+`/gov chain push`, hold a **closed** two-option approval poll linked to a
+group issue. The choices must be `approve` and `reject` (or their accepted
+synonyms) and approval must have a strict majority.
+
+```text
+/gov issue list
+/gov chain charter prepare <closed-issue-id>
+/gov chain charter handoff
+/gov chain charter status [64-hex-charter-hash]
+```
+
+`prepare` is read-only, showing exact signed JSON, its content hash,
+Proposal ID, poll counts, target node and RhoGov Issue URI. It uses the
+signer's existing dyncap anchor and wallet, and validates the **secp256k1**
+wallet signature and its already published group REV address. The
+`ratifiedAtSeq` field is the signer's *observed* dyncap sequence at
+preparation time; it is not by itself a cryptographic poll-close receipt.
+The current release requires at least one authorized admin wallet signer;
+full multi-party signing/independent council tally are separate promotion gates.
+
+`handoff` requires a separate human confirmation of **exact charter hash,
+Proposal ID, node endpoint and Issue contract**. It attempts at most one
+signed deploy; uncertain outcomes are not automatically retried. If the
+immutable Issue is already present, the exact canonical title and signers
+must match or it fails closed. A missing proposal (including explicit Nil)
+authorizes an absence claim only when both `issueOf` and the Issue/4 index
+are read at the same explicit block hash. If that pinned snapshot cannot be
+read, handoff refuses to submit. This is snapshot-level consistency, not a
+proof of finality or of atomic read-before-write across concurrent submitters.
+Group metadata records only a proposal
+ID/hash/Issue URI after independent read-back of the exact artifact.
+
+`status` is read-only and reports `pending | unknown` under the current
+Issue/4 protocol. It can resolve the artifact from its stored hash even
+after a browser reload. The status carries read-block provenance, including
+whether the observation could come from an unfinalized tip. **Do not**
+interpret an opener's `closed` or `proposed` result as independent
+multi-stakeholder approval/rejection; native tally + council policy
+verification is still required for those labels.
+
+### On-chain encoding
+
+`Issue.id = "success-charter-" + charterHash`, and the immutable title is
+`qos/success-charter/1:` plus URI-encoded canonical JSON of the entire
+**signed** `success-charter/1` artifact. That stores the exact record, not
+merely its hash. The 12 kB transport bound is explicit; oversized charters
+are refused, not silently truncated. A colliding id or changed on-chain
+payload is a blocking mismatch. The wire validator also rejects fields or
+unnormalized values that differ from the hashed canonical schema projection;
+it cannot validate a hash for one document and transmit another.
+
+Signatures use `sc1:<anchor>:<compressed-secp256k1-pubkey>:<compact-signature>`
+over `SHA-256("qos:success-charter/1:handoff\\n" + charterHash + "\\n" + anchor)`.
+They are verified against published group wallet addresses. This is
+cryptographic **wallet** authorization, but the pre-existing dyncap
+anchor-to-wallet binding is room/TOFU metadata, not a publicly verifiable
+seed proof. No AI agent may sign or initiate the handoff.
+
+The existing `Group/4`/`Issue/4` contracts remain unchanged. No Rholo
+consensus change is required. On-chain status `approved`/`rejected`
+requires an independently verified vote/tally; no implicit promotion is
+implemented here. See
+[RhoGov handoff protocol](https://github.com/rhovision-org/rhogov/blob/main/docs/success-charter-handoff.md)
+for cross-repo source and exact evidence requirements.
+
+
+### Mandatory trust classification (QOS/1 review)
+
+- `walletSignature = secp256k1-wallet-verified`: the `sc1` authorization proves control of the matching REV wallet key for the domain-separated charter hash and claimed anchor.
+- `dyncapAttribution = hash-only-tofu-unverified`: the room anchor is hash/TOFU attribution, **not** a dyncap seed signature or proof of seed possession.
+- `pollRatification = not-independently-verified`: a room poll and Issue/4 record are not independent council ratification.
+
+Reserve "signed" for the verified secp256k1 wallet authorization and on-chain deploy. Never label the room journal or dyncap anchor cryptographically signed.
+
+### Transport preflight and privacy parity
+
+Both handoff adapters validate the canonical content hash and reject reserved
+private-state field names (including underscore/hyphen variants) before
+network access. The shared negative fixture exercises rehashed, wallet-authorized
+synthetic private fields: a valid hash or wallet signature does not override
+this restriction. Field-name checks are not semantic detection of sensitive
+information embedded in ordinary free text. QuantumOS status-by-hash inspects
+the same observed record instead of selecting a second moving tip. No change
+to council policy, finality, or status promotion is made.
