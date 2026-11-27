@@ -867,3 +867,45 @@ OPFS stores verified bytes, with volatile fallback where unavailable.
 Persistence failures are surfaced, not represented as successful durable saves.
 The current text command grammar uses whitespace-separated paths; generic binary
 I/O and live mounts are not asserted. No automatic Rholo writes.
+
+### `/sh` — bounded deterministic shell (#281)
+
+Create an owned QOS process and namespace using `/qos start workspace` and
+`/fs init workspace`, then select the namespace via
+`/sh use workspace <namespace-handle>`. The selection is local UI state; cwd,
+environment, child processes, stage receipts, and exit status are replayed
+from the single canonical journal. After reload re-select the shell.
+
+- `/sh set NAME=value; cd /docs; echo "$NAME" | upper > result.txt`
+- `/sh cat < result.txt | lower`; `/sh echo next >> result.txt`
+- Builtins: echo, cat (stdin), upper, lower, wc (UTF-8 bytes), pwd, env,
+  true, false. Standalone cd, set/export, unset, exit configure the shell.
+- `/spawn <pipeline>` queues a child and returns its explicit job capability.
+  `/bg <job-handle>` marks it runnable; `/exec <job-handle>` advances one
+  cooperative stage or finishes it. `/fg <job-handle>` runs remaining stages.
+  `/jobs` lists owned handles, `/wait <job-handle>` reaps an exited child,
+  `/kill <job-handle>` sends SIGTERM through the job SIGNAL capability.
+  The pre-existing /kill process-name lifecycle alias remains distinct.
+
+Single/double quotes, escapes, variable expansion, pipe, semicolon, and
+input/output/append redirection are supported. No globbing, substitution,
+dynamic evaluation, host execution, implicit Rholang, binary data, or
+arbitrary executables. All pipeline stages execute in source order; the first
+non-zero status wins (pipefail). Configuration commands cannot be piped.
+Background jobs are cooperatively stepped, not autonomous threads.
+Parent exit terminates its active children. Children have only a restricted
+EXEC image root, while their parent retains explicitly attenuated control.
+
+Input is read using a live file capability and verified against its content
+hash; the bytes (bounded UTF-8 text) become journal observations.
+Output redirection is an atomic COW namespace update against the root/version
+captured at spawn, with verified local-cache metadata, never an ambient host
+path. Append verifies the original bytes. If the root changes, the job exits
+non-zero without replacing the new root. Redirection is local-cache only;
+durable publication remains an explicit /fs put-durable operation.
+
+Limits: 4 KiB source/expanded pipeline/input/output, eight pipeline stages
+and eight semicolon segments, sixteen environment variables of at most
+256 UTF-8 bytes, 128 historical jobs per parent. **Shell source, environment,
+input observations and stage outputs are visible in room journal data.
+Do not put secrets or private file contents through this shell.**

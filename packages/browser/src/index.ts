@@ -93,3 +93,6 @@ export type { SuccessRecipe } from "./success-recipes.js";
 
 export {QosVfs,VFS_OPS,vfsPath} from "./qos-vfs.js";
 export type {VfsOp,VfsEntry,VfsNamespace} from "./qos-vfs.js";
+
+export {SHELL_OPS,splitShell,parsePipeline,stageResult} from "./qos-shell.js";
+export type {ShellOp,ShellJob,ShellContext,Pipeline} from "./qos-shell.js";
