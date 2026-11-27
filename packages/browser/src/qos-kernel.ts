@@ -27,6 +27,8 @@ import {IDENTITY_OPS,PROXY_ACTIONS,MAX_PROXIES,isUid,isProxyToken,type IdentityO
 
 import {DEVICE_OPS,DEVICE_KINDS,DEVICE_MAX_REQUESTS,DEVICE_MAX_DESCRIPTORS,deviceRequest,deviceObservation,deviceRights,deviceRight,type DeviceOp,type DeviceDescriptor,type DeviceTicket,type DeviceKind} from "./qos-device.js";
 
+import {INIT_OPS,MAX_PACKAGES,MAX_RESTARTS,parsePackage,verifyPackage,packageIdentity,serviceIdentity,parseBindings,parseBoot,packageName,runBuiltin,type InitOp,type InstalledPackage,type ServiceRecord} from "./qos-init.js";
+
 export const QOS_ABI_VERSION = 0;
 
 export const QOS_RIGHTS = {
@@ -46,7 +48,7 @@ export const QOS_ALL_RIGHTS =
 
 export const QOS_SYSCALLS = [
   "getpid", "getppid", "spawn", "exit", "wait", "signal",
-  "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open", ...MEMORY_OPS, ...VFS_OPS, ...SHELL_OPS, ...IDENTITY_OPS, ...DEVICE_OPS,
+  "cap_derive", "cap_revoke", "cap_close", "signal_grant", "open", ...MEMORY_OPS, ...VFS_OPS, ...SHELL_OPS, ...IDENTITY_OPS, ...DEVICE_OPS, ...INIT_OPS,
   "read", "write", "stat", "mkdir", "unlink", "rename", "mount", "unmount",
   "send", "recv", "listen", "connect", "accept",
   "svc_register", "svc_lookup", "yield", "sleep", "sched_step", "sched_priority", "sched_wake", "log",
@@ -127,6 +129,149 @@ export class QosKernel {
   private scheduler = new QosScheduler();
   private memory = new QosMemoryGraph();
   private vfs = new QosVfs();
+  private packages=new Map<string,Map<string,InstalledPackage>>();
+  private services=new Map<string,Map<string,ServiceRecord>>();
+  private initVersions=new Map<string,string>();
+  initVersion(pid:string){return this.initVersions.get(pid)??this.processVersion(pid);}
+  private initTables(pid:string){
+    if(!this.packages.has(pid))this.packages.set(pid,new Map());
+    if(!this.services.has(pid))this.services.set(pid,new Map());
+    return {packages:this.packages.get(pid)!,services:this.services.get(pid)!};
+  }
+  initView(pid:string){
+    const order=<T>(m:Map<string,T>|undefined)=>[...(m??new Map<string,T>())].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([,v])=>v);
+    return JSON.parse(JSON.stringify({packages:order(this.packages.get(pid)),services:order(this.services.get(pid))})) as {packages:InstalledPackage[];services:ServiceRecord[]};
+  }
+  snapshotInit():Map<string,string>{
+    return new Map([...new Set([...this.packages.keys(),...this.services.keys()])].map(pid=>[pid,canonicalJson(this.initView(pid))]));
+  }
+  recordInit(before:Map<string,string>,hash:string){
+    for(const [pid,value] of this.snapshotInit())if(before.get(pid)!==value)this.initVersions.set(pid,hash);
+  }
+  private packageAuthority(pid:string,pkg:InstalledPackage):boolean{
+    const p=this.processes.get(pid);if(!p||p.state!=="running")return false;
+    return pkg.manifest.capabilities.every(c=>{
+      const b=pkg.bindings.find(x=>x.name===c.name);if(!b)return false;
+      const h=this.handle(p,b.handle);
+      return h.ok&&h.value.object.startsWith(c.kind+":")&&(h.value.rights&(c.rights|QOS_RIGHTS.GRANT))===(c.rights|QOS_RIGHTS.GRANT);
+    });
+  }
+  private stopService(s:ServiceRecord,phase:ServiceRecord["phase"]="stopped",detail="stopped"){
+    const child=s.pid?this.processes.get(s.pid):undefined;
+    if(child&&(child.state==="running"||child.state==="suspended")){
+      child.state="exited";child.exitCode=phase==="failed"?1:0;child.handles.clear();
+      this.terminateShellChildren(child.pid);
+    }
+    s.phase=phase;s.detail=detail;
+  }
+  private stopDependents(pid:string,name:string){
+    const pkgs=this.packages.get(pid),svcs=this.services.get(pid);if(!pkgs||!svcs)return;
+    const blocked=new Set([name]);let changed=true;
+    while(changed){changed=false;for(const [n,pkg] of pkgs)if(!blocked.has(n)&&pkg.manifest.dependencies.some(d=>blocked.has(d))){
+      blocked.add(n);changed=true;const s=svcs.get(n);if(s&&s.phase==="running")this.stopService(s,"blocked","dependency stopped");
+    }}
+  }
+  private stopSupervised(pid:string){for(const s of this.services.get(pid)?.values()??[])this.stopService(s);}
+  private serviceReady(pid:string,name:string):boolean{
+    const s=this.services.get(pid)?.get(name),pkg=this.packages.get(pid)?.get(name);
+    return !!s&&!!pkg&&s.phase==="running"&&!!s.pid&&this.processes.get(s.pid)?.state==="running"&&this.packageAuthority(pid,pkg);
+  }
+  // Reconcile on every accepted mutation, including revocation/lifecycle
+  // outside init. No hidden execution or automatic wall-clock retries.
+  reconcileInit(){
+    for(const [pid,svcs] of this.services){
+      const owner=this.processes.get(pid);
+      if(owner?.state!=="running"){this.stopSupervised(pid);continue;}
+      let changed=true;
+      while(changed){changed=false;for(const [name,s] of svcs){
+        const pkg=this.packages.get(pid)?.get(name);
+        if(s.phase==="running"&&(!this.serviceReady(pid,name)||!pkg||pkg.manifest.dependencies.some(d=>!this.serviceReady(pid,d)))){
+          this.stopService(s,"blocked","runtime authority or dependency lost");changed=true;
+        }
+      }}
+    }
+  }
+  executeInit(pid:string,op:InitOp,args:Record<string,unknown>,allocation?:string):QosResult<unknown>{
+    const p=this.processes.get(pid);if(!p||p.state!=="running")return err("ENOENT","supervisor not running");
+    const root=this.handle(p,args.handle as string);
+    if(!root.ok)return root;
+    if(root.value.id!==p.root||root.value.object!=="room"||
+      (root.value.rights&(QOS_RIGHTS.GRANT|QOS_RIGHTS.EXEC))!==(QOS_RIGHTS.GRANT|QOS_RIGHTS.EXEC))return err("EACCES","supervisor root required");
+    if(args.initVersion!==this.initVersion(pid))return err("EAGAIN","init registry changed");
+    if(op==="pkg_list")return ok(this.initView(pid).packages);
+    if(op==="svc_list")return ok(this.initView(pid).services);
+    const name=args.name as string;
+    if(op==="svc_status"){const s=this.services.get(pid)?.get(name);return s?ok({...s}):err("ENOENT","service absent");}
+    const {packages,services}=this.initTables(pid);
+    if(op==="pkg_install"){
+      const signed=parsePackage(args.package),bindings=parseBindings(args.bindings);
+      if(!signed||!bindings)return err("EINVAL","invalid package envelope");
+      if(!verifyPackage(signed,args.publisher as string))return err("EACCES","signature or pinned publisher mismatch");
+      const m=signed.manifest;
+      if(packages.has(m.name)||packages.size>=MAX_PACKAGES)return err("EINVAL","package exists or registry full");
+      if(bindings.length!==m.capabilities.length)return err("EACCES","exact capability bindings required");
+      const pkg:InstalledPackage={id:packageIdentity(signed),manifest:m,signature:signed.signature,bindings};
+      if(!this.packageAuthority(pid,pkg))return err("EACCES","ungranted package capability");
+      packages.set(m.name,pkg);
+      services.set(m.name,{id:serviceIdentity(pid,m.name),name:m.name,packageId:pkg.id,generation:0,pid:null,phase:"stopped",attempts:0,output:"",detail:"installed"});
+      return ok({name:m.name,packageId:pkg.id,serviceId:services.get(m.name)!.id});
+    }
+    const start=(n:string,reset:boolean):QosResult<ServiceRecord>=>{
+      const pkg=packages.get(n),s=services.get(n);
+      if(!pkg||!s)return err("ENOENT","package absent");
+      if(s.phase==="running")return ok({...s});
+      if(reset)s.attempts=0;
+      s.output="";
+      if(pkg.manifest.dependencies.some(d=>!this.serviceReady(pid,d))){s.phase="blocked";s.detail="dependency not ready";return ok({...s});}
+      if(!this.packageAuthority(pid,pkg)){s.phase="blocked";s.detail="capability unavailable";return ok({...s});}
+      if(!allocation||s.generation>=1024)return err("EINVAL","service generation limit");
+      s.generation++;s.attempts++;
+      s.pid="svc:"+s.id+":"+s.generation+":"+allocation;
+      const rh="h:svc:"+allocation+":"+s.id;
+      const childRoot=this.makeHandle("service:image:"+pkg.id,QOS_RIGHTS.EXEC,root.value.id,rh);
+      const child:QosProcess={pid:s.pid,name:n,owner:p.owner,parent:pid,state:"running",exitCode:null,root:rh,handles:new Map([[rh,childRoot]]),pending:[]};
+      for(const c of pkg.manifest.capabilities){
+        const b=pkg.bindings.find(b=>b.name===c.name)!,h=p.handles.get(b.handle)!;
+        const grant=this.makeHandle(h.object,c.rights,h.id,rh+":"+c.name);child.handles.set(grant.id,grant);
+      }
+      this.processes.set(child.pid,child);
+      const started=pkg.manifest.entrypoint.kind==="builtin"?runBuiltin(pkg.manifest.entrypoint.source):{code:127,output:""};
+      s.output=started.output;s.phase="running";s.detail="ready";
+      if(started.code||runBuiltin(pkg.manifest.health).code)this.stopService(s,"failed",started.code?"entrypoint failed or no authorized runtime":"health check failed");
+      return ok({...s});
+    };
+    if(op==="svc_boot"){
+      const names=parseBoot(args.manifest);if(!names)return err("EINVAL","invalid init manifest");
+      const order:string[]=[],visited=new Set<string>(),visiting=new Set<string>(),cycles=new Set<string>();
+      const visit=(n:string)=>{
+        if(visiting.has(n)){for(const v of visiting)cycles.add(v);return;}
+        if(visited.has(n))return;
+        visiting.add(n);for(const dep of packages.get(n)?.manifest.dependencies??[])visit(dep);
+        visiting.delete(n);visited.add(n);order.push(n);
+      };
+      for(const n of names)visit(n);
+      const results=[];
+      for(const n of order){
+        const s=services.get(n);
+        if(cycles.has(n)&&s){this.stopService(s,"blocked","dependency cycle");results.push({name:n,phase:s.phase,detail:s.detail});continue;}
+        const r=start(n,true);results.push(r.ok?{name:n,phase:r.value.phase,detail:r.value.detail}:{name:n,phase:"missing",detail:r.detail});
+      }
+      return ok({order,results});
+    }
+    const s=services.get(name),pkg=packages.get(name);
+    if(!s||!pkg)return err("ENOENT","service absent");
+    if(op==="pkg_remove"){this.stopService(s);this.stopDependents(pid,name);services.delete(name);packages.delete(name);return ok({name,removed:true});}
+    if(op==="svc_stop"){this.stopService(s);this.stopDependents(pid,name);return ok({...s});}
+    if(op==="svc_start")return start(name,true);
+    if(op==="svc_restart"){this.stopService(s);this.stopDependents(pid,name);return start(name,true);}
+    if(op==="svc_health"){
+      if(s.phase==="running"&&runBuiltin(pkg.manifest.health).code===0)return ok({...s});
+      if(s.phase==="running"){this.stopService(s,"failed","health check failed");this.stopDependents(pid,name);}
+      if(s.phase==="failed"&&pkg.manifest.restart==="on-failure"&&s.attempts<=MAX_RESTARTS)return start(name,false);
+      return ok({...s});
+    }
+    return err("EINVAL","unknown init operation");
+  }
   private devices=new Map<string,DeviceDescriptor>();
   private deviceTickets=new Map<string,DeviceTicket>();
   deviceDescriptor(id:string){const d=this.devices.get(id);return d?{...d}:null;}
@@ -861,6 +1006,7 @@ export class QosKernel {
     if (transition === "suspend") {
       if (target.state !== "running") return err("EINVAL", "target is not running");
       target.state = "suspended";
+      this.reconcileInit();
       return ok(true);
     }
     if (transition === "resume") {
@@ -873,6 +1019,7 @@ export class QosKernel {
     target.exitCode = 0;
     target.handles.clear();
     this.terminateShellChildren(pid);
+    this.reconcileInit();
     return ok(true);
   }
 
@@ -976,6 +1123,9 @@ export class QosKernel {
     copy.scheduler = this.scheduler.clone();
     copy.memory = this.memory.clone();
     copy.vfs = this.vfs.clone();
+    copy.packages=new Map([...this.packages].map(([pid,m])=>[pid,new Map([...m].map(([n,v])=>[n,JSON.parse(JSON.stringify(v)) as InstalledPackage]))]));
+    copy.services=new Map([...this.services].map(([pid,m])=>[pid,new Map([...m].map(([n,v])=>[n,{...v}]))]));
+    copy.initVersions=new Map(this.initVersions);
     copy.devices=new Map([...this.devices].map(([id,d])=>[id,{...d}]));
     copy.deviceTickets=new Map([...this.deviceTickets].map(([id,t])=>[id,JSON.parse(JSON.stringify(t)) as DeviceTicket]));
     copy.proxies=new Map([...this.proxies].map(([id,p])=>[id,{...p}]));
@@ -1004,6 +1154,8 @@ export class QosKernel {
       scheduler: this.scheduler.state(),
       memory: this.memoryView(),
       vfs: this.fsState(),
+      init:[...new Set([...this.packages.keys(),...this.services.keys()])].sort().map(pid=>[pid,this.initView(pid)]),
+      initVersions:[...this.initVersions.entries()].sort(([a],[b])=>a<b?-1:a>b?1:0),
       devices:[...this.devices.values()].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0),
       deviceTickets:[...this.deviceTickets.values()].sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0),
       proxies:this.proxyState(),
@@ -1081,7 +1233,7 @@ export class QosKernel {
 export type QosCanonicalSyscallRequest = {
   schema: "qos.syscall/1";
   caller: string;
-  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp | MemoryOp | VfsOp | ShellOp | IdentityOp | DeviceOp;
+  op: "getpid" | "getppid" | "cap_derive" | "cap_close" | "cap_revoke" | "signal_grant" | "signal" | SchedulerOp | MemoryOp | VfsOp | ShellOp | IdentityOp | DeviceOp | InitOp;
   args: Record<string, unknown>;
   observed?:string[];
 };
@@ -1265,6 +1417,18 @@ function parseSyscallRequest(payload: Record<string, unknown>, pid: string): Qos
       if(payload.op==="dev_request"&&!deviceRequest(args.request))return null;
       break;
     }
+    case "pkg_install":case "pkg_list":case "pkg_remove":case "svc_boot":case "svc_list":case "svc_status":case "svc_start":case "svc_stop":case "svc_restart":case "svc_health":{
+      const keys=["handle","handleVersion","initVersion","authorityFrontier"];
+      if(payload.op==="pkg_install")keys.push("package","publisher","bindings");
+      else if(payload.op==="svc_boot")keys.push("manifest");
+      else if(!["pkg_list","svc_list"].includes(payload.op))keys.push("name");
+      if(!exactKeys(args,keys)||typeof args.handle!=="string"||args.handle.length>256||!isObjectId(args.handleVersion)||!isObjectId(args.initVersion)||
+        !Array.isArray(args.authorityFrontier)||args.authorityFrontier.length>4096||!args.authorityFrontier.every((v,i,a)=>isObjectId(v)&&(i===0||a[i-1]<v)))return null;
+      if(keys.includes("package")&&(!parsePackage(args.package)||!isObjectId(args.publisher)||!parseBindings(args.bindings)))return null;
+      if(keys.includes("manifest")&&!parseBoot(args.manifest))return null;
+      if(keys.includes("name")&&!packageName(args.name))return null;
+      break;
+    }
     default: return null;
   }
   return payload as QosCanonicalSyscallRequest;
@@ -1289,6 +1453,8 @@ function executeCanonicalSyscall(kernel: QosKernel, request: QosCanonicalSyscall
       return kernel.executeIdentity(pid,request.op,request.args,requestHash);
     case "dev_define":case "dev_grant":case "dev_open":case "dev_close":case "dev_list":case "dev_request":case "dev_observe":
       return kernel.executeDevice(pid,request.op,request.args,requestHash);
+    case "pkg_install":case "pkg_list":case "pkg_remove":case "svc_boot":case "svc_list":case "svc_status":case "svc_start":case "svc_stop":case "svc_restart":case "svc_health":
+      return kernel.executeInit(pid,request.op,request.args,requestHash);
     case "getpid": return kernel.getpid(pid);
     case "getppid": return kernel.getppid(pid);
     case "cap_derive": return kernel.capDerive(pid, request.args.handle as string, request.args.rights as number, requestHash === undefined ? undefined : `h:request:${requestHash}`);
@@ -1327,6 +1493,10 @@ function syscallVersionsMatch(kernel: QosKernel, request: QosCanonicalSyscallReq
       if(!job||job.pid!==args.target||job.version!==args.jobVersion||args.targetVersion!==kernel.processVersion(job.pid))return false;
       if(request.op==="sh_finish"&&canonicalJson(args.memoryFrontier)!==canonicalJson(kernel.memoryFrontier()))return false;
     }
+  }
+  if(INIT_OPS.includes(request.op as InitOp)){
+    if(args.initVersion!==kernel.initVersion(pid)||canonicalJson(args.authorityFrontier)!==canonicalJson(kernel.handleFrontier(pid)))return false;
+    if(request.op==="pkg_install")for(const b of parseBindings(args.bindings)??[])if(b.version!==kernel.handleVersion(pid,b.handle))return false;
   }
   if(request.op==="dev_list")return canonicalJson(args.authorityFrontier)===canonicalJson(kernel.handleFrontier(pid));
   if(request.op==="dev_grant")return args.targetVersion===kernel.processVersion(args.target as string);
@@ -1473,7 +1643,7 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
         rejectSyscall(event, VFS_OPS.includes(pending.request.op as VfsOp)&&!outcome.ok&&outcome.errno==="EAGAIN"?"VFS conflict: "+outcome.detail:"syscall outcome differs from deterministic execution"); continue;
       }
       // Refusals are traceable but cannot publish speculative mutation.
-      if (outcome.ok) { trial.recordVfs(pending.request.op,outcome,event.hash); trial.recordShell(event.process,pending.request.op,outcome,event.hash); trial.recordIdentity(pending.request.op,outcome,event.hash,pending.request.args); trial.recordDevice(pending.request.op,outcome,event.hash); trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); trial.recordMemory(beforeMemory,event.hash,MEMORY_OPS.includes(pending.request.op as MemoryOp)?pending.request.op as MemoryOp:pending.request.op==="sh_finish"&&(outcome.value as {namespace?:string}).namespace?"mem_put":undefined); kernel = trial; }
+      if (outcome.ok) { trial.reconcileInit(); trial.recordInit(kernel.snapshotInit(),event.hash); trial.recordVfs(pending.request.op,outcome,event.hash); trial.recordShell(event.process,pending.request.op,outcome,event.hash); trial.recordIdentity(pending.request.op,outcome,event.hash,pending.request.args); trial.recordDevice(pending.request.op,outcome,event.hash); trial.recordHandleVersions(before, event.hash); trial.recordProcessVersions(beforeProcesses, event.hash); trial.recordScheduler(event.hash, SCHEDULER_OPS.includes(pending.request.op as SchedulerOp)); trial.recordMemory(beforeMemory,event.hash,MEMORY_OPS.includes(pending.request.op as MemoryOp)?pending.request.op as MemoryOp:pending.request.op==="sh_finish"&&(outcome.value as {namespace?:string}).namespace?"mem_put":undefined); kernel = trial; }
       consumed.add(requestHash);
       syscalls.push({ requestHash, resultHash: event.hash, caller: event.process, op: pending.request.op,
                       args: { ...pending.request.args }, outcome, position });
@@ -1493,9 +1663,10 @@ export function replayQosKernel(events: QosEvent[], forkedSources: Iterable<stri
     const before = kernel.snapshotLiveHandles();
     const beforeMemory = kernel.memoryRootSnapshot();
     const beforeProcesses = kernel.snapshotProcessState();
+    const beforeInit=kernel.snapshotInit();
     const result = kernel.replayLifecycle(event.process, transition);
     if (!result.ok) rejected.push({ hash: event.hash, reason: result.detail ?? result.errno });
-    else { kernel.recordHandleVersions(before, event.hash); kernel.recordProcessVersions(beforeProcesses, event.hash); kernel.recordScheduler(event.hash); kernel.recordMemory(beforeMemory,event.hash); applied.push(event.hash); }
+    else { kernel.reconcileInit();kernel.recordInit(beforeInit,event.hash);kernel.recordHandleVersions(before, event.hash); kernel.recordProcessVersions(beforeProcesses, event.hash); kernel.recordScheduler(event.hash); kernel.recordMemory(beforeMemory,event.hash); applied.push(event.hash); }
   }
   return { kernel, applied, rejected, missingDependencies: order.missingDependencies, cyclicHashes: order.cyclicHashes, syscalls, pendingSyscalls: [...requests.keys()].filter(hash => !consumed.has(hash)) };
 }

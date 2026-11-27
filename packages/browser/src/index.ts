@@ -102,3 +102,5 @@ export type {IdentityOp,AuthorityProxy} from "./qos-identity.js";
 
 export * from "./qos-device.js";
 export * from "./qos-device-host.js";
+
+export * from "./qos-init.js";

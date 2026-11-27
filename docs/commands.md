@@ -1017,3 +1017,34 @@ Browser CI uses real dedicated RTC channels, PosixNet over a separate RTC
 channel, and a synthetic canvas MediaStreamTrack (metadata and stop only).
 Rholo device CI uses an owned disposable bundled node and GET /api/status
 only; replay is verified in a separate process forbidden to perform RPC.
+
+### Signed packages and init (#284)
+
+A supervisor is an owned running QOS process. `/pkg install <process> | JSON`
+accepts exactly `{package:{manifest,signature},publisher,bindings}`.
+The manifest schema is `qos.package/1`: name, version, publisher (32-byte
+Ed25519 public key hex), capabilities (name/kind/rights), entrypoint
+(kind/source), ordered dependencies, restart (never/on-failure), health
+(bounded builtin pipeline). Signature is 64-byte hex over UTF-8
+canonicalJson(manifest), verified against the explicitly pinned publisher.
+The user must obtain that pin independently; no publisher PKI is implied.
+Bindings are explicit `{name,handle,version?}` for live grantable fs,
+memory, or device-grant objects. The command fills omitted handle versions.
+No ambient room root, ADMIN, or implicit device acquisition.
+
+`/svc boot <process> | {"schema":"qos-init/1","services":["name"]}`
+resolves signed dependencies in declared order. Missing/failed dependencies
+and cycles block their dependents. `/svc list|status|start|stop|restart|health`
+and `/pkg list|remove` operate in the supervisor namespace. Stable service
+identity is separate from the generation-specific process identity.
+Restart stops dependents, creates a fresh restricted runtime and attenuated
+handles; failed health checks retry only on explicit health commands with
+a bounded retry budget. Removing a package stops its service and dependents.
+Losing supervisor or resource authority blocks/stops runtime processes.
+
+The builtin entrypoint and health pipeline execute bounded pure shell
+stages; no redirection, host I/O, arbitrary eval or npm. Signed agent,
+macro and contract entrypoints are installable inert data; starting them
+fails closed until an authorized execution runtime is implemented.
+This is the deterministic init/core slice, not autonomous daemon service
+execution or an agent execution host. Package source is room journal data.

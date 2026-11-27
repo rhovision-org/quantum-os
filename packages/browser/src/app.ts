@@ -3979,7 +3979,7 @@ function handleCommand(raw: string): string[] {
   // would put a rholang `//` comment and the rest of the program on one line,
   // commenting out everything after it.
   // Shell quoting is semantic: do not collapse internal spaces before lexing.
-  const arg = body.includes("\n") || cmd === "sh" || cmd === "spawn"
+  const arg = body.includes("\n") || cmd === "sh" || cmd === "spawn" || cmd === "pkg" || cmd === "svc"
     ? body.slice(cmd.length).replace(/^[^\S\n]+/, "")
     : parts.slice(1).join(" ");
   const lines: string[] = [];
@@ -6470,6 +6470,10 @@ function handleCommand(raw: string): string[] {
       sys(`→ asked the ${role} (${peerLabel(agent.peerId)}) — ${text}`);
       break;
     }
+
+    case "pkg":case "svc":
+      runQosCommand(cmd+" "+arg,"/"+cmd);
+      break;
 
     case "dev":
       runQosCommand("dev "+arg,"/dev");

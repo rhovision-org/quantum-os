@@ -9,6 +9,7 @@
 // change `/poll` or `/gov`, and does not call a chain. Every lifecycle
 // transition is the dyncap-attributed event `QosProcessRoom` already knows how to make.
 
+import { INIT_OPS,type InitOp } from "./qos-init.js";
 import { DEVICE_OPS,DEVICE_KINDS,deviceRequest,type DeviceOp,type DeviceDescriptor } from "./qos-device.js";
 import { DeviceBroker,deviceFailure,type DeviceDriver } from "./qos-device-host.js";
 import { IDENTITY_OPS,PROXY_ACTIONS,type IdentityOp } from "./qos-identity.js";
@@ -169,6 +170,7 @@ export class QosCommand {
       case "fs":
         return this.fs(rest);
       case "dev":return this.deviceCommand(rest);
+      case "pkg":case "svc":return this.initCommand(sub,rest);
       case "whoami":case "id":
         if(!rest){this.host.say("UID "+this.host.identity.anchor+" · dyncap TOFU continuity; no superuser");return;}
         return this.identityCommand("id_info",rest);
@@ -380,6 +382,11 @@ export class QosCommand {
       if(op==="dev_list"&&!Object.hasOwn(a,"authorityFrontier"))a.authorityFrontier=before.kernel.handleFrontier(entry.id);
       if(op==="dev_observe"&&typeof a.ticket==="string"&&!Object.hasOwn(a,"ticketVersion"))a.ticketVersion=before.kernel.deviceTicket(a.ticket)?.version;
     }
+    if(args&&typeof args==="object"&&!Array.isArray(args)&&INIT_OPS.includes(operation.trim() as InitOp)){
+      const a=args as Record<string,unknown>;
+      if(!Object.hasOwn(a,"initVersion"))a.initVersion=before.kernel.initVersion(entry.id);
+      if(!Object.hasOwn(a,"authorityFrontier"))a.authorityFrontier=before.kernel.handleFrontier(entry.id);
+    }
     if (!canonicalSyscallReady(before.kernel, payload, entry.id)) {
       this.host.say("invalid, unsupported or stale canonical syscall");
       return;
@@ -467,6 +474,31 @@ export class QosCommand {
     }
   }
 
+
+  private async initCommand(domain:string,rest:string):Promise<void>{
+    const [head,...body]=rest.split("|"),[op,ref,name,...extra]=head.trim().split(/\s+/);
+    const entry=this.resolve(ref),k=this.shellKernel(),say=(s:string)=>this.host.say(s);
+    const usage="/pkg install <process> | {package,publisher,bindings}; /pkg list|remove <process> [name]; /svc boot <process> | {schema,services}; /svc list|status|start|stop|restart|health <process> [name]";
+    if(!entry||entry.ownerAnchor!==this.host.identity.anchor||extra.length){say(usage);return;}
+    const handle=k.getProcess(entry.id)?.root;if(!handle){say("supervisor unavailable");return;}
+    const operation=domain+"_"+op;
+    if(!INIT_OPS.includes(operation as InitOp)){say(usage);return;}
+    let args:Record<string,unknown>={handle};
+    if(operation==="pkg_install"||operation==="svc_boot"){
+      if(name||!body.length){say(usage);return;}
+      try{
+        const data=JSON.parse(body.join("|"));
+        if(!data||typeof data!=="object"||Array.isArray(data))throw Error("invalid manifest");
+        if(operation==="pkg_install"){
+          const {package:pkg,publisher,bindings}=data;
+          if(!Array.isArray(bindings)||Object.keys(data).length!==3)throw Error("exact package, publisher, bindings required");
+          args={handle,package:pkg,publisher,bindings:bindings.map(b=>({...b,version:b.version??k.handleVersion(entry.id,b.handle)}))};
+        }else args={handle,manifest:data};
+      }catch{say("invalid package/init JSON");return;}
+    }else if(operation==="pkg_list"||operation==="svc_list"){if(name||body.length){say(usage);return;}}
+    else{if(!name||body.length){say(usage);return;}args.name=name;}
+    await this.syscall(entry.id+" | "+operation+" | "+JSON.stringify(args));
+  }
 
   /** An embedding host explicitly transfers a dedicated, already-authorized
    * resource. Factory is never invoked on an invalid handle or wrong kind. */

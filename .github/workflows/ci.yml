@@ -193,6 +193,8 @@ jobs:
         run: node packages/browser/test/qos-identity.test.mjs
       - name: QOS capability device and observation replay test
         run: node packages/browser/test/qos-device.test.mjs
+      - name: QOS signed packages and deterministic init test
+        run: node packages/browser/test/qos-init.test.mjs
       - name: QOS isolated syscall trace test
         run: node packages/browser/test/qos-syscall-journal.test.mjs
 
