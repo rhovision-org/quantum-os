@@ -197,6 +197,10 @@ node selftest.mjs        # ZFA: 200 peer caps + closure facts + parseTwists
 node dyncap.selftest.mjs # dyncap: sign→verify chain, canonicalization, fork detection, state round-trip
 node facilitator-faq.mjs --selftest          # /facil ask answers QOS/decision basics without AI
 node facilitator-advisor.selftest.mjs        # advisor failures surface (incl. a Claude session limit)
+node skills.selftest.mjs                     # activity skills parse, load by name/path, reach the advisor's prompt
+node skill-play.e2e.mjs                      # an agent with a skill answers /greeter rules and /greeter play over a relay
+node fork-host.selftest.mjs                  # fork grants: owner check, use limits, expiry, revoke + stop, restart
+node fork.e2e.mjs                            # a real fork: the owner's grant, a request from outside, a copy in room B, revoke stop
 ```
 
 The dyncap suite proves the witness port matches the browser byte-for-byte
@@ -229,6 +233,8 @@ and checks the replies (and, for the observer, the files it writes):
 
 ```bash
 node list-cmd.e2e.mjs    # `/scribe list N` — the room's screen history
+node history.e2e.mjs    # a joiner is handed the conversation the facilitator heard (sync-chat)
+node chat-history.mjs --selftest   # history trimming + reading it back from a --persist transcript
 node observer.e2e.mjs    # `/observer start … stop` — records a game, materializes the qos-game/1 record + index
 ```
 
@@ -274,6 +280,31 @@ optimum — the same loop a room runs collectively. No deps. See
   faithfully.
 
 ## Agents (facilitator, scribe, greeter …)
+
+**The easy way:** in the room, type `/agent add [role] [name]`. You need your own AI
+account on the computer that runs it (the `claude` CLI logged in, or your own
+`ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY`); with none, the line stops and says how to set one up. It copies one line
+with the room already in it; paste that into a terminal on any computer with git
+and Node 18+. The line runs [`add-agent.sh`](add-agent.sh), which installs
+dependencies the first time, uses the `claude` CLI if present (your Claude plan),
+else `ANTHROPIC_API_KEY`, else `DEEPSEEK_API_KEY` (`AI=<provider>` forces one, `AI=off`
+starts it without AI on purpose), keeps the room's memory (`--persist`, `NO_MEMORY=1` to skip), starts the
+agent detached, and waits until it has joined. `/agent add … --ai deepseek` (or
+`claude`, `anthropic`, `none`) picks the model provider; each is a plugin in
+[`ai-providers/`](ai-providers/README.md), and `--ai-backend ./your-plugin.mjs` loads your own.
+Every agent has the [standard skills](skills/README.md) (brainstorm, debate, retrospective,
+story-round, twenty-questions, word-chain): `/<cmd> use <skill>`, `/<cmd> rules`,
+`/<cmd> play <move>`. `--skill <name|/abs/path.md>` (`SKILL=` for the script) starts with one on
+or adds your own.
+
+**Forks.** The line `/agent add` copies carries the browser's owner capability in the
+agent's environment (`QOS_AGENT_OWNER`). The owner's `/agent grant` gets a `cap:fork:` grant;
+`/agent fork <grant>` in another room starts a detached copy there (`--fork-of`: same role,
+skills and AI; its own state under `<state>/forks/`; no room memory, no key, no owner cap).
+`/agent revoke <id> stop` ends it. [`fork-host.mjs`](fork-host.mjs) has the details.
+Keys are read from the agent machine's environment, never from the room. `bash stop-agents.sh <role>` stops
+it. Unlike `run-agents.sh` it has no default room and never turns on the faucet.
+
 
 `agent.mjs` is a sibling daemon that joins a room as a **full member** (stable
 `cap:peer` + dyncap identity) and posts **measured** nudges according to its

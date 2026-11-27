@@ -109,7 +109,7 @@ const RULES = [
     id: "agents",
     test: [/\bagents?\b/, /\bfacilitator\b/, /\bscribe\b/, /\bskeptic\b/, /\bgreeter\b/, /\bobserver\b/],
     answer: ({ cmd }) =>
-      `Room agents are full peers: the facilitator greets, summarizes, and chairs; the scribe keeps screen history; the skeptic verifies claims; the greeter welcomes; the observer records games. They are trust-governable — \`/gov trust\` or \`/gov censure\` them. This agent speaks only for itself; use \`${C(cmd)} help\` for its own commands.`,
+      `Room agents are full peers: the facilitator greets, summarizes, and chairs; the scribe keeps screen history; the skeptic verifies claims; the greeter welcomes; the observer records games. They are trust-governable — \`/gov trust\` or \`/gov censure\` them. To add one, type \`/agent add [role]\` in the room: it copies the one command to run on any computer with Node. This agent speaks only for itself; use \`${C(cmd)} help\` for its own commands.`,
   },
   {
     id: "channel",

@@ -406,6 +406,18 @@ permission = "prompt";
   t.drop("b");
   check("a speaker who leaves is forgotten", t.current() === null, String(t.current()));
 
+  // The `speaking` highlight: held through pauses, gone after the hold.
+  const h = mod.speakingHold(3000);
+  const ids = (s) => [...s].sort().join(",");
+  check("nobody heard, nobody speaking", ids(h.update(null, 0)) === "", "");
+  check("a voice lights its tile", ids(h.update("a", 1000)) === "a", "");
+  check("a pause keeps it lit", ids(h.update(null, 3500)) === "a", "");
+  check("someone else talking lights theirs too", ids(h.update("b", 3600)) === "a,b", "");
+  check("three seconds of silence turns it off", ids(h.update(null, 4000)) === "b", "");
+  h.drop("b");
+  check("a peer who leaves is dropped", ids(h.update(null, 4100)) === "", "");
+  check("the default hold is three seconds", mod.SPEAKING_HOLD_MS === 3000, String(mod.SPEAKING_HOLD_MS));
+
   // Through the tiles.
   const bar = el(), tilesS = el(), viewBtn = el(), fullBtn = el();
   const sPeer = {
@@ -463,6 +475,69 @@ permission = "prompt";
   sCalls.toggle();              // hang up: nobody left, the bar hides
   check("a call that ends does not leave the window covered",
         bar.hidden && !bar.classList.contains("call-full"), `hidden=${bar.hidden} ${bar.className}`);
+}
+
+// --- leaving the call --------------------------------------------------------
+// Leave used to stop only your own camera and mic: everyone else stayed on
+// screen and in your ears. Now it leaves them too, and a box stays where the
+// call was with a way back in, for as long as anyone is still in it.
+{
+  const bar = el(), tilesL = el();
+  const said = [];
+  const lPeer = {
+    peerId: "l0", addLocalMedia() {}, removeLocalMedia() {}, broadcast() {},
+    videoSenders() { return []; }, pinNeighbor() {}, unpinNeighbor() {},
+  };
+  const lCalls = mod.createCalls(
+    { peer: () => lPeer, say: (m) => said.push(m), label: (id) => id.toUpperCase(),
+      isAgent: (id) => id === "bot", roomPeers: () => [], mediaBlocked: () => [] },
+    { bar, tiles: tilesL, mute: el(), cam: el(), share: el() },
+  );
+  const live = () => tilesL.children.filter((c) => c.parent);
+  const keys = () => live().map((c) => c.dataset.key ?? c.className).join();
+  const rejoin = () => live().find((c) => c.className === "call-rejoin");
+  const cam = (n) => new Stream([new Track("audio", n + "-voice"), new Track("video", n + "-cam")]);
+  const aStream = cam("a"), bStream = cam("b");
+
+  lCalls.toggle();
+  await settle();
+  lCalls.remoteStream("a", aStream);
+  lCalls.remoteStream("b", bStream);
+  lCalls.remoteStream("bot", cam("bot"));
+  check("in the call: you and the two others", keys() === "__local__,a,b", keys());
+
+  lCalls.toggle();          // Leave
+  check("Leave leaves everyone, not just your own camera",
+        !live().some((c) => c.dataset.key), keys());
+  check("nothing is left playing", tilesL.children.every((c) => !c.dataset.key || c.parent === null), "");
+  check("a box with a way back in takes the call's place", !!rejoin() && !bar.hidden, keys());
+  check("it says who is still there (people, not agents)",
+        rejoin()?.children[0]?.textContent === "You left the call. Still in it: A, B.", rejoin()?.children[0]?.textContent);
+  check("the button says Rejoin", rejoin()?.children[1]?.textContent.includes("Rejoin the call"), rejoin()?.children[1]?.textContent);
+  check("the call controls are put away", bar.classList.contains("call-left"), bar.className);
+  check("hasLeft() reports it", lCalls.hasLeft() === true, String(lCalls.hasLeft()));
+
+  lCalls.remoteStream("c", cam("c"));
+  check("someone arriving while you are out is not shown", !live().some((c) => c.dataset.key === "c"), keys());
+  check("but is listed", rejoin()?.children[0]?.textContent.includes("C"), rejoin()?.children[0]?.textContent);
+
+  rejoin().children[1].fire("click");
+  await settle();
+  check("Rejoin puts you back in the call", lCalls.inCall() && !lCalls.hasLeft(), `inCall=${lCalls.inCall()}`);
+  check("and shows everyone at once", ["__local__", "a", "b", "c"].every((k) => live().some((c) => c.dataset.key === k)), keys());
+  check("the box goes", !rejoin() && !bar.classList.contains("call-left"), keys());
+  check("each tile plays the stream it had", live().find((c) => c.dataset.key === "a").children[0].srcObject === aStream, "");
+  check("and it says so", said.at(-1) === "📞 you rejoined the call", said.at(-1));
+
+  lCalls.toggle();          // Leave again
+  for (const id of ["a", "b", "c"]) lCalls.peerGone(id);
+  check("when the last person goes, so does the box", !rejoin() && bar.hidden && !lCalls.hasLeft(), `${keys()} hidden=${bar.hidden}`);
+
+  // Leaving when you were the only one there: no box, as before.
+  lCalls.toggle();
+  await settle();
+  lCalls.toggle();
+  check("leaving an empty call just closes it", !rejoin() && bar.hidden, keys());
 }
 
 console.log(failed === 0 ? "\ncalls: all passed" : `\ncalls: ${failed} FAILED`);
