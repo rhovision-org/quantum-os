@@ -28,7 +28,7 @@ myrole: {
 
 Run it: `node agent.mjs --room <cap> --role myrole [--ai --ai-backend claude-code]`. You
 inherit for free: a stable identity, the measured-disruption budget, `/myrole` + `ask` +
-`trust` + mute commands, the AI advisor (two backends), multi-agent lead-election, and trust
+`trust` + mute commands, the AI advisor ([provider plugins](scripts/qos-cli/ai-providers/README.md)), the [standard activity skills](scripts/qos-cli/skills/README.md), multi-agent lead-election, and trust
 governance. **Duties** are the proactive behaviours your role performs (the table atop
 `agent-roles.mjs` defines each); everything else is shared. → run/flags: [Agents](scripts/qos-cli/README.md).
 
@@ -61,16 +61,18 @@ protocol are documented in [scripts/qos-cli/README.md](scripts/qos-cli/README.md
 `qos-daemon.mjs`).
 
 ## The envelope vocabulary
-Plain `chat` is enough for a bot. To be a first-class member, also speak these (dyncap-signed
+Plain `chat` is enough for a bot. To be a first-class member, also speak these (dyncap-attributed
 where noted):
 
 | kind | meaning |
 |---|---|
 | `chat {text}` | a message |
 | `name {name, agent?}` | announce your display name; set `agent:<role>` so other agents recognize you |
-| `gov-trust {rater,ratee,rating}` · `gov-censure {censurer,target,on}` · `gov-delegate` | liquid-trust (self-signed) |
+| `gov-trust {rater,ratee,rating}` · `gov-censure {censurer,target,on}` · `gov-delegate` | liquid-trust (self-attributed) |
 | `group-open` · `group-member` · `sync-gov {groups}` | group roster / re-served state |
 | `lemma` · `state-discrepancy` | a recorded fact / a consensus split |
+| `sync-chat {lines}` | hand a joiner the conversation you heard (`{from, label, text, at}` per line) |
+| `agent-ctl` → `agent-ctl-reply` · `fork-request` → `fork-reply` | an owner's fork grants and a request for a copy ([fork-host.mjs](scripts/qos-cli/fork-host.mjs)) |
 
 Full kinds + payload shapes: [README](scripts/qos-cli/README.md) · [Group Decisions](Group_Decisions.md).
 
@@ -84,9 +86,12 @@ Full kinds + payload shapes: [README](scripts/qos-cli/README.md) · [Group Decis
 - **Multi-agent etiquette.** Tag `name` with `agent:<role>`; elect one lead per shared duty
   (lowest peerId) so N agents don't all act; count agent posts collectively against the human share.
 - **AI (optional).** [`facilitator-advisor.mjs`](scripts/qos-cli/facilitator-advisor.mjs)'s
-  `makeAdvisor({ persona, cmd, backend })` gives an advisor with two backends — `api`
-  (`ANTHROPIC_API_KEY`) or `claude-code` (a Claude subscription, no credits). Advisory only,
-  gated by your own budget. In the browser, **`/ask <question>`** routes to the live
+  `makeAdvisor({ persona, cmd, backend, skills })` reaches the model through a **provider
+  plugin** — `anthropic`, `claude-code` (a Claude plan, no credits), `deepseek`, or your own
+  `.mjs` ([contract](scripts/qos-cli/ai-providers/README.md)). Keys come from the agent
+  machine's environment only. Advisory only, gated by your own budget.
+- **Teach it an activity without code.** A [skill](scripts/qos-cli/skills/README.md) is a
+  Markdown file of rules; drop it in `skills/` and every agent has it. In the browser, **`/ask <question>`** routes to the live
   facilitator when one is present, otherwise the lowest-peer-id other live agent, and
   reports if none is present; it relays the normal `/<role> ask` chat form, so an agent
   needs no new protocol.

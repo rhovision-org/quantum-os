@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
   <meta name="description" content="QuantumOS (QOS): an intelligent gateway to each other and everything — a rho ZFA-inspired peer-to-peer layer with capability-oriented authorization. See the security model and limitations." />
   <title>QuantumOS — P2P Room</title>
+  <link rel="icon" type="image/svg+xml" href="/qos-icon.svg" />
   <!-- Geek level (src/geek.ts), applied before first paint so a "low" page
        never flashes the full one. -->
   <script>
@@ -42,7 +43,8 @@
       gap: 1rem;
     }
 
-    header h1 { font-size: 1rem; color: #7fdbca; letter-spacing: 0.05em; }
+    header h1 { font-size: 1rem; color: #7fdbca; letter-spacing: 0.05em; line-height: 0; }
+    header h1 .logo { height: 1.9rem; width: auto; display: block; }
     header .tag { font-size: 0.7rem; color: #555; flex: 1; }
 
     #sidebar-toggle {
@@ -82,12 +84,13 @@
       cursor: pointer;
       white-space: nowrap;
       user-select: none;
-      max-width: 16rem;
+      flex-shrink: 0;
     }
     .tab:hover { color: #ccc; background: #111; }
     .tab.active { color: #7fdbca; background: #111; border-bottom: 2px solid #7fdbca; padding-bottom: calc(0.35rem - 2px); }
     .tab.unread { color: #ff9d4a; font-weight: 600; }
-    .tab .tab-label { overflow: hidden; text-overflow: ellipsis; }
+    /* A tab shows its whole name — the tab list scrolls rather than cutting one off. */
+    .tab .tab-label { white-space: nowrap; }
     .tab .tab-close {
       background: none;
       border: none;
@@ -108,8 +111,29 @@
       padding: 0 0.8rem;
       font-size: 0.9rem;
       line-height: 1;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      white-space: nowrap;
     }
+    .tab-add .tab-add-word { font-size: 0.65rem; font-weight: 600; letter-spacing: 0.08em; }
     .tab-add:hover { background: #111; color: #aae0d5; }
+    /* The room-name dialog (roomNameDialog in app.ts). */
+    .room-name-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .room-name-card { background: #1b1d23; color: #e8e8ea; border: 1px solid #3a3d46; border-radius: 10px; max-width: 440px; width: 100%; padding: 18px 18px 14px; box-shadow: 0 8px 40px rgba(0,0,0,.5); font: 14px/1.5 system-ui, sans-serif; }
+    .room-name-title { font-weight: 600; font-size: 15px; margin-bottom: 10px; }
+    .room-name-label { display: block; font-size: 12px; opacity: .8; margin-bottom: 4px; }
+    .room-name-input { width: 100%; box-sizing: border-box; background: #0f1013; color: #e8e8ea; border: 1px solid #3a3d46; border-radius: 6px; padding: 8px 10px; font: 14px/1.4 system-ui, sans-serif; }
+    .room-name-input:focus { outline: none; border-color: #7fdbca; }
+    .room-name-preview { font: 11px/1.4 ui-monospace, monospace; color: #777; margin-top: 6px; min-height: 1.4em; word-break: break-all; }
+    .room-name-error { color: #ff9d4a; font-size: 12.5px; margin-top: 4px; min-height: 1.2em; }
+    .room-name-suggest { margin-top: 6px; background: none; border: 1px solid #2a8a76; color: #7fdbca; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12.5px; }
+    .room-name-suggest[hidden] { display: none; }
+    .room-name-suggest:hover { background: #12302a; }
+    .room-name-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+    .room-name-cancel { background: #2a2d35; color: #e8e8ea; border: 1px solid #3a3d46; border-radius: 6px; padding: 7px 14px; cursor: pointer; }
+    .room-name-ok { background: #3b6ef5; color: #fff; border: none; border-radius: 6px; padding: 7px 14px; cursor: pointer; font-weight: 600; }
+    .room-name-ok:disabled { opacity: .45; cursor: not-allowed; }
     .tab-add-wrap { position: relative; display: flex; }
     .tab-menu {
       position: absolute;
@@ -301,6 +325,15 @@
     .msg .from.self { color: #ff9d4a; }
     .msg .text { color: #ccc; }
     .msg.system-line .text { color: #bbb; }
+    /* A clock line wherever the minute changed between two messages. */
+    .msg.time-mark { text-align: center; color: #555; font-size: 0.68rem; margin: 0.35rem 0 0.1rem; user-select: none; }
+    /* A known room member named in a line; our own name stands out more, and
+       a peer's line that names us gets a gutter bar. */
+    .msg .mention { color: #7fdbca; background: rgba(127,219,202,0.10); border-radius: 3px; padding: 0 0.15rem; }
+    .msg .mention.me { color: #ffcf8a; background: rgba(255,157,74,0.18); font-weight: 600; }
+    .msg.mentions-me { border-left: 2px solid #ff9d4a; padding-left: 0.4rem; background: rgba(255,157,74,0.05); }
+    /* History merged from another peer's transcript on join. */
+    .msg.synced { opacity: 0.85; }
 
     .input-row {
       border-top: 1px solid #222;
@@ -362,7 +395,7 @@
       cursor: pointer;
     }
     #hide-btn:hover { border-color: #2a5a5a; color: #7fdbca; }
-    #copy-btn {
+    #copy-btn, #invite-btn {
       background: none;
       border: 1px solid #333;
       border-radius: 3px;
@@ -373,7 +406,7 @@
       cursor: pointer;
       white-space: nowrap;
     }
-    #copy-btn:hover { color: #aaa; border-color: #555; }
+    #copy-btn:hover, #invite-btn:hover { color: #aaa; border-color: #555; }
 
     /* Markdown inside messages */
     .msg .text code { background:#1a1a1a; border:1px solid #262626; border-radius:3px; padding:0 0.25rem; font-size:0.78rem; color:#aae0d5; }
@@ -486,6 +519,15 @@
     .call-tiles.speaker .stage-main.pinned .call-zoom { opacity:1; }
     .call-tiles.speaker .stage-side { grid-column:10 / span 3; }
     .call-tiles.speaker .stage-below { grid-column:span 2; }
+    /* A thumbnail is never wider than 16:9. Its height is the row's; its width
+       follows from that, and may only shrink if the column is narrower (which
+       makes it taller than 16:9, never wider). */
+    .call-tiles.speaker .stage-side,
+    .call-tiles.speaker .stage-below,
+    .call-bar.call-full .call-tiles:not(.speaker) .call-tile:not(.expanded) {
+      height:100%; width:auto; max-width:100%; aspect-ratio:16 / 9; justify-self:start;
+    }
+    .call-bar.call-full .call-tiles:not(.speaker) .call-tile:not(.expanded) { justify-self:center; }
     /* Making sound right now. */
     .call-tile.speaking { border-color:#3fbf7f; box-shadow:0 0 0 2px #3fbf7f; }
     @media (max-width: 640px) {
@@ -494,8 +536,22 @@
       .call-tiles.speaker .stage-main { grid-column:1 / -1; }
       .call-tiles.speaker .stage-side,
       .call-tiles.speaker .stage-below { grid-column:span 4; grid-row:auto !important; }
-      .call-bar.call-full .call-ctl, html[data-geek="low"] .call-ctl { min-width:3.6rem; padding:0.35rem 0.4rem; }
+      .call-bar.call-full .call-ctl { min-width:3.6rem; padding:0.35rem 0.4rem; }
     }
+
+    /* ── Having left the call (calls.ts `paintRejoin`) ───────────────────────
+       The call's place holds one video-shaped box and a way back in; the call
+       controls are for someone in the call, so they go until then. */
+    .call-bar.call-left .call-controls { display:none; }
+    /* Not the speaker grid: there is one box, not a stage. */
+    .call-bar.call-left .call-tiles { display:flex !important; }
+    .call-rejoin {
+      width:min(100%, 400px); aspect-ratio:16 / 9; background:#000; border:1px dashed #2a3a3a; border-radius:6px;
+      display:flex; flex-direction:column; align-items:center; justify-content:center; gap:0.6rem; padding:0.75rem; text-align:center;
+    }
+    .call-rejoin-msg { font-size:0.7rem; color:#8fa9a3; }
+    .call-rejoin-btn { background:#141414; border:1px solid #2a6b5e; border-radius:5px; color:#7fdbca; font-family:inherit; font-size:0.85rem; padding:0.35rem 0.8rem; cursor:pointer; }
+    .call-rejoin-btn:hover { background:#1e3a3a; }
 
     /* ── The call, full screen (calls.ts `toggleFull`) ────────────────────────
        The bar itself fills the window, so the controls come with it. The class
@@ -507,14 +563,13 @@
     .call-bar.call-full .call-tiles:not(.speaker) {
       display:grid; grid-template-columns:repeat(auto-fit, minmax(min(320px, 100%), 1fr)); grid-auto-rows:minmax(0, 1fr);
     }
-    .call-bar.call-full .call-tiles:not(.speaker) .call-tile:not(.expanded) { width:auto; height:auto; min-height:0; }
     .call-bar.call-full .call-controls { justify-content:center; }
-    .call-bar.call-full .call-ctl, html[data-geek="low"] .call-ctl {
+    .call-bar.call-full .call-ctl {
       display:flex; flex-direction:column; align-items:center; gap:0.15rem;
       min-width:4.6rem; padding:0.4rem 0.6rem; font-size:1.05rem; border-radius:8px;
     }
     /* The word under the icon: calls.ts keeps `data-label` current. */
-    .call-bar.call-full .call-ctl[data-label]::after, html[data-geek="low"] .call-ctl[data-label]::after {
+    .call-bar.call-full .call-ctl[data-label]::after {
       content:attr(data-label); font-size:0.62rem; color:#b9c4c1; white-space:nowrap;
     }
 
@@ -534,51 +589,23 @@
       .geek-opt { padding:0.3rem 0.45rem; }
     }
 
-    /* Low: the same room, dressed as somewhere you talk. Nothing below removes
-       a capability — every command still works when typed. */
-    html[data-geek="low"] body { font-family:system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; background:#1a1d21; color:#d1d2d3; }
-    html[data-geek="low"] header { background:#121016; border-bottom-color:#2c2d30; padding:0.7rem 1.2rem; }
-    html[data-geek="low"] header h1 { font-size:1.05rem; letter-spacing:0; }
-    html[data-geek="low"] .geek-toggle { font-size:0.72rem; }
-    html[data-geek="low"] .tab-bar { background:#121016; border-bottom-color:#2c2d30; }
-    html[data-geek="low"] .tab { font-size:0.8rem; }
-    html[data-geek="low"] .sidebar { background:#19171d; border-right-color:#2c2d30; gap:1.4rem; }
-    html[data-geek="low"] .sidebar h2 { font-size:0.8rem; color:#9a9b9e; text-transform:none; letter-spacing:0; font-weight:600; margin-bottom:0.35rem; }
-    html[data-geek="low"] #my-name { font-size:0.85rem !important; padding:0.5rem 0.6rem !important; border-radius:6px !important; }
-    html[data-geek="low"] .signal-row button { flex:1; font-size:0.85rem; padding:0.5rem; border-radius:6px; background:#1f6f5f; border-color:#2a8a76; color:#fff; font-weight:600; }
-    html[data-geek="low"] .signal-row button:hover { background:#258471; }
-    html[data-geek="low"] #status-text { font-size:0.75rem; }
-    html[data-geek="low"] #peer-list li { font-size:0.88rem; color:#d1d2d3; border-bottom:none; padding:0.25rem 0; word-break:normal; }
-    html[data-geek="low"] #peer-list li::before { content:""; display:inline-block; width:8px; height:8px; border-radius:50%; background:#2bac76; margin-right:0.5rem; }
-    html[data-geek="low"] #peer-list li.unreachable::before { background:none; border:1.5px solid #8a7550; }
-    html[data-geek="low"] .lib-row, html[data-geek="low"] #poll-list { font-size:0.82rem; }
-    html[data-geek="low"] .lib-drop { font-size:0.72rem; color:#6b6c70; border-color:#3a3b3f; }
-    html[data-geek="low"] .share-row { background:#1a1d21; border-bottom-color:#2c2d30; font-size:0.8rem; padding:0.55rem 1.2rem; }
-    html[data-geek="low"] .share-row span { color:#9a9b9e; }
-    html[data-geek="low"] #invite-btn { background:#222529; border:1px solid #3a3b3f; border-radius:6px; color:#d1d2d3; font-family:inherit; font-size:0.8rem; padding:0.35rem 0.75rem; cursor:pointer; }
-    html[data-geek="low"] #invite-btn:hover { border-color:#2a8a76; color:#7fdbca; }
+    /* Low: the same room with less on screen. Fonts, buttons and borders are
+       the other levels'; only the background colours differ. Nothing here
+       removes a capability — every command still works when typed. */
+    html[data-geek="low"] body { background:#1a1d21; }
+    html[data-geek="low"] header,
+    html[data-geek="low"] .tab-bar { background:#121016; }
+    html[data-geek="low"] .sidebar { background:#19171d; }
+    html[data-geek="low"] .share-row,
+    html[data-geek="low"] .actions-row { background:#1a1d21; }
+    html[data-geek="low"] .welcome,
+    html[data-geek="low"] #msg-input { background:#222529; }
+    html[data-geek="low"] .call-bar { background:#0b0c0e; }
     /* The toolbar keeps what a conversation needs; the rest is still a `/` away. */
     html[data-geek="low"] .action-btn[data-action="rholang"],
     html[data-geek="low"] .action-btn[data-action="estimate"],
     html[data-geek="low"] .action-btn[data-action="commands"],
     html[data-geek="low"] .action-btn[data-action="other"] { display:none; }
-    html[data-geek="low"] .actions-row { background:#1a1d21; border-bottom-color:#2c2d30; padding:0.55rem 1.2rem; gap:0.5rem; }
-    html[data-geek="low"] .action-btn { font-size:0.82rem; padding:0.4rem 0.85rem; border-radius:999px; background:#222529; border-color:#3a3b3f; color:#d1d2d3; }
-    html[data-geek="low"] #messages { padding:1rem 1.2rem; gap:0.5rem; }
-    html[data-geek="low"] .msg { font-size:0.94rem; }
-    html[data-geek="low"] .msg .from { font-weight:700; color:#fff; }
-    html[data-geek="low"] .msg .from.self { color:#7fdbca; }
-    html[data-geek="low"] .msg .text { color:#d1d2d3; }
-    html[data-geek="low"] .msg.system-line { font-size:0.8rem; }
-    html[data-geek="low"] .msg.system-line .text { color:#8b8c90; }
-    html[data-geek="low"] .welcome { font-size:0.92rem; border-style:solid; border-color:#2c2d30; background:#222529; color:#c4c5c7; }
-    html[data-geek="low"] .welcome h3 { font-size:1.05rem; color:#fff; }
-    html[data-geek="low"] .input-row { border-top-color:#2c2d30; padding:0.8rem 1.2rem; }
-    html[data-geek="low"] #msg-input { font-size:0.95rem; padding:0.65rem 0.9rem; border-radius:8px; background:#222529; border-color:#565856; }
-    html[data-geek="low"] #send-btn { font-size:0.9rem; border-radius:8px; background:#1f6f5f; border-color:#2a8a76; color:#fff; font-weight:600; }
-    html[data-geek="low"] #attach-btn { border-radius:8px; background:#222529; border-color:#3a3b3f; }
-    html[data-geek="low"] .call-bar { background:#0b0c0e; border-bottom-color:#2c2d30; }
-    html[data-geek="low"] .call-controls { justify-content:center; }
 
     /* Polls */
     .msg.poll-msg { display:block; }
@@ -619,7 +646,8 @@
 
     /* Onboarding / empty state */
     .welcome { color:#9a9a9a; font-size:0.78rem; line-height:1.7; border:1px dashed #262626; border-radius:8px; padding:1rem 1.1rem; margin:0.5rem 0; }
-    .welcome h3 { color:#7fdbca; font-size:0.85rem; margin-bottom:0.5rem; }
+    .welcome h3 { color:#7fdbca; font-size:0.85rem; margin-bottom:0.5rem; display:flex; align-items:center; gap:0.5rem; }
+    .welcome h3 .welcome-icon { height:2em; width:2em; flex:none; }
     .welcome ol { margin:0.4rem 0 0.4rem 1.1rem; }
     .welcome li { margin:0.2rem 0; }
     .welcome code { background:#1a1a1a; border:1px solid #262626; border-radius:3px; padding:0 0.25rem; color:#aae0d5; }
@@ -629,7 +657,7 @@
 <body>
   <header>
     <button id="sidebar-toggle" aria-label="Toggle sidebar">☰</button>
-    <h1>⬡ QuantumOS</h1>
+    <h1><img class="logo" src="/qos-logo.svg" alt="QuantumOS" width="2200" height="500"></h1>
     <span class="tag geek-med" title="An intelligent gateway to each other and everything — a rho ZFA-inspired p2p layer.">gateway to each other and everything · rho ZFA-inspired p2p</span>
     <a href="https://github.com/rhovision-org/quantum-os#readme" class="geek-med"
        target="_blank" rel="noopener"
@@ -647,9 +675,9 @@
   <div id="tab-bar" class="tab-bar">
     <div id="tab-list" class="tab-list"></div>
     <div class="tab-add-wrap">
-      <button id="tab-add" class="tab-add" title="Add a room tab" aria-haspopup="menu" aria-expanded="false">+</button>
+      <button id="tab-add" class="tab-add" title="Add a room tab" aria-haspopup="menu" aria-expanded="false">+<span class="tab-add-word">ROOM</span></button>
       <div id="tab-menu" class="tab-menu" role="menu" hidden>
-        <button id="tab-new" class="tab-menu-item" role="menuitem">New room<span>create a fresh room tab</span></button>
+        <button id="tab-new" class="tab-menu-item" role="menuitem">New room…<span>name it and open a fresh room tab</span></button>
         <button id="tab-join" class="tab-menu-item" role="menuitem">Join room…<span>paste a room link or capability</span></button>
       </div>
     </div>

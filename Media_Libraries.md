@@ -77,7 +77,7 @@ Every entry is identified by `SHA-256` of the bytes. The browser already has it
 An entry is `{hash, name, mime, size, addedBy, at, cap?}`. The index is a
 per-room store, and it is the same shape as every other store in this app:
 
-- dyncap-signed `library-entry` envelopes, so who added an entry is not a guess;
+- dyncap-attributed `library-entry` envelopes, so who added an entry is not a guess;
 - replayed to joiners in the existing `sync-*` handshake;
 - removable through the existing tombstone machinery (`retract`, kind
   `"library"`), so a removal does not heal back on the next sync;
@@ -166,7 +166,7 @@ Each answers in lines, so each composes. `/file add` broadcasts its entry
 because that is the point of it; `/file get` does not, because a fetch is
 between two peers.
 
-**The macros.** A workflow is a `+command`, which is dyncap-signed room state,
+**The macros.** A workflow is a `+command`, which is dyncap-attributed room state,
 replayed to joiners and owned by its author — so a group adopts a way of
 working the way EIES groups adopted commands, without a release.
 

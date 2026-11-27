@@ -11,7 +11,7 @@ The full reference is in
 [scripts/qos-cli/README.md](../scripts/qos-cli/README.md#agents-facilitator-scribe-greeter-).
 
 **What you need:** a Claude account. To keep an agent up for good, you also need an
-account with a host and an Anthropic API key. **You don't need** write access to this
+account with a host and your own AI key (Anthropic or DeepSeek). **You don't need** write access to this
 repository or a GitHub account: the repo is public, and Claude clones it anonymously.
 GitHub is only for the [optional fork path](#optional-your-own-persona-with-a-github-account).
 
@@ -19,6 +19,39 @@ Verified 2026-11-18: a facilitator joined a live room from a cloud session and g
 new peer within seconds.
 
 ## Quick start
+
+**You need your own AI account.** An agent's AI runs on your key or plan, never the room's:
+the `claude` CLI logged in (your Claude plan), or your own `ANTHROPIC_API_KEY` or
+`DEEPSEEK_API_KEY` on the computer that runs it. Keys are never typed into the room.
+
+**From inside the room** (newest, simplest): type `/agent add` (or `/agent add skeptic`,
+`/agent add Socrates`). It copies one line with the room already in it:
+
+- **Have a terminal?** Paste the line into it on any computer with git and Node 18+.
+  The agent installs itself, joins within seconds, and stays as long as that computer is
+  on. It uses your Claude plan if the `claude` CLI is installed there, otherwise
+  `ANTHROPIC_API_KEY`, otherwise `DEEPSEEK_API_KEY`. With none of them it stops and says
+  how to set one up (`--ai none` starts one without AI on purpose).
+- **No terminal?** Type `/agent claude` instead and paste what it copies into a Claude
+  Code session. That is the route the rest of this page describes.
+
+Add `--ai deepseek` (or `claude`, `anthropic`) to choose the model provider, after
+setting that provider's key on the computer that runs it; `--model` picks a model. Each
+provider is a plugin, and you can [add your own](../scripts/qos-cli/ai-providers/README.md).
+Type `/agent` to watch it arrive.
+
+**Activities.** Every agent knows the [standard skills](../scripts/qos-cli/skills/README.md)
+(brainstorm, debate, retrospective, story-round, twenty-questions, word-chain): in the room,
+`/facil use debate`, `/facil rules`, `/facil play <move>`. `/agent add … --skill <name>`
+starts it with one on.
+
+**Lending it to another room.** The browser that ran `/agent add` owns the agent.
+`/agent grant [uses N] [days D]` gives a fork grant; whoever holds it runs
+`/agent fork <grant>` in their own room and a copy joins there, with the same role,
+skills and AI but nothing from your room. Copies run on your computer and account:
+`/agent grants` lists grants, `/agent revoke <id> stop` ends one and its copies.
+A copy started from a Claude cloud session lasts only as long as that session.
+
 
 **Try it now:** this is included in your Claude plan, and the agent lasts minutes after
 you stop chatting.
@@ -214,8 +247,8 @@ crash or reboot. Ask Claude to show you what it does before you paste it.
 Render builds the public repo, so it runs only the roles already there. A fork lets
 Render run your own persona, and redeploy it whenever you change it.
 
-1. [Sign up for GitHub](https://github.com/signup) and
-   [fork rhovision-org/quantum-os](https://github.com/rhovision-org/quantum-os/fork).
+1. [Sign up for GitHub](https://github.com/signup) and ask Claude to
+   fork rhovision-org/quantum-os
 2. Let Claude edit the fork:
    - [connect GitHub](https://claude.ai/connect-github)
    - [install the Claude GitHub App](https://github.com/apps/claude/installations/select_target)

@@ -11,7 +11,7 @@ Detail pages hang off this one:
 | [connection.md](connection.md) | signaling trust model, room capacity, the bounded-degree overlay, leased peer ids, `/ice`, the default TURN relay, reconnect fixes |
 | [rholang.md](rholang.md) | the `$`/`+` macro language, the `%` capability-macro registry, the `/rholang` chain client |
 | [commands.md](commands.md) | every slash command |
-| [qos-process.md](qos-process.md) | named QOS processes: the finite event contract, signed lifecycle, deterministic orchestration, failure modes, and the chain boundary (gate quantum-os#264) |
+| [qos-process.md](qos-process.md) | named QOS processes: the finite event contract, dyncap-attributed lifecycle, deterministic orchestration, failure modes, and the chain boundary (gate quantum-os#264) |
 | [os-roadmap.md](os-roadmap.md) · [os-abi.md](os-abi.md) | QOS/1 — the OS layer model, invariants, milestones, and the v0 handle/syscall ABI (design + first slice) |
 | [success-frameworks.md](success-frameworks.md) · [success-charter.md](success-charter.md) · [rhoqu-success-recipes.md](rhoqu-success-recipes.md) | private goals, group charters, the required RhoGov handoff artifact, and RhoQu recipes with their current limits |
 | [../Consensus.md](../Consensus.md) | the `/probe` protocol and threat model |
