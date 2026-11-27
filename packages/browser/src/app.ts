@@ -981,6 +981,8 @@ function qosCommandFor(ctx: RoomContext): QosCommand | null {
   const volatileCache=new RoomByteCache();
   const cmd = new QosCommand({
     loadJournal:()=>{const saved=localStorage.getItem(journalKey);return saved===null?null:JSON.parse(saved);},
+    loadSnapshot:name=>{const raw=localStorage.getItem(journalKey+":snapshot:"+name);return raw===null?null:JSON.parse(raw);},
+    saveSnapshot:(name,snapshot)=>{localStorage.setItem(journalKey+":snapshot:"+name,JSON.stringify(snapshot));},
     saveJournal:events=>{
       const encoded=JSON.stringify(events);
       if(encoded.length>2*1024*1024)throw new Error("local journal checkpoint limit");
@@ -6470,6 +6472,10 @@ function handleCommand(raw: string): string[] {
       sys(`→ asked the ${role} (${peerLabel(agent.peerId)}) — ${text}`);
       break;
     }
+
+    case "top":case "dmesg":case "trace":case "stat":case "snapshot":case "restore":case "branch":
+      runQosCommand(cmd+" "+arg,"/"+cmd);
+      break;
 
     case "pkg":case "svc":
       runQosCommand(cmd+" "+arg,"/"+cmd);

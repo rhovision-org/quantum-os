@@ -195,6 +195,8 @@ jobs:
         run: node packages/browser/test/qos-device.test.mjs
       - name: QOS signed packages and deterministic init test
         run: node packages/browser/test/qos-init.test.mjs
+      - name: QOS snapshot, branch isolation and quota test
+        run: node packages/browser/test/qos-observe.test.mjs
       - name: QOS isolated syscall trace test
         run: node packages/browser/test/qos-syscall-journal.test.mjs
 
