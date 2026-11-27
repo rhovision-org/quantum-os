@@ -1,9 +1,6 @@
 name: QOS browser init acceptance (#284)
 on:
-  push:
-    branches: [feat/qos-kernel-init-284]
   pull_request:
-    branches: [main, work, feat/qos-kernel-devices-283]
     paths:
       - "packages/browser/src/qos-*.ts"
       - "packages/browser/src/app.ts"
@@ -11,6 +8,7 @@ on:
       - "packages/browser/test/qos-init-opfs-ci.mjs"
       - "scripts/localnet/qos-vfs-opfs-ci.py"
       - ".github/workflows/qos-init-browser.yml"
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
