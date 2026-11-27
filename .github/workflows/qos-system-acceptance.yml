@@ -1,9 +1,6 @@
 name: QOS/1 integrated system acceptance (#276)
 on:
-  push:
-    branches: [feat/qos1-system-acceptance-276]
   pull_request:
-    branches: [main, work, feat/qos-native-boot-286]
     paths:
       - "packages/browser/src/qos-*.ts"
       - "packages/browser/src/app.ts"
@@ -15,6 +12,7 @@ on:
       - "packages/browser/test/qos-system-opfs-ci.mjs"
       - "scripts/localnet/qos-vfs-opfs-ci.py"
       - ".github/workflows/qos-system-acceptance.yml"
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

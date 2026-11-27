@@ -1,9 +1,6 @@
 name: QOS cross-runtime boot acceptance (#286)
 on:
-  push:
-    branches: [feat/qos-native-boot-286]
   pull_request:
-    branches: [main, work, feat/qos-kernel-recovery-285]
     paths:
       - "packages/browser/src/qos-*.ts"
       - "packages/browser/src/app.ts"
@@ -13,6 +10,7 @@ on:
       - "packages/browser/test/qos-boot-opfs-ci.mjs"
       - "scripts/localnet/qos-vfs-opfs-ci.py"
       - ".github/workflows/qos-boot-browser.yml"
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
