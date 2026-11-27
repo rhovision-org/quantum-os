@@ -1,6 +1,10 @@
 # quantum-os
 
-> **QuantumOS (QOS) is an intelligent gateway to each other and everything.** It is the rho ZFA peer-to-peer layer — proven secure. Every identity, message, claim, and unit of value is a capability token whose validity is a machine-checked algebraic fact (Curry–Howard security, Lean-verified in [QLF](https://github.com/rhovision-org/quantum-logical-framework)), not a policy anyone has to trust or a server anyone has to ask. To an engineer that reads as *zero-trust p2p with capability tokens standing in for ACLs, sessions, and TLS all at once*. To anyone else it reads more simply: reaching another person and reaching the truth, the agreement, or the value between you are the same one verified act — the gateway to each other *is* the gateway to everything, because in QOS a relationship and a reality are the same kind of object.
+**In summary:**
+
+QuantumOS (QOS) is a P2P Slack or Discord designed for making group decisions and deploying group resources, with a Rholo interface for when consensus needs to be publicly recorded and resources need to be exchanged.
+
+> **In depth... QOS is an intelligent gateway to each other and everything.** It is the Rho ZFA peer-to-peer layer — proven secure. Every identity, message, claim, and unit of value is a capability token whose validity is a machine-checked algebraic fact (Curry–Howard security, Lean-verified in [QLF](https://github.com/rhovision-org/quantum-logical-framework)), not a policy anyone has to trust or a server anyone has to ask. To an engineer that reads as *zero-trust p2p with capability tokens standing in for ACLs, sessions, and TLS all at once*. To anyone else it reads more simply: reaching another person and reaching the truth, the agreement, or the value between you are the same one verified act — the gateway to each other *is* the gateway to everything, because in QOS a relationship and a reality are the same kind of object.
 >
 > That security model runs **off-chain by default** — rooms, capability tokens, lemmas, notes, polls, rendezvous swaps, governance, and the file library are all verified peer-to-peer by the algebra itself, no consensus and no ledger required. That's not a limitation, it's the point: everyday activity leaves no public trace to correlate and costs nothing beyond the peers' own bandwidth. A blockchain (`/rholang`, the pooled token exchange, wrapped native tokens) is an opt-in extension reached for deliberately — a durable public record, a currency that must exist outside any one room — never a dependency of the security or privacy guarantee.
 >
@@ -10,9 +14,11 @@
 
 Peer-to-peer QuantumOS running in the browser. ZFA kernel in Rust/WASM, WebRTC data channels for transport, self-hosted signaling server.
 
-**[Open a room →](https://rhovision-org.github.io/quantum-os/)** · **[My room →](MyRoom.md)** · **[Syllogism Demo →](SyllogismDemo.md)** · **[Promissory Note Demo →](PromissoryNoteDemo.md)** · **[Atomic Swap Demo →](AtomicSwapDemo.md)** · **[Token Exchange Demo →](ExchangeDemo.md)** · **[Multisig Demo →](MultisigDemo.md)** · **[Dining Philosophers Demo →](DiningPhilosophersDemo.md)** · **[RhoQu Macro Demo →](RhoQuDemo.md)** · **[Optimization Demo →](OptimizationDemo.md)** · **[Consensus →](Consensus.md)** · **[EIES legacy →](EIES_Legacy.md)** · **[Security →](SECURITY.md)** · **[Candidate capability issuance profile →](docs/capability-issuance-profile.md)** · **[New issue →](https://github.com/rhovision-org/quantum-os/issues/new)**
+**[Open a room →](https://rhovision-org.github.io/quantum-os/)** · **[My room →](MyRoom.md)** · **[Syllogism Demo →](SyllogismDemo.md)** · **[Promissory Note Demo →](PromissoryNoteDemo.md)** · **[Atomic Swap Demo →](AtomicSwapDemo.md)** · **[Token Exchange Demo →](ExchangeDemo.md)** · **[Multisig Demo →](MultisigDemo.md)** · **[Dining Philosophers Demo →](DiningPhilosophersDemo.md)** · **[RhoQu Macro Demo →](RhoQuDemo.md)** · **[Optimization Demo →](OptimizationDemo.md)** · **[Consensus →](Consensus.md)** · **[EIES legacy →](EIES_Legacy.md)** · **[Security →](SECURITY.md)** · **[New issue →](https://github.com/rhovision-org/quantum-os/issues/new)**
 
 **Group processes:** **[User Guide →](User_Guide.md)** · **[Developer Guide (build agents) →](Developer_Guide.md)** · **[MacRhoLang — write your own commands →](MacRhoLang.md)** · **[Group Decisions →](Group_Decisions.md)** · **[QOS process orchestration (gate #264) →](docs/qos-process.md)** · **[Quantum Problem Solver →](Collective_Optimization.md)** · **[Governance (liquid democracy) →](Governance.md)** · **[Room Best Practices →](Room_Best_Practices.md)** · **[Live Testing (2+ people) →](Live_Testing.md)** · **[RhoQuCalc Macros — protocols as verified ρ-processes →](RhoQuCalc_Macros.md)**
+
+**Capability research:** **[Candidate capability issuance profile →](docs/capability-issuance-profile.md)**
 
 **Case studies:** **[Multi-Stakeholder Governance →](GovernanceCaseStudy.md)** · **[Collaborative Learning →](CollaborativeLearningCaseStudy.md)** · **[Specialist Closure Room →](SpecialistRoomCaseStudy.md)** · **[Framework Self-Inquiry (draft) →](SelfInquiryCaseStudy.md)**
 
@@ -42,7 +48,7 @@ Everything linked from the first four rows is **running code or a verified proof
 9. Use `/grant [label]` to mint a random ZFA capability token and share it as a proof object.
 10. Use `/request name` to signal you need a named lemma; the holder sees a prompt and can `/pass name peer` to transfer it directly — no token strings to copy.
 
-Beyond evaluation, a room is a full collaboration space: take **group decisions** (`/poll`, `/estimate`, the `/probe` consensus check, trust-weighted `/gov` liquid democracy); invite **AI agent members** — a trust-governed *facilitator*, *scribe*, and *skeptic* that join as full peers and run on a Claude subscription ([Developer Guide](Developer_Guide.md)) — and ask the room with **`/ask <question>`**, which picks the facilitator when present, otherwise another live agent ([Agents](scripts/qos-cli/README.md)); and run the room as a **quantum problem solver** (below). New here? Start with the **[User Guide](User_Guide.md)**.
+Beyond evaluation, a room is a full collaboration space: take **group decisions** (`/poll`, `/estimate`, the `/probe` consensus check, trust-weighted `/gov` liquid democracy); invite **AI agent members** with **`/agent add`** — one pasted line puts a trust-governed *facilitator*, *scribe*, *skeptic*, *greeter* or *observer* in the room, running on **your own** Claude plan or API key (Claude, DeepSeek, or a provider plugin of your own), with **standard activity skills** (brainstorm, debate, retrospective, word games) and a way to **fork** your agent into someone else's room ([docs/commands.md](docs/commands.md#agent-ai-agents-in-the-room)) — and ask the room with **`/ask <question>`**, which picks the facilitator when present, otherwise another live agent ([Agents](scripts/qos-cli/README.md)); join late and still **see the conversation so far**, with time marks and your name highlighted where you're mentioned; and run the room as a **quantum problem solver** (below). New here? Start with the **[User Guide](User_Guide.md)**.
 
 The room URL encodes a ZFA capability token in the hash (`#room=cap:room:…`). Anyone with the link can join — no account needed. The public signaling server (`wss://quantum-os-signaling.onrender.com`) is used by default; edit the field to point at a self-hosted server.
 
@@ -74,7 +80,7 @@ and the source file behind it, is in [docs/commands.md](docs/commands.md)**. By 
 | Claims & value | `/lemma` `/grant` `/request` `/pass` `/note` `/rdv` `/persist` `/forget` | [PromissoryNoteDemo.md](PromissoryNoteDemo.md) · [AtomicSwapDemo.md](AtomicSwapDemo.md) |
 | Deciding | `/poll` `/estimate` `/probe` `/gov` `/channel` | [Group_Decisions.md](Group_Decisions.md) · [Governance.md](Governance.md) · [Consensus.md](Consensus.md) |
 | Processes | `/qos` `/ps` `/kill` | [docs/qos-process.md](docs/qos-process.md) · [docs/os-roadmap.md](docs/os-roadmap.md) |
-| Agents | `/ask` `/facil` `/scribe` `/skeptic` `/observer` `/greeter` | [scripts/qos-cli/README.md](scripts/qos-cli/README.md) |
+| Agents | `/agent` (`add` · `grant` · `fork`) `/ask` `/facil` `/scribe` `/skeptic` `/observer` `/greeter` | [docs/agents-from-claude.md](docs/agents-from-claude.md) · [scripts/qos-cli/README.md](scripts/qos-cli/README.md) · [skills](scripts/qos-cli/skills/README.md) · [AI providers](scripts/qos-cli/ai-providers/README.md) |
 | Personal goals | `/goal` | [docs/success-frameworks.md](docs/success-frameworks.md) · [docs/success-charter.md](docs/success-charter.md) |
 | Macros & chain | `/macro` `+name` `$name` `/rhoqu` `/rholang` | [MacRhoLang.md](MacRhoLang.md) · [docs/rholang.md](docs/rholang.md) |
 | Media & files | Call bar · `/record` · `/file` · `/render` | [Media_Libraries.md](Media_Libraries.md) (design) |
@@ -181,6 +187,7 @@ and a **bridge** that stands in two rooms at once ([Room_Bridges.md](Room_Bridge
 cd scripts/qos-cli && npm install
 node qos-cli.mjs --room "<cap:room:… | room-URL>" --message "hello room"
 bash run-agents.sh "" facilitator observer      # defaults to the MyRoom test room
+bash add-agent.sh "<room link>" skeptic         # what /agent add copies: one agent, your own AI key or plan
 ```
 
 Rooms are peer-to-peer: a message reaches only the peers present at that moment; the daemon

@@ -3,7 +3,7 @@
 // Exercises the QOS process contract end to end without a network:
 //
 //   - the finite event schema and strict rholalc-facing parser;
-//   - signed start/suspend/resume/terminate lifecycle events;
+//   - dyncap-attributed start/suspend/resume/terminate lifecycle events;
 //   - the example composition (nominations -> ranked poll -> lemma-of-record
 //     -> optional anchor) on three peer identities;
 //   - identical final/state digests on independent peers fed the same
@@ -92,12 +92,39 @@ console.log("\nevent model");
 eq("the event vocabulary is finite and explicit", Q.QOS_EVENT_TYPES, [
   "process-start", "process-suspend", "process-resume", "process-terminate",
   "capability-grant", "nomination", "poll-open", "ballot", "poll-close",
-  "lemma", "anchor",
+  "lemma", "anchor", "syscall-request", "syscall-result",
 ]);
 ok("an unknown type is rejected", Q.parseQosEvent({ kind: "qos-event", schema: Q.QOS_EVENT_SCHEMA, type: "unknown" }) === null);
 ok("a non-event is rejected", Q.parseQosEvent(null) === null);
 ok("canonical JSON sorts keys recursively",
   Q.canonicalJson({ b: 2, a: { d: 4, c: 3 } }) === '{"a":{"c":3,"d":4},"b":2}');
+// Causal canonicalization must override stable tuple order when a dependency
+// exists, while using compareEvents only among ready events.
+{
+  const ev = (hash, source, seq, prev = "genesis", grant = "root") => ({ hash, source, seq, prev, grant });
+  const parent = ev("p", "z-source", 1);
+  const child = ev("c", "a-source", 1, "p");
+  const concurrent = ev("x", "m-source", 1);
+  const ordered = Q.canonicalEventOrder([child, concurrent, parent]);
+  ok("causal predecessor is ordered before its consumer", ordered.ordered.findIndex(e => e.hash === "p") < ordered.ordered.findIndex(e => e.hash === "c"));
+  ok("valid explicit dependencies produce no missing refs or cycles", ordered.missingDependencies.length === 0 && ordered.cyclicHashes.length === 0);
+  const permuted = Q.canonicalEventOrder([parent, child, concurrent]);
+  eq("arrival permutation preserves causal canonical order", permuted.ordered.map(e => e.hash), ordered.ordered.map(e => e.hash));
+  const permutations = [
+    [child, concurrent, parent], [child, parent, concurrent],
+    [concurrent, child, parent], [concurrent, parent, child],
+    [parent, child, concurrent], [parent, concurrent, child],
+  ];
+  ok("all permutations produce the same causal canonical order", permutations.every(input =>
+    JSON.stringify(Q.canonicalEventOrder(input).ordered.map(e => e.hash)) === JSON.stringify(ordered.ordered.map(e => e.hash))));
+  const grant = ev("g", "b-source", 2);
+  const granted = ev("q", "a-source", 3, "genesis", "g");
+  eq("grant dependency is ordered before its consumer", Q.canonicalEvents([granted, grant]).map(e => e.hash), ["g", "q"]);
+  const missing = Q.canonicalEventOrder([ev("m1", "a", 1, "missing-prev")]);
+  ok("missing dependencies are surfaced", missing.missingDependencies.length === 1 && missing.missingDependencies[0].kind === "prev");
+  const cycle = Q.canonicalEventOrder([ev("cy1", "a", 1, "cy2"), ev("cy2", "b", 1, "cy1")]);
+  eq("dependency cycles are surfaced deterministically", cycle.cyclicHashes, ["cy1", "cy2"]);
+}
 
 // ---------------------------------------------------------------------------
 // 2. Capability derivation and attenuation
@@ -120,34 +147,34 @@ ok("adding an event type not in the parent is refused",
   Q.attenuateScope(participant, { ...participant, events: ["nomination", "anchor"] }) === null);
 
 // ---------------------------------------------------------------------------
-// 3. Signed lifecycle
+// 3. Dyncap-attributed lifecycle
 // ---------------------------------------------------------------------------
 
-console.log("\nprocess identity and signed lifecycle");
+console.log("\nprocess identity and dyncap attribution");
 {
   const id = await identity(10);
   const { room } = makeRoom(id);
   const started = await room.startProcess("lifecycle", {
-    question: "does the process stay named and signed?",
+    question: "does the process stay named and dyncap-attributed?",
     minNominations: 1,
     entropyHex: "00112233",
   });
   const pid = started.processId;
   const events = room.log.eventsFor(pid);
   ok("start is a named, capability-guarded process event", started.event.type === "process-start" && pid.startsWith("qos:proc:"));
-  ok("start carries a dyncap-signed envelope", started.event.dyncap.anchor === id.anchor && started.event.dyncap.seq === started.event.seq);
+  ok("start carries the expected dyncap attribution envelope", started.event.dyncap.anchor === id.anchor && started.event.dyncap.seq === started.event.seq);
   ok("start's capability is valid ZFA", Z.validateCapability(started.capability));
   eq("start leaves the process running", (await room.view(pid)).status, "running");
 
   await room.suspend(pid, started.event, "pause");
-  eq("suspend is a signed event and leaves the process suspended", (await room.view(pid)).status, "suspended");
+  eq("suspend is a dyncap-attributed event and leaves the process suspended", (await room.view(pid)).status, "suspended");
   await room.resume(pid, started.event, "continue");
-  eq("resume is a signed event and leaves the process running", (await room.view(pid)).status, "running");
+  eq("resume is a dyncap-attributed event and leaves the process running", (await room.view(pid)).status, "running");
   await room.terminate(pid, started.event, "done");
   const terminated = await room.view(pid);
-  eq("terminate is a signed event and is terminal", terminated.status, "terminated");
+  eq("terminate is a dyncap-attributed event and is terminal", terminated.status, "terminated");
   const lifecycle = room.log.eventsFor(pid).map((event) => event.type);
-  eq("the signed lifecycle vocabulary is present", lifecycle,
+  eq("the lifecycle vocabulary is present", lifecycle,
     ["process-start", "process-suspend", "process-resume", "process-terminate"]);
   ok("the process action history still achieves ZFA", Q.zfaHistoryAchievesZfa(room.log.eventsFor(pid)));
 }
@@ -258,6 +285,10 @@ console.log("\nexample composition — anchored");
   const reverse = await Q.orchestrate(logReverse.events(), { forkedSources: logReverse.forkedSources });
   eq("arrival order does not change the final digest", forward.finalDigest, reverse.finalDigest);
   eq("arrival order does not change the state digest", forward.stateDigest, reverse.stateDigest);
+  eq("the public event-log view uses causal canonical ordering",
+    logForward.events().map((event) => event.hash), logReverse.events().map((event) => event.hash));
+  eq("the canonical public event view matches the explicit causal order",
+    logForward.events().map((event) => event.hash), Q.canonicalEventOrder(run.all).ordered.map((event) => event.hash));
   ok("the rholalc-facing parser round-trips every emitted envelope",
     run.all.every((event) => {
       const parsed = Q.parseQosEvent(clone(event));
@@ -340,6 +371,46 @@ console.log("\nsource fork");
   ok("the forked source is quarantined", log.forkedSources.has(stA.anchor) && log.events().length === 0);
   const view = await Q.orchestrate(log.events(), { forkedSources: log.forkedSources });
   ok("a quarantined source cannot make the reducer guess", view.finalDigest === null && view.conflictedSources.includes(stA.anchor));
+  const simultaneous = new Q.QosEventLog(ROOM);
+  const results = await Promise.all([simultaneous.ingest(eventA), simultaneous.ingest(eventB)]);
+  ok("concurrent conflicting admissions cannot race past the fork gate", results.filter(r => r.fork).length === 1 && simultaneous.events().length === 0 && simultaneous.forkedSources.has(stA.anchor));
+  const recovered = new Q.QosEventLog(ROOM);
+  await recovered.ingest(eventA);
+  await recovered.mergeFrom(simultaneous);
+  ok("merge relays both branches and independently reproduces quarantine", recovered.forkedSources.has(stA.anchor) && recovered.events().length === 0);
+  const isolated = new Q.QosEventLog(ROOM);
+  const mutable = clone(eventA);
+  const intake = isolated.ingest(mutable);
+  mutable.payload.question = "changed during admission";
+  ok("admission owns a snapshot before the first await", (await intake).ok && isolated.events()[0].payload.question === "one");
+  isolated.events()[0].payload.question = "changed after admission";
+  ok("journal reads cannot mutate retained verified envelopes", isolated.events()[0].payload.question === "one");
+  const same = new Q.QosEventLog(ROOM);
+  const duplicates = await Promise.all([same.ingest(eventA), same.ingest(eventA)]);
+  ok("concurrent duplicate deliveries are idempotent", duplicates.every(r => r.ok) && duplicates.filter(r => r.duplicate).length === 1 && same.events().length === 1);
+  const concurrentSigner = new Q.QosEventSigner(await D.newDynCapState(new Uint8Array(32).fill(33)), ROOM);
+  const mutablePayload = {...payloadA};
+  const signing = concurrentSigner.sign(pid, cap, "root", "process-start", mutablePayload);
+  mutablePayload.question = "changed during signing";
+  const next = concurrentSigner.sign(pid, cap, "root", "process-suspend", {});
+  const [firstSigned, secondSigned] = await Promise.all([signing, next]);
+  ok("signer snapshots payload and serializes predecessor assignment", firstSigned.payload.question === "one" && secondSigned.prev === firstSigned.hash && secondSigned.seq > firstSigned.seq);
+  const special = JSON.parse('{"__proto__":{"x":1},"a":2}');
+  ok("canonical JSON commits to prototype-named own keys", Q.canonicalJson(special) === '{"__proto__":{"x":1},"a":2}' && Q.canonicalJson(special) !== Q.canonicalJson({a:2}));
+
+}
+// The reducer must fail closed on explicit causal cycles even when supplied raw
+// events (the room log normally rejects/diagnoses them before this boundary).
+{
+  const id = await identity(61);
+  const { room } = makeRoom(id);
+  const started = await room.startProcess("cycle-guard", { question: "cycle guard", minNominations: 1, entropyHex: "ab" });
+  const cycleA = { hash: "cycle-a", source: "cycle-source", seq: 2, process: started.processId, prev: "cycle-b", grant: "root", type: "process-suspend" };
+  const cycleB = { hash: "cycle-b", source: "cycle-source", seq: 3, process: started.processId, prev: "cycle-a", grant: "root", type: "process-resume" };
+  const view = await Q.orchestrate([started.event, cycleA, cycleB]);
+  ok("causal cycle makes the reducer conflicted", view.status === "conflicted" && view.phase === "conflicted");
+  eq("cycle conflict is named", view.blocked, "causal-dependency-cycle");
+  ok("cyclic hashes are surfaced in rejected diagnostics", view.rejected.length === 2 && view.rejected.every(e => /causal dependency cycle/.test(e.reason)));
 }
 
 // ---------------------------------------------------------------------------

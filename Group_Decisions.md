@@ -25,7 +25,7 @@ the outcome (e.g. `/gov uri`), which is a separate, opt-in step.
 QuantumOS has no central authority to count votes, hold a tally, or declare a
 winner. Every decision process here is the same two ingredients:
 
-- **Dyncap-signed envelopes** — each contribution (a ballot, a nomination, an
+- **Dyncap-attributed envelopes** — each contribution (a ballot, a nomination, an
   acceptance) is a hash-chained message attributable to a peer. You cannot forge
   another peer's signed contribution, and a fork (two messages at the same
   sequence) is flagged.
@@ -207,7 +207,7 @@ and tab-switch.
 remove button on poll cards, and a `/forget <poll <id> | lemma <name> | note …>`
 command. Because gossiped state (polls, lemmas) otherwise heals back from the
 next peer's `sync-*`, removal uses **tombstones** (`qos-retracted-<roomId>`): the
-owner broadcasts a dyncap-signed `retract` everyone honors (creator for a poll,
+owner broadcasts a dyncap-attributed `retract` everyone honors (creator for a poll,
 author for a lemma), and anyone else hides the item from their own view. Notes are
 private bearer value, so `/forget note` deletes locally with a confirm.
 (Transfer-as-removal still applies too: `/pass`, `/note` ops, `/probe clear`, the
