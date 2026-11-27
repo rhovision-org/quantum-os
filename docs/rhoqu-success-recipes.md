@@ -8,6 +8,8 @@ Starter RhoQu processes for the success framework
 They are also exported from `packages/browser/src/success-recipes.ts` and
 transpiled by `packages/browser/test/rhoqu-success-recipes.test.mjs`.
 
+The [RhoQu v2 runtime guide](rhoqu-v2-runtime.md) describes structured execution and receipt binding.
+
 ## Current limits — do not pretend otherwise
 
 | Limit | Today | Consequence |
