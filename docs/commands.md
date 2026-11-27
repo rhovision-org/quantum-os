@@ -834,3 +834,36 @@ Rust source: [`crates/zfa-core/src/capability.rs`](../crates/zfa-core/src/capabi
 Sends a literal message that starts with `/` (escapes the command prefix).
 
 ---
+
+
+### `/fs` — capability-rooted filesystem (#280)
+
+Start a process with `/qos start workspace`, then `/fs init workspace`.
+Use the returned namespace handle on subsequent commands (paths are rooted
+inside that namespace, not host paths):
+
+| Command (after `/fs`) | Meaning |
+| --- | --- |
+| `ls <process> <handle> /` | List a directory and child content IDs |
+| `stat <process> <handle> /path` | Inspect metadata, including root and version |
+| `mkdir <process> <handle> /dir` | Create a directory |
+| `put <process> <handle> /dir/file \| text` | Write immutable UTF-8 file bytes to local cache |
+| `put-durable <process> <handle> /dir/file \| text` | Explicitly publish bytes to configured Rholo, verify pinned readback, then commit namespace |
+| `cat <process> <handle> /dir/file` | Open a READ-only file handle, verify bytes, close handle |
+| `rm <process> <handle> /path` | Unlink a file or empty directory |
+| `rename <process> <handle> /old /new` | Copy-on-write rename |
+| `mount <process> <handle> /mount <source-handle>` | Attach read-only snapshot of a READ+GRANT source |
+| `unmount <process> <handle> /mount` | Detach snapshot |
+| `grant <process> <handle> <recipient-pid> <rights-mask>` | Attenuated namespace grant (READ=1, WRITE=2, GRANT=16, REVOKE=32) |
+
+Writes require a live WRITE namespace handle and an observed root hash/version.
+File bytes are not journal payloads; the versioned, immutable directory
+manifest hashes are computed from sorted child names, kinds and content IDs.
+A conflicting speculative receipt is explicitly rejected by canonical replay.
+A mount is an explicit read-only snapshot copy, not a live/distributed mount.
+Unmount or close references before local collection. Browser checkpoints
+persist admission evidence in origin-local storage, scoped by room and identity;
+OPFS stores verified bytes, with volatile fallback where unavailable.
+Persistence failures are surfaced, not represented as successful durable saves.
+The current text command grammar uses whitespace-separated paths; generic binary
+I/O and live mounts are not asserted. No automatic Rholo writes.

@@ -60,6 +60,9 @@ import { loadConfig as loadNodeConfig, saveConfig as saveNodeConfig, describeCon
          registryUriOf, powerboxUsed, DEFAULT_CONFIG as DEFAULT_NODE_CONFIG,
          readResult, readResultRecord, syncResultNonce, deployAnswer, deployVerdict,
          type NodeConfig } from "./rholang.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { QosMemoryBytes, OpfsMemoryCache, RoomByteCache, objectIdentity } from "./qos-memory-bytes.js";
+import { RholoRegistryMemory } from "./qos-memory-rholo.js";
 import { transcriptForSync, sanitizeTranscript, mergeTranscript, needsTimeMark, timeMarkText, findMentions,
          type TranscriptLine } from "./chat-view.js";
 import { qucalcSearch, qucalcSolve,
@@ -971,7 +974,25 @@ function qosCommandFor(ctx: RoomContext): QosCommand | null {
   if (!dyncapState) return null;
   const existing = qosCommands.get(ctx.roomId);
   if (existing) return existing;
+  const journalScope=Array.from(sha256(new TextEncoder().encode(ctx.roomId)),b=>b.toString(16).padStart(2,"0")).join("");
+  const journalKey="qos-journal-v1:"+dyncapState.anchor+":"+journalScope;
+  // The room-scoped origin-private byte cache is independent of the journal.
+  const volatileCache=new RoomByteCache();
   const cmd = new QosCommand({
+    loadJournal:()=>{const saved=localStorage.getItem(journalKey);return saved===null?null:JSON.parse(saved);},
+    saveJournal:events=>{
+      const encoded=JSON.stringify(events);
+      if(encoded.length>2*1024*1024)throw new Error("local journal checkpoint limit");
+      localStorage.setItem(journalKey,encoded);
+    },
+    memory:async()=>{
+      const scope=await objectIdentity(new TextEncoder().encode(ctx.roomId));
+      const cache=typeof navigator.storage?.getDirectory==="function"?new OpfsMemoryCache(scope):volatileCache;
+      const config=loadNodeConfig();
+      const network="node/"+await objectIdentity(new TextEncoder().encode(config.url.replace(/\/+$/,"")));
+      const backend=new RholoRegistryMemory(network,config);
+      return {service:new QosMemoryBytes(cache,[backend]),network};
+    },
     roomId: ctx.roomId,
     identity: dyncapState,
     transport: {
@@ -4013,6 +4034,7 @@ function handleCommand(raw: string): string[] {
         "  /macro [sub]     — write a +command: define · list · show · find · echo (a body of / commands, or of rholang)",
         "  +name <args>     — run a command somebody here defined (++text to send a literal + line)",
         "  /rhoqu <src>     — RhoQu macro: process/new/parallel/call → /commands",
+        "  /fs              — capability-rooted filesystems; /help fs for commands",
         "  /rholang <sub>   — run rholang on rnode: eval · deploy · echo · read · status · config (multi-line, end with a blank line)",
         "  @name in args    — expand named lemma (e.g. /qucalc @major @minor)",
         "  [multi word]      — a spaced name: /lemma [all men are mortal]  ·  cite as @[all men are mortal]",
@@ -6438,6 +6460,10 @@ function handleCommand(raw: string): string[] {
       sys(`→ asked the ${role} (${peerLabel(agent.peerId)}) — ${text}`);
       break;
     }
+
+    case "fs":
+      runQosCommand("fs "+arg,"/fs");
+      break;
 
     case "agent":
     case "agents": {
