@@ -1,5 +1,7 @@
 # Success charter handoff
 
+The [identity boundary](success-charter-identity-boundary.md) describes the relationship between room identity and the chain signer.
+
 `success-charter/1` is the canonical artifact for the **required** handoff from a
 ratified QuantumOS group charter to RhoGov/Rholo. The builder and validator live
 in `packages/browser/src/success-charter.ts` and are pure: no DOM, storage,
