@@ -652,6 +652,56 @@
     .welcome li { margin:0.2rem 0; }
     .welcome code { background:#1a1a1a; border:1px solid #262626; border-radius:3px; padding:0 0.25rem; color:#aae0d5; }
     .welcome .tip { color:#666; margin-top:0.5rem; }
+    /* #289: identity-local goals + read-only projection of the room's /gov
+       state. A modal keeps private personal goals off the ambient sidebar. */
+    .success-open { width:100%; border:1px solid #25554b; border-radius:6px;
+      padding:0.65rem; text-align:left; background:#101d1a; color:#a8e3d4;
+      font:inherit; font-size:0.72rem; cursor:pointer; }
+    .success-open:hover, .success-open:focus-visible { background:#18332c; }
+    .success-dialog { margin:auto; width:min(94vw,740px); max-height:88dvh;
+      border:1px solid #34554d; border-radius:12px; color:#e8efed;
+      background:#101615; box-shadow:0 20px 75px #000b; }
+    .success-dialog::backdrop { background:#000b; }
+    .success-dialog-head { display:flex; justify-content:space-between; align-items:center;
+      gap:1rem; position:sticky; top:0; padding:1rem 1.2rem;
+      border-bottom:1px solid #2b3a36; background:#101615; z-index:1; }
+    .success-dialog-head h2 { font-size:1rem; color:#99ddca; }
+    .success-dialog-head button { border:0; background:transparent; color:#bbb;
+      font-size:1.1rem; padding:0.25rem 0.5rem; cursor:pointer; }
+    .success-content { display:grid; grid-template-columns:1fr 1fr; gap:1rem;
+      overflow-y:auto; max-height:calc(88dvh - 4rem); padding:1rem; }
+    .success-section { min-width:0; background:#141e1b; border:1px solid #283a33;
+      border-radius:10px; padding:1rem; }
+    .success-heading { font-size:0.9rem; margin-bottom:0.5rem; color:#b9e6da; }
+    .success-muted { font-size:0.7rem; line-height:1.5; color:#a1aba8;
+      overflow-wrap:anywhere; margin:0.35rem 0; }
+    .success-add { display:flex; flex-wrap:wrap; gap:0.4rem; margin:0.9rem 0; }
+    .success-input { flex:1 1 180px; min-width:0; }
+    .success-input, .success-select { background:#0b1210; border:1px solid #3b5148;
+      border-radius:5px; padding:0.55rem; color:#f0f0f0; font:inherit; font-size:0.72rem; }
+    .success-select { flex:1 1 145px; }
+    .success-action, .success-minor { border-radius:5px; border:1px solid #418371;
+      background:#1b4035; color:#d6f5e8; padding:0.5rem 0.7rem; font:inherit;
+      font-size:0.7rem; cursor:pointer; }
+    .success-minor { padding:0.28rem 0.5rem; background:#20302b; flex:none; }
+    .success-action:hover, .success-minor:hover { background:#295647; }
+    .success-bucket { padding:0.5rem 0; border-top:1px solid #293931; }
+    .success-bucket-title { font-size:0.75rem; color:#afc9bc; margin-bottom:0.3rem; }
+    .success-goal { display:flex; align-items:start; gap:0.5rem;
+      padding:0.3rem 0; border-bottom:1px solid #22302a; }
+    .success-goal-text { flex:1; font-size:0.74rem; line-height:1.5;
+      overflow-wrap:anywhere; }
+    .success-completed { margin-top:0.6rem; font-size:0.73rem; }
+    .success-group { padding:0.7rem 0; border-top:1px solid #2b4137; }
+    .success-group-name { font-size:0.8rem; color:#ddeee5; overflow-wrap:anywhere; }
+    .success-issue { font-size:0.72rem; line-height:1.45; color:#c6ceca;
+      margin:0.4rem 0; overflow-wrap:anywhere; }
+    .success-empty { font-size:0.75rem; padding:1rem 0; color:#a2aba6; }
+    @media (max-width:640px) {
+      .success-content { grid-template-columns:1fr; }
+      .success-dialog { width:96vw; max-height:92dvh; }
+      .success-content { max-height:calc(92dvh - 4rem); }
+    }
   </style>
 </head>
 <body>
@@ -755,6 +805,11 @@
         <ul id="macro-list" style="list-style:none; max-height:8rem; overflow-y:auto;"></ul>
       </div>
 
+      <div>
+        <h2>Success framework</h2>
+        <button id="success-open" class="success-open" type="button">Goals & group overview</button>
+      </div>
+
       <div class="geek-med">
         <h2>Governance (<span id="gov-count">0</span>)</h2>
         <ul id="gov-list" style="list-style:none; max-height:8rem; overflow-y:auto;"></ul>
@@ -809,6 +864,14 @@
       </div>
     </div>
   </div>
+
+  <dialog id="success-dialog" class="success-dialog" aria-labelledby="success-title">
+    <div class="success-dialog-head">
+      <h2 id="success-title">Success overview</h2>
+      <button id="success-close" type="button" aria-label="Close success overview">✕</button>
+    </div>
+    <div id="success-content" class="success-content"></div>
+  </dialog>
 
   <script type="module" src="/src/app.ts"></script>
 </body>

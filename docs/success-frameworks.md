@@ -27,11 +27,63 @@ Goals are **local to the dyncap identity** and private by default.
   private habit ticks.
 - `/goal share <id>` is the only network path. It sends one goal as a signed
   `goal-share` envelope; the receiving peer verifies the dyncap and displays it.
+- Direct `/goal` commands bypass room chat persistence, command recall, and
+  the shared session dump. Results use ephemeral plain-text UI, not a room
+  transcript entry, and are cleared on identity restoration or room replay.
+  Only direct user input may invoke `/goal share`; scripts, macros and
+  automatic handlers cannot publish a goal through that path. Do not embed
+  private text in room-visible scripts, macros, or RhoQu source. This change
+  does not erase copies in pre-existing room logs or backups, nor encrypt
+  same-origin localStorage.
 - A corrupt or refused local store starts empty for the session; it does not
   break the room.
 
 The goal store is implemented in `packages/browser/src/goal-store.ts` and tested
 in `packages/browser/test/goal-store.test.mjs`.
+
+## Compact success overview (#289)
+
+The sidebar's **Goals & group overview** button opens an identity-local
+priority matrix with explicit Add/Complete actions alongside a read-only
+snapshot of the currently selected room's existing /gov groups and issues.
+
+- The personal section uses the existing identity-scoped GoalStore. There
+  is no implicit sharing, network request, or additional persistent model.
+- Only group name, member/issue counts, and issue title/status/poll-link
+  presence are projected. No vault contents, credentials, or raw chain
+  references are copied to the panel.
+- A configured chain reference is not proof of ratification. The overview
+  does not claim that a governance gate has passed.
+- User text is rendered through safe DOM text nodes, never interpreted as HTML.
+- Switching rooms changes group data; restoring an identity changes the
+  private goal projection.
+- The focused test (packages/browser/test/success-panel.test.mjs) checks
+  privacy boundaries, snapshots, event wiring and text rendering. Full browser
+  end-to-end and chain verification remain outside this UI increment.
+
+The implementation lives at packages/browser/src/success-panel.ts and reuses
+the current browser app. No QOS/1 ABI, authorization, or on-chain change.
+
+## Private habit check-ins and review history (#289)
+
+The existing identity-scoped GoalStore now contains goals, habits and local
+review records under the same key, qos-goals:<dyncap-anchor>. Schema v1 goals
+are loaded transparently; subsequent writes use v2 while preserving IDs.
+
+- /goal habit add <text> [| daily|weekly] creates a local cadence.
+- /goal habit tick <id> records one UTC-day check-in idempotently.
+- /goal habit list and /goal habit remove <id> inspect/delete local habits.
+- /goal review note <text> snapshots open/completed goals, today's completed
+  check-ins and a private narrative note; /goal review history lists records.
+- The Success overview panel offers the same add/check-in/review controls.
+- Check-ins and notes never enter the explicit /goal share snapshot. No
+  broadcast, signature, central profile, or second persistent store is added.
+- Local history is bounded (366 dates per habit; 100 review records per
+  identity). Counts are local snapshots, not governance verdicts.
+
+The dedicated regression suite covers v1 migration, per-anchor isolation,
+UTC check-in idempotence, bounded history, defensive copies, and no network
+side effects: node packages/browser/test/success-habits.test.mjs.
 
 ## Group scope
 
@@ -41,8 +93,8 @@ Use existing governance, not a second group model:
 2. Ratify with `/poll` or `/gov vote`; trust weighting is whatever the group
    already uses.
 3. Record the decision with `/lemma` and, if desired, `/persist`.
-4. A future compact panel reads those issues/lemmas; it does not own a separate
-   group record.
+4. The compact success overview reads existing issues (without duplicating
+   group state or asserting a ratification verdict).
 
 Adding charter metadata to `Group` later needs a signed, admin-gated
 `group-meta` mutation with merge rules. It is not in this slice.
@@ -119,12 +171,12 @@ AI is an assistant, not an authority:
 - identity-scoped, private `/goal` store and explicit `/goal share`;
 - canonical `success-charter/1` builder/validator (no chain call);
 - tested RhoQu recipe library using the shipped subset;
+- a compact private-goal / read-only-group overview;
 - docs and attribution.
 
 ## What remains
 
 - chain handoff/status and cross-repo RhoGov work (#291);
-- a compact personal/group panel;
 - RhoQu v2: output binding, exec-time control flow, real parallelism, and
   RhoProcess IR (#290);
 - AI-assisted authoring with preview/approval (see #132).
