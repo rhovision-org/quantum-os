@@ -1,0 +1,127 @@
+name: Formal authority model
+on:
+  pull_request:
+    branches: [work, main]
+    paths:
+      - 'formal/**'
+      - 'packages/browser/src/qos-process.ts'
+      - 'packages/browser/src/dyncap.ts'
+      - 'packages/browser/src/zfa.ts'
+      - '.github/workflows/formal-authority.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  authority:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install pinned Lean
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain leanprover/lean4:v4.34.0-rc1
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Check authority model and axiom footprint
+        run: |
+          set -euo pipefail
+          lean --version
+          if grep -nE '\b(sorry|admit|axiom)\b' formal/Authority.lean | grep -v '^.* /-' | grep -v '^.*--' | grep -v 'cryptographic axiom'; then exit 1; fi
+          lean formal/Authority.lean 2>&1 | tee authority-proof.txt
+          if grep -E 'sorryAx|error:' authority-proof.txt; then exit 1; fi
+          python3 - <<'PY'
+          import re
+          s=open('authority-proof.txt').read()
+          names=['path_non_amplification','authorized_root_bound','revoked_root_denies','replay_denied_after_trace','revoked_root_stays_denied']
+          for n in names:
+              line=next((l for l in s.splitlines() if f"QosAuthority.{n}'" in l),None)
+              assert line is not None,n
+              assert 'does not depend on any axioms' in line or ('depends on axioms:' in line and set(re.findall(r'[A-Za-z][A-Za-z0-9_.]*',line.split('depends on axioms:',1)[1])) <= {'propext','Quot.sound','Classical.choice'}),line
+          print('PASS: five selected theorem footprints checked')
+          PY
+          sha256sum formal/Authority.lean authority-proof.txt > authority.SHA256SUMS
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Lean-to-runtime bounded correspondence
+        env:
+          AUTHORITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          lean -o formal/Authority.olean formal/Authority.lean
+          LEAN_PATH=formal lean formal/AuthorityWitness.lean | tee authority-refinement-proof.txt
+          if grep -E 'sorryAx|error:' authority-refinement-proof.txt; then exit 1; fi
+          grep -F "QosAuthority.subsetCheck_sound" authority-refinement-proof.txt
+          LEAN_PATH=formal lean --run formal/AuthorityWitness.lean > authority-vectors.txt
+          npm install --prefix "$RUNNER_TEMP/authority-tools" --no-save --no-package-lock esbuild@0.21.5
+          AUTHORITY_ESBUILD="$RUNNER_TEMP/authority-tools/node_modules/esbuild/lib/main.js" node formal/compare-authority.mjs
+          sha256sum authority-refinement-proof.txt authority-vectors.txt authority-refinement.json > authority-refinement.SHA256SUMS
+      - name: Authority lifecycle reference and independent oracle
+        env:
+          AUTHORITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          LEAN_PATH=formal lean formal/AuthorityLifecycle.lean | tee authority-lifecycle-proof.txt
+          if grep -E 'sorryAx|error:' authority-lifecycle-proof.txt; then exit 1; fi
+          python3 - <<'PYTHON'
+          import re
+          s=open('authority-lifecycle-proof.txt').read()
+          for name in ['live_extension_implies_parent','revoked_parent_blocks_grant','grant_child_live','revoked_ancestor_persists']:
+              line=next(l for l in s.splitlines() if f"QosAuthority.{name}'" in l)
+              assert 'does not depend on any axioms' in line or ('depends on axioms:' in line and set(re.findall(r'[A-Za-z][A-Za-z0-9_.]*',line.split('depends on axioms:',1)[1])) <= {'propext','Quot.sound','Classical.choice'}),line
+          PYTHON
+          python3 formal/lifecycle-oracle.py
+          node formal/compare-lifecycle.mjs
+          sha256sum authority-lifecycle-proof.txt authority-lifecycle-vectors.jsonl authority-lifecycle-commands.json authority-lifecycle.json > authority-lifecycle.SHA256SUMS
+      - name: Durable authority journal and crash recovery
+        env:
+          AUTHORITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node formal/test-authority-journal.mjs
+          sha256sum authority-journal.json > authority-journal.SHA256SUMS
+      - name: Signed authority replica and partition semantics
+        env:
+          AUTHORITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node formal/test-authority-replica.mjs
+          sha256sum authority-replica.json > authority-replica.SHA256SUMS
+      - name: Cryptographic actor identity candidate
+        env:
+          AUTHORITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node formal/test-authority-identity.mjs
+          sha256sum authority-identity.json > authority-identity.SHA256SUMS
+      - name: Integrated actor-to-replica authority witness
+        env:
+          AUTHORITY_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          node formal/test-authority-integrated.mjs
+          sha256sum authority-integration.json > authority-integration.SHA256SUMS
+      - uses: actions/upload-artifact@v6
+        with:
+          name: authority-proof
+          path: |
+            authority-proof.txt
+            authority.SHA256SUMS
+            authority-refinement-proof.txt
+            authority-vectors.txt
+            authority-refinement.json
+            authority-refinement.SHA256SUMS
+            authority-lifecycle-proof.txt
+            authority-lifecycle-vectors.jsonl
+            authority-lifecycle-commands.json
+            authority-lifecycle.json
+            authority-lifecycle.SHA256SUMS
+            authority-journal.json
+            authority-journal.SHA256SUMS
+            authority-replica.json
+            authority-replica.SHA256SUMS
+            authority-identity.json
+            authority-identity.SHA256SUMS
+            authority-integration.json
+            authority-integration.SHA256SUMS
+          if-no-files-found: error

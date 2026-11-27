@@ -1,0 +1,198 @@
+# Formal authority model — research boundary
+
+Phase III follows the Quantum OS security assurance work. Baseline runtime:
+[`qos-process.ts` at 86a569f](https://github.com/rhovision-org/quantum-os/blob/86a569f99470b265784ab7d4d1189a03f375d50a/packages/browser/src/qos-process.ts).
+The Lean toolchain matches QLF at
+[2b93f23](https://github.com/rhovision-org/quantum-logical-framework/blob/2b93f23fd8f8cbcbac330710f305a62a38e4905d/lean-toolchain).
+The model does not import ZFA, nor assert that balance implies authority.
+
+| Model element | Runtime correspondence | Boundary |
+| --- | --- | --- |
+| Scope process and rights | `attenuateScope`, `scopeAllows` | Event categories abstracted into six rights |
+| Certified Path | `resolveCapability` grant recursion | Authenticity, grant hash resolution, global freshness and depth policy external |
+| Actor | grant target/source | authenticated principal is an assumption; dyncap TOFU is not a signature |
+| Live lineage | proposed revocation policy | not implemented by this research |
+| Serial Step and Trace | proposed acceptance/replay reference model | not a distributed or concurrent protocol |
+
+The Lean module proves scope transitivity, root-bound authorization,
+lineage/root revocation denial, preservation of revoked and seen IDs
+under serial steps, and replay refusal after any modeled trace. Positive
+and negative fixture theorems exercise a delegated ballot, denied anchor,
+cross-process request and revoked lineage.
+
+The model permits root-only permanent revocation of an ID; it does not model
+grant persistence or creation as a state update, non-root revocation,
+causality between grant and execution, concurrent replicas, authentication,
+or actual receiver code. Grant IDs are fresh only within a certified path;
+global uniqueness and provenance must be supplied by the refinement.
+Revocation may not be inferred from current software behavior.
+
+## Next gate
+
+Define an executable adapter from runtime event and grant traces to this
+model, test real scope/identity/ordering behavior against it, and design
+revocation and replay state before claiming refinement. Counterexamples
+to the abstraction are evidence, not a reason to weaken the specification.
+
+CI only. No room probes, deployment, or live infrastructure changes.
+
+
+## Phase IV — bounded refinement witness
+
+The six effective rights are encoded independently in Lean. The executable
+enumerator emits all 64 × 64 pairs, for matching and nonmatching process
+identities (8,192 decisions), and 384 right decisions. The comparator evaluates
+the actual TypeScript exports on canonical scopes and maps all 11 event types
+to the six rights (704 checks). It also checks 576 cases where irrelevant raw
+privileged event fields are added to a child: the runtime deliberately rejects
+these despite unchanged effective rights. Thus equivalence is only on the
+canonical subset; the wider representation is stricter, not equivalent.
+
+The Lean soundness theorem connects the finite Boolean subset check to the
+abstract Narrows proposition. Separate offline event-log fixtures exercise a
+delegated nomination, duplicate-envelope acknowledgment without append, and
+reducer denial of an out-of-scope operation after envelope acceptance. These
+are executable observations, not a trace refinement proof. They do not
+establish cryptographic authentication, global request uniqueness, concurrency,
+or runtime revocation. CI records the exact tested merge and PR head, vector
+digest and results. No default runtime behavior changes.
+
+
+## Phase V — serial authority lifecycle candidate
+
+The research-only reference reducer in the formal directory registers unique
+grant IDs, binds grants to holders and processes, checks full ancestry for
+revocation, enforces narrowing and delegation rights, and consumes request IDs
+on successful grant, revoke and execute operations. A rejected request does
+not mutate state. Root-owner management revocation is a separate authority,
+even after the root's execution authority has been revoked. IDs are never
+reused; revocation has no undo operation. A sibling branch remains live unless
+its own ancestry is revoked.
+
+The Lean extension checks four selected lineage and revocation obligations
+against the abstract model. An independently implemented Python oracle uses
+parent pointers and sets of rights; the JavaScript reducer uses materialized
+lineages and bit masks. CI compares complete decisions and normalized next
+states over a fixed 22-command alphabet and all reachable states up to four
+accepted transitions, plus an explicit longer trace and malformed controls.
+This is bounded differential evidence, not a proof of equivalence between the
+Lean specification and both implementations.
+
+The candidate is not called by any production code. It assumes a trusted
+authenticated actor, a trusted initial state and serial state transitions.
+No durable journal, atomic external side effects, crash recovery, cross-replica
+ordering or authenticated revocation distribution is supplied. A successful
+execute marks a request as used but does not invoke any external action.
+Production revocation semantics and backwards-compatible migration require
+maintainer agreement and a separately reviewed integration.
+
+
+## Phase VI — durable serial authority journal
+
+The research-only SQLite adapter wraps the Phase V reference reducer in
+BEGIN IMMEDIATE transactions with WAL and FULL synchronous mode. Each
+accepted transition commits state and a unique request receipt together.
+Receipt digests bind actor and canonical command; reusing an ID with different
+content is a conflict, while identical retries are refused as replays.
+Receipt replay checks the complete stored state against genesis and each
+recorded transition. This is corruption detection under trusted storage,
+not authentication against an administrator who can rewrite the entire log.
+
+CI uses separate local processes and temporary databases to check request
+contention, grant-ID contention, process termination immediately before and
+after commit, serial ordering of execute versus revoke, and journal corruption.
+The adapter does not invoke external actions. It assumes trusted actor input,
+a single database, compatible SQLite/VFS and storage durability. Process
+termination is not a physical power-loss test. No distributed consensus,
+authenticated revocation propagation, browser persistence, or production
+integration is supplied.
+
+
+## Phase VII — partition-aware authority replica candidate
+
+Immediate global revocation and autonomous offline execution cannot both be
+guaranteed in this model. An isolated replica has the same observations in two
+executions: one in which its parent grant remains live, and another in which
+the writer has revoked it after the partition. No local predicate can
+distinguish these executions without additional information. The candidate
+therefore sacrifices offline execution availability, not revocation safety.
+
+The research-only single-writer reference signs each accepted transition
+with Ed25519, binding the stream, ordinal, predecessor, actor, command and
+before/after state hashes. Replicas verify signatures and recompute transitions,
+refuse gaps and conflicting histories, and remain read-only even when caught
+up. A valid prefix is explicitly not evidence of freshness. Observed
+equivocation quarantines the replica; this does not detect an equivocation
+that remains hidden from it.
+
+CI models partition and ordered repair, exhausts all 720 permutations of a
+six-record fixture followed by complete ordered delivery (8,640 receive
+calls), tests stale grant replay, invalid signatures/stream, and signed
+prefix/state conflicts. It does not contact a network. Convergence is
+conditional on receiving the same valid complete prefix; the test is not a
+general consensus proof. Writer authentication here is distinct from actor
+authentication, which remains assumed. The in-memory writer is not coupled
+to Phase VI's durable journal, and its signing key is a synthetic fixture.
+A production design requires authenticated principal input, atomic durable
+writer/signature publication, trusted stream/key bootstrap, recovery and
+rotation, a consensus or trusted-writer policy, and separately tested runtime
+integration. No offline grant or execution is introduced.
+
+
+## Phase VIII — isolated cryptographic actor identity candidate
+
+This is an optional research experiment, not a replacement for dyncap,
+room identities, transport, token issuance or any production API.
+The maintainer decides whether this or another architecture is suitable.
+The experiment places a fixed, explicitly provisioned Ed25519 actor-key
+registry in front of the Phase V reference reducer and records original
+actor-signed envelopes in a separate SQLite journal. Registry order is
+canonical; duplicate actors and reused public keys are refused. The
+signature covers protocol domain, stream, registry digest, actor and
+complete command. The same transaction commits the verified envelope,
+request ID and next state. Full audit re-verifies signatures and replays
+the reducer. The registry is pinned externally, not discovered via TOFU.
+
+Authentication does not confer authority: wrong-holder, missing-right,
+owner-only, replay and revoked-lineage decisions are still enforced by
+the serial reference model. Request IDs are global within this candidate
+stream. Failed authentication or authorization does not consume an ID.
+
+The fixture uses temporary local keys and databases only. Trust in the
+initial registry, storage, key custody and the adapter itself remains
+explicit. Signature verification does not establish a person's identity
+or prevent key compromise. Ed25519 is classical public-key cryptography,
+not post-quantum. There is no key enrollment, rotation/recovery protocol,
+distributed ordering, rollback-resistant external checkpoint, or production
+migration. The separate Phase VI crash and Phase VII replica tests do not
+automatically transfer to this adapter. Integration of the candidates
+requires explicit maintainer approval and new evidence.
+
+
+## Phase IX — integrated research witness
+
+A separate experimental adapter composes the existing Phase V reference
+reducer and Phase VIII identity verifier with a serial SQLite writer and
+a dual-signature read-only replica. It neither replaces previous candidates
+nor imports or changes production code. The writer signature binds the
+actor's original signed envelope, pinned stream/registry/writer context,
+ordinal, predecessor and before/after state hashes. State and the complete
+signed record commit in one transaction. Publication is an audited snapshot
+export of committed records only; no external network or side effect is
+performed. Replicas re-verify both signatures and recompute the transition;
+a writer signature alone is insufficient. No new Lean refinement theorem
+is claimed by this integration.
+
+The CI fixture tests process death before and after commit, eight competing
+identical requests, revocation persistence, descendant denial and sibling
+independence, gap repair, replay, context/key substitution, and rejection of
+a writer-signed invalid actor or transition. The audit rejects corrupted
+stored records. Temporary fixture keys are not production credentials.
+Trusted storage and pinned registry/writer bootstrap remain assumptions;
+there is no external rollback checkpoint, key rotation, network consensus,
+physical power-loss experiment, or production/browser integration. A replica
+cannot authorize local execution or claim global freshness.
+
+All candidate adoption, integration with current Quantum OS and migration
+decisions remain with the maintainer. This experiment is not a security
+certification or recommendation to replace the current architecture.

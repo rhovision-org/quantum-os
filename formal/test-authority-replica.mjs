@@ -1,0 +1,68 @@
+import assert from 'node:assert/strict';
+import {generateKeyPairSync,createHash,sign} from 'node:crypto';
+import {writeFile} from 'node:fs/promises';
+import {Writer,Replica} from './authority-replica.mjs';
+const {privateKey,publicKey}=generateKeyPairSync('ed25519');
+const stream='synthetic-authority-fixture';
+const writer=new Writer(stream,privateKey);
+const grant=(request,id,target,parent=0,mask=10)=>({kind:'grant',request,id,target,parent,mask,process:7});
+const exec=(request,parent,right=1)=>({kind:'execute',request,parent,right,process:7});
+const revoke=(request,id)=>({kind:'revoke',request,id});
+const yes=(a,c)=>{const x=writer.submit(a,c);assert(x.accepted);return x.record;};
+const records=[yes(0,grant(1,1,1)),yes(0,grant(2,2,2,0,2)),yes(1,grant(3,3,2,1,2)),yes(2,exec(4,3)),yes(0,revoke(5,1)),yes(2,exec(6,2))];
+const checks=[];
+assert.deepEqual(writer.submit(2,exec(7,3)),{accepted:false,reason:'revoked'});
+assert.deepEqual(writer.submit(2,exec(6,2)),{accepted:false,reason:'replay'});
+const isolated=new Replica(stream,publicKey),connected=new Replica(stream,publicKey);
+for(const r of records.slice(0,4))assert.equal(isolated.receive(r),'applied');
+for(const r of records)assert.equal(connected.receive(r),'applied');
+assert.equal(isolated.observation().freshness,'unknown');
+assert(!isolated.observation().state.revoked.includes(1));
+assert(connected.observation().state.revoked.includes(1));
+assert.equal(isolated.requestExecution().reason,'writer-required');
+assert.equal(connected.requestExecution().reason,'writer-required');
+checks.push('partition: stale and up-to-date replicas both refuse local execution');
+assert.equal(isolated.receive(records[5]),'gap');
+assert.equal(isolated.receive(records[4]),'applied');
+assert.equal(isolated.receive(records[5]),'applied');
+assert.deepEqual(isolated.observation(),connected.observation());
+assert.equal(isolated.receive(records[0]),'duplicate');
+assert.deepEqual(isolated.observation(),connected.observation());
+checks.push('heal: gap refused, missing prefix applied, old grant replay does not revive authority');
+function* permutations(a){if(!a.length){yield [];return;}for(let i=0;i<a.length;i++)for(const p of permutations(a.filter((_,j)=>j!==i)))yield [a[i],...p];}
+let schedules=0,deliveries=0;
+for(const order of permutations(records)){
+ const replica=new Replica(stream,publicKey);
+ for(const record of order){assert(['applied','gap','duplicate'].includes(replica.receive(record)));deliveries++;}
+ for(const record of records){assert(['applied','duplicate'].includes(replica.receive(record)));deliveries++;}
+ assert.deepEqual(replica.observation(),connected.observation());
+ assert.equal(replica.requestExecution().reason,'writer-required');schedules++;
+}
+assert.equal(schedules,720);assert.equal(deliveries,8640);
+checks.push('all 720 delivery permutations with complete ordered repair converge');
+const invalid=new Replica(stream,publicKey);
+const altered=structuredClone(records[0]);altered.body.command.target=99;
+assert.equal(invalid.receive(altered),'invalid');
+const wrong=new Replica('another-stream',publicKey);assert.equal(wrong.receive(records[0]),'invalid');
+const otherKey=generateKeyPairSync('ed25519').publicKey;
+assert.equal(new Replica(stream,otherKey).receive(records[0]),'invalid');
+assert.equal(invalid.observation().ordinal,0);
+checks.push('payload tamper, stream substitution, wrong writer key refused');
+const alternate=new Writer(stream,privateKey);
+const fork=alternate.submit(0,grant(1,1,9)).record;
+assert.equal(invalid.receive(records[0]),'applied');
+assert.equal(invalid.receive(fork),'equivocation');
+assert.equal(invalid.receive(records[1]),'quarantined');
+assert.equal(invalid.requestExecution().reason,'quarantined');
+checks.push('observed writer equivocation quarantines replica');
+const canonical=x=>JSON.stringify(x,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,v[k]])):v);
+const signed=b=>({body:b,signature:sign(null,Buffer.from(canonical(b)),privateKey).toString('hex')});
+const badPrefix=new Replica(stream,publicKey);
+assert.equal(badPrefix.receive(signed({...records[0].body,parent:'0'.repeat(64)})),'prefix-conflict');
+const badState=new Replica(stream,publicKey);
+assert.equal(badState.receive(signed({...records[0].body,after:'0'.repeat(64)})),'invalid-transition');
+assert(badPrefix.observation().quarantined&&badState.observation().quarantined);
+checks.push('signed incorrect prefix or state transition quarantined');
+const report={schema:'authority-replica-witness/1',source:process.env.AUTHORITY_HEAD,testedMerge:process.env.GITHUB_SHA,schedules,deliveries,checks,writerTip:writer.tip,scope:'synthetic signed serial log; read-only replicas; ordered repair assumed; no consensus, real network, durable writer or global freshness'};
+await writeFile('authority-replica.json',JSON.stringify(report,null,2)+'\n');
+console.log(JSON.stringify(report,null,2));
