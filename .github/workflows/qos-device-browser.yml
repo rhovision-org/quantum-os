@@ -1,9 +1,6 @@
 name: QOS browser device acceptance (#283)
 on:
-  push:
-    branches: [feat/qos-kernel-devices-283]
   pull_request:
-    branches: [main, work, feat/qos-kernel-identity-282]
     paths:
       - "packages/browser/src/qos-*.ts"
       - "packages/browser/src/app.ts"
@@ -14,6 +11,7 @@ on:
       - "scripts/localnet/run-node.sh"
       - "bin/rnode"
       - ".github/workflows/qos-device-browser.yml"
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:

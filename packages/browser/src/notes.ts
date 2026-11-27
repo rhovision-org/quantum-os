@@ -12,7 +12,7 @@
 ///   split     — partition (a, N−a) keeping ZFA balance in each half
 ///   merge     — concatenate two notes of the same currency
 
-import { generateCapability } from "./zfa.js";
+import { generateCapability, validateCapability } from "./zfa.js";
 
 export type NoteKind = "note" | "token" | "receipt";
 
@@ -24,7 +24,7 @@ export interface ParsedLabel { kind: NoteKind; currency: string; baseCurrency: s
 
 export function parseNoteLabel(token: string): ParsedLabel | null {
   const parts = token.split(":");
-  if (parts.length < 3 || parts[0] !== "cap") return null;
+  if (parts.length !== 3 || parts[0] !== "cap" || parts[2].length % 2 !== 0 || !/^[0-7]+$/.test(parts[2])) return null;
   const m = parts[1].match(/^(note|token|receipt)-([A-Za-z0-9_]+(?:~[0-9a-f]+)?)$/);
   if (!m) return null;
   const currency = m[2];
@@ -58,16 +58,16 @@ export function denomination(token: string): number {
   return Math.floor(parts[2].length / 2);
 }
 
-/// Generate a ZFA-balanced hex string of length 2N (N pos + N neg twists).
+/// Generate adjacent conjugate pairs: every pair is Pauli-closed and count-balanced.
 function balancedHex(n: number): string {
-  if (n < 1) throw new Error("denomination must be >= 1");
+  if (!Number.isSafeInteger(n) || n < 1) throw new Error("denomination must be a positive safe integer");
   const bytes = new Uint8Array(n);
-  crypto.getRandomValues(bytes);
+  for (let i = 0; i < bytes.length; i += 65536) crypto.getRandomValues(bytes.subarray(i, i + 65536));
   let hex = "";
   for (const b of bytes) {
     const pos = (b & 0x3) * 2;             // 0, 2, 4, 6 — positive twists
-    const neg = ((b >> 2) & 0x3) * 2 + 1;  // 1, 3, 5, 7 — negative twists
-    hex += pos.toString(16) + neg.toString(16);
+    const neg = pos + 1; // conjugate, not an independently sampled axis
+    hex += (b & 4) ? neg.toString(16) + pos.toString(16) : pos.toString(16) + neg.toString(16);
   }
   return hex;
 }
@@ -91,14 +91,14 @@ export function mintReceipt(currency: string, n: number): string {
 }
 
 /// Split a note into (left of denomination `a`, right of denomination N−a).
-/// Both halves are ZFA-balanced by construction: walk the hex once, fill the
-/// left with the first `a` positive and first `a` negative digits, route the
-/// rest to the right.
+/// Partition the original digits without reminting. Newly minted adjacent
+/// conjugate pairs close on pair boundaries; legacy inputs may not.
+/// Return null if either child fails deployed capability validation or aliases.
 export function splitNote(token: string, a: number): [string, string] | null {
   const parsed = parseNoteLabel(token);
-  if (!parsed || parsed.kind !== "note") return null;
+  if (!parsed || parsed.kind !== "note" || !validateCapability(token)) return null;
   const N = denomination(token);
-  if (a < 1 || a >= N) return null;
+  if (!Number.isSafeInteger(a) || a < 1 || a >= N) return null;
   const hex = token.split(":")[2];
   const POS = new Set(["0", "2", "4", "6"]);
   const left: string[] = [];
@@ -111,16 +111,18 @@ export function splitNote(token: string, a: number): [string, string] | null {
       if (ln < a) { left.push(c); ln++; } else right.push(c);
     }
   }
-  return [
-    `cap:note-${parsed.currency}:${left.join("")}`,
-    `cap:note-${parsed.currency}:${right.join("")}`,
-  ];
+  const l = `cap:note-${parsed.currency}:${left.join("")}`;
+  const r = `cap:note-${parsed.currency}:${right.join("")}`;
+  // Legacy aggregate-balanced histories need not admit this partition.
+  // Do not delete the original or emit an invalid or aliased child.
+  return l !== r && denomination(l) === a && denomination(r) === N-a
+    && validateCapability(l) && validateCapability(r) ? [l, r] : null;
 }
 
 export function mergeNotes(t1: string, t2: string): string | null {
   const p1 = parseNoteLabel(t1);
   const p2 = parseNoteLabel(t2);
   if (!p1 || !p2 || p1.kind !== "note" || p2.kind !== "note") return null;
-  if (p1.currency !== p2.currency) return null;
+  if (p1.currency !== p2.currency || t1 === t2 || !validateCapability(t1) || !validateCapability(t2)) return null;
   return `cap:note-${p1.currency}:${t1.split(":")[2]}${t2.split(":")[2]}`;
 }
