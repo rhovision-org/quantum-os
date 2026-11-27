@@ -18,6 +18,7 @@ const bundle = await build({
   stdin: {
     contents: `
       export { QosCommand } from "./src/qos-command.ts";
+      export { executeRhoProcessAsync } from "./src/rhoqu-process.ts";
       export { newDynCapState } from "./src/dyncap.ts";
     `,
     resolveDir: root,
@@ -29,7 +30,7 @@ const bundle = await build({
   platform: "node",
   write: false,
 });
-const { QosCommand, newDynCapState } = await import(
+const { QosCommand, newDynCapState, executeRhoProcessAsync } = await import(
   "data:text/javascript;base64," + Buffer.from(bundle.outputFiles[0].text).toString("base64")
 );
 
@@ -168,5 +169,22 @@ ok("resume from terminated is refused", alice.said.some((l) => l.includes("canno
 await alice.cmd.handle("suspend Nope");
 ok("unknown process is named", alice.said.some((l) => l.includes("no process") && l.includes("Nope")));
 
+// Actual QOS dispatcher, two concurrent branch-local bindings; no store diffs.
+const rhoquPeer = await peer("RhoQu");
+let queue = Promise.resolve();
+const correlated = await executeRhoProcessAsync({kind: "parallel", branches: [
+  {kind: "sequence", steps: [{kind:"command", command:"/qos start One", bind:"one"}, {kind:"command", command:"/qos status $one"}]},
+  {kind: "sequence", steps: [{kind:"command", command:"/qos start Two", bind:"two"}, {kind:"command", command:"/qos status $two"}]},
+]}, async command => {
+  // Same serialization as the browser per-room sign queue.
+  const run = queue.then(() => rhoquPeer.cmd.handle(command.slice(4).trim()));
+  queue = run.then(() => undefined, () => undefined);
+  const id = await run;
+  return {lines: [], ...(id ? {id} : {})};
+}, {strictBindings:true});
+const idOne = rhoquPeer.cmd.list().find(p => p.name === "One")?.id;
+const idTwo = rhoquPeer.cmd.list().find(p => p.name === "Two")?.id;
+ok("parallel QOS starts return distinct exact dispatcher receipts", !!idOne && !!idTwo && idOne !== idTwo && correlated[0].id === idOne && correlated[2].id === idTwo);
+ok("branch-local references resolve to own QOS process", correlated[1].command === "/qos status " + idOne && correlated[3].command === "/qos status " + idTwo);
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"}: qos-command.test.mjs — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

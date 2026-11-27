@@ -1,15 +1,16 @@
 /// RhoQu — macro layer over quantum-os /commands.
 ///
-/// Commit 1 of the spec: a hand-rolled recursive-descent parser + transpiler
-/// that turns RhoQu source into a flat array of `/command` strings to be
-/// executed sequentially by the dispatcher.
+/// Recursive-descent parser with a compatibility string transpiler and structured
+/// process output. Commands may capture a dispatcher ID with `bind name /cmd;`.
 ///
 /// Supported in this commit:
 ///   process Name(arg1, arg2) { body }      — definitions
 ///   new x y z;                              — expands to /grant x, /grant y, /grant z
-///   parallel { stmt1; stmt2; … }            — sequential expansion (true parallel = separate peers)
+///   parallel { stmt1; stmt2; … }            — legacy sequential expansion
+///   concurrent { stmt1; stmt2; … }          — local concurrent branches
 ///   Name(val1, val2);                       — call a defined process; $arg substitution in body
 ///   /cmd ...;                                — raw command, $arg substitution applied
+///   bind name /poll new question;              — bind ID returned by dispatcher
 ///   // comment up to next ; or newline       — skipped
 ///
 /// Deferred to future commits:
@@ -18,15 +19,18 @@
 ///   timeout Ns { ... }
 ///   send / receive primitives ('!', '?', '->')
 ///
-/// The transpiler is pure: source string → string[]. The dispatcher runs
-/// each command via handleCommand; errors in one don't stop subsequent.
+/// `transpile` remains source → string[] for legacy callers; `transpileProcess`
+/// retains bindings in structured command IR for live execution.
+
+import type { RhoFlatProcess, RhoProcessNode, RhoRuntimeExpr, RhoRuntimeWhenNode, RhoBinOp, RhoUnOp } from "./rhoqu-process.js";
+import { canonLemma } from "./lemma-parse.js";
 
 // ---------------------------------------------------------------------------
 // Tokens
 // ---------------------------------------------------------------------------
 
 type TokenKind =
-  | "process" | "new" | "in" | "parallel" | "if" | "else" | "and" | "or" | "not" | "on"
+  | "process" | "new" | "in" | "parallel" | "if" | "when" | "else" | "and" | "or" | "not" | "on" | "bind"
   | "ident" | "number" | "string" | "command"
   | "lbrace" | "rbrace" | "lparen" | "rparen"
   | "semi" | "comma" | "eof" | "pipe"
@@ -40,7 +44,7 @@ class RhoQuError extends Error {
   }
 }
 
-const KEYWORDS = new Set(["process", "new", "in", "parallel", "if", "else", "and", "or", "not", "on"]);
+const KEYWORDS = new Set(["process", "new", "in", "parallel", "if", "when", "else", "and", "or", "not", "on", "bind"]);
 
 function tokenize(src: string): Token[] {
   const tokens: Token[] = [];
@@ -71,7 +75,7 @@ function tokenize(src: string): Token[] {
     // captured verbatim and dispatched as a /command, with $arg substitution
     // applied at interpret time. `|` is RhoQu's parallel-composition operator
     // (rho-calculus convention), so commands can't contain a literal `|`;
-    // use /script as an escape hatch if you need one.
+    // type slash commands with literal pipes directly in the chat input.
     if (ch === "/") {
       const startL = line, startC = col;
       let buf = "";
@@ -148,26 +152,18 @@ function tokenize(src: string): Token[] {
 
 type Stmt =
   | { kind: "new"; names: string[] }
-  | { kind: "parallel"; body: Stmt[] }
+  | { kind: "parallel" | "concurrent"; body: Stmt[] }
   | { kind: "call"; name: string; args: string[] }
-  | { kind: "cmd"; text: string }
+  | { kind: "cmd"; text: string; bind?: string }
   | { kind: "if"; cond: Expr; then: Stmt[]; else: Stmt[] }
+  | { kind: "when"; cond: Expr; then: Stmt[]; else: Stmt[] }
   | { kind: "on"; channel: string; binding: string; body: Stmt[] };
 
 // Expression AST. Evaluated against a RhoQuContext at transpile time;
 // the chosen branch's commands are emitted.
-type Expr =
-  | { kind: "num"; value: number }
-  | { kind: "str"; value: string }
-  | { kind: "var"; name: string }              // a bare identifier (looked up in env)
-  | { kind: "lemma"; name: string }            // @name — refers to lemma name string
-  | { kind: "call"; name: string; args: Expr[] }
-  | { kind: "binop"; op: BinOp; left: Expr; right: Expr }
-  | { kind: "unop"; op: UnOp; expr: Expr };
-
-type BinOp = "and" | "or" | "eq" | "ne" | "lt" | "le" | "gt" | "ge";
-type UnOp = "not";
-
+type Expr = RhoRuntimeExpr;
+type BinOp = RhoBinOp;
+type UnOp = RhoUnOp;
 interface ProcessDef { name: string; params: string[]; body: Stmt[] }
 
 interface Program { defs: Map<string, ProcessDef>; top: Stmt[] }
@@ -278,10 +274,15 @@ class Parser {
   private parseStmt(): Stmt | null {
     const t = this.peek();
     if (t.kind === "new") return this.parseNew();
-    if (t.kind === "parallel") return this.parseParallel();
+    if (t.kind === "parallel") return this.parseParallel("parallel");
+    if (t.kind === "ident" && t.value === "concurrent" && this.peek(1)?.kind === "lbrace") {
+      return this.parseParallel("concurrent");
+    }
     if (t.kind === "if") return this.parseIf();
+    if (t.kind === "when") return this.parseWhen();
     if (t.kind === "on") return this.parseOn();
     if (t.kind === "command") return this.parseCmd();
+    if (t.kind === "bind") return this.parseBindCommand();
     if (t.kind === "ident") return this.parseCall();
     if (t.kind === "semi") { this.eat(); return null; }
     throw new RhoQuError(`unexpected token '${t.value}' (kind: ${t.kind})`, t.line, t.col);
@@ -316,6 +317,25 @@ class Parser {
       }
     }
     return { kind: "if", cond, then: thenBody, else: elseBody };
+  }
+  /** Runtime conditional: predicate and both branches are retained in IR. */
+  private parseWhen(): Stmt {
+    this.expect("when");
+    const cond = this.parseExpr();
+    this.expect("lbrace");
+    const thenBody = this.parseStmtsUntil("rbrace");
+    this.expect("rbrace");
+    let elseBody: Stmt[] = [];
+    if (this.maybe("else")) {
+      if (this.peek().kind === "if") elseBody = [this.parseIf()];
+      else if (this.peek().kind === "when") elseBody = [this.parseWhen()];
+      else {
+        this.expect("lbrace");
+        elseBody = this.parseStmtsUntil("rbrace");
+        this.expect("rbrace");
+      }
+    }
+    return { kind: "when", cond, then: thenBody, else: elseBody };
   }
 
   // ---- expression grammar: disjunction → conjunction → unary → comparison →
@@ -397,17 +417,33 @@ class Parser {
     return { kind: "new", names };
   }
 
-  private parseParallel(): Stmt {
-    this.expect("parallel");
+  private parseParallel(kind: "parallel" | "concurrent"): Stmt {
+    const token = this.eat();
     this.expect("lbrace");
     const body = this.parseStmtsUntil("rbrace");
     this.expect("rbrace");
-    return { kind: "parallel", body };
+    if (kind === "concurrent" && body.length < 2) {
+      throw new RhoQuError("concurrent requires at least two semicolon-separated branches", token.line, token.col);
+    }
+    return { kind, body };
   }
 
   private parseCmd(): Stmt {
     const t = this.expect("command");
     return { kind: "cmd", text: t.value };
+  }
+
+  private parseBindCommand(): Stmt {
+    this.expect("bind");
+    const nameToken = this.expect("ident");
+    if (!/^[A-Za-z_][A-Za-z0-9_-]{0,127}$/.test(nameToken.value)) {
+      throw new RhoQuError("invalid binding name", nameToken.line, nameToken.col);
+    }
+    if (nameToken.value.toUpperCase() === "LAST_ID") {
+      throw new RhoQuError("LAST_ID is reserved and cannot be a named binding", nameToken.line, nameToken.col);
+    }
+    const command = this.expect("command");
+    return { kind: "cmd", text: command.value, bind: nameToken.value };
   }
 
   private parseCall(): Stmt {
@@ -439,11 +475,11 @@ class Parser {
 /// Substitute `$name` references in `text` with the bound values from `env`.
 /// Substitution is whole-token: `$x` is replaced when followed by a
 /// non-identifier character or end-of-string. `$$` escapes a literal `$`.
-function substitute(text: string, env: Map<string, string>): string {
+function substitute(text: string, env: Map<string, string>, forRuntime = false): string {
   let out = "";
   let i = 0;
   while (i < text.length) {
-    if (text[i] === "$" && text[i + 1] === "$") { out += "$"; i += 2; continue; }
+    if (text[i] === "$" && text[i + 1] === "$") { out += forRuntime ? "$$" : "$"; i += 2; continue; }
     if (text[i] === "$") {
       let j = i + 1;
       while (j < text.length && /[A-Za-z0-9_\-]/.test(text[j])) j++;
@@ -453,7 +489,7 @@ function substitute(text: string, env: Map<string, string>): string {
         // Unknown binding: leave the $name in place (lets users include literal $names).
         out += text.slice(i, j);
       } else {
-        out += val;
+        out += forRuntime ? val.replace(/\$/g, () => "$$") : val;
       }
       i = j;
     } else {
@@ -467,83 +503,157 @@ function substitute(text: string, env: Map<string, string>): string {
 /// Conditions in `if` statements are evaluated at transpile time against
 /// `ctx`, so the chosen branch's commands are what gets emitted.
 /// Throws RhoQuError on parse or expansion failure.
+/** Stage registrations until the requested compilation path has succeeded. */
+type Expansion = { remaining: number; calls: Set<string>; forRuntime: boolean };
+
+function useExpansionStep(expansion: Expansion): void {
+  if (--expansion.remaining < 0) throw new RhoQuError("process expansion exceeds the statement limit", 0, 0);
+}
+
+function compileProcess(source: string, ctx: RhoQuContext | undefined, forRuntime: boolean): { process: RhoFlatProcess; handlers: OnHandler[] } {
+  const program = new Parser(tokenize(source)).parseProgram();
+  const handlers: OnHandler[] = [];
+  const expansion: Expansion = { remaining: 4096, calls: new Set(), forRuntime };
+  const process: RhoFlatProcess = { kind: "sequence", steps: lowerStmts(program.top, program, new Map(), handlers, false, expansion, ctx) };
+  return { process, handlers };
+}
+export function transpileProcess(source: string, ctx?: RhoQuContext): RhoFlatProcess {
+  const { process, handlers } = compileProcess(source, ctx, true);
+  for (const handler of handlers) ctx?.registerOnHandler?.(handler);
+  return process;
+}
+export function transpilePackageProcess(source: string): RhoFlatProcess {
+  const { process, handlers } = compileProcess(source, undefined, true);
+  if (handlers.length) throw new RhoQuError("process packages cannot represent channel handler registrations", 0, 0);
+  return process;
+}
 export function transpile(source: string, ctx?: RhoQuContext): string[] {
-  const tokens = tokenize(source);
-  const program = new Parser(tokens).parseProgram();
-  const out: string[] = [];
-  const env = new Map<string, string>();
-  emitStmts(program.top, program, env, out, ctx);
+  const { process, handlers } = compileProcess(source, ctx, false);
+  const flatten = (nodes: readonly RhoProcessNode[]): string[] => nodes.flatMap((node) => {
+    if (node.kind === "command") return [node.command];
+    if (node.kind === "sequence") return flatten(node.steps);
+    if (node.kind === "parallel") throw new RhoQuError("concurrent cannot be flattened by legacy transpile; use transpileProcess", 0, 0);
+    throw new RhoQuError("runtime when cannot be flattened by legacy transpile; use transpileProcess", 0, 0);
+  });
+  const commands = flatten(process.steps);
+  for (const handler of handlers) ctx?.registerOnHandler?.(handler);
+  return commands;
+}
+function getProcessCall(
+  call: Extract<Stmt, { kind: "call" }>, program: Program, env: Map<string, string>,
+): { definition: ProcessDef; parameters: Map<string, string> } {
+  const definition = program.defs.get(call.name);
+  if (!definition) throw new RhoQuError("unknown process '" + call.name + "'", 0, 0);
+  if (definition.params.length !== call.args.length) {
+    throw new RhoQuError("process '" + call.name + "' takes " + definition.params.length + " args, got " + call.args.length, 0, 0);
+  }
+  const parameters = new Map(env);
+  for (const [index, name] of definition.params.entries()) {
+    const value = substitute(call.args[index], env);
+    const quoted = (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"));
+    parameters.set(name, quoted ? value.slice(1, -1) : value);
+  }
+  return { definition, parameters };
+}
+
+function validateHandler(
+  statements: Stmt[], program: Program, visiting = new Set<string>(), validated = new Set<string>(),
+): void {
+  for (const statement of statements) {
+    if (statement.kind === "when" || statement.kind === "concurrent" || statement.kind === "on" ||
+        (statement.kind === "cmd" && statement.bind)) {
+      throw new RhoQuError("channel handlers require flat commands without runtime bindings or registrations", 0, 0);
+    }
+    if (statement.kind === "parallel") validateHandler(statement.body, program, visiting, validated);
+    if (statement.kind === "if") {
+      validateHandler(statement.then, program, visiting, validated);
+      validateHandler(statement.else, program, visiting, validated);
+    }
+    if (statement.kind !== "call" || validated.has(statement.name)) continue;
+    if (visiting.has(statement.name) || visiting.size >= 64) {
+      throw new RhoQuError("recursive or excessively nested process call in channel handler", 0, 0);
+    }
+    const definition = program.defs.get(statement.name);
+    if (!definition) throw new RhoQuError("unknown process '" + statement.name + "'", 0, 0);
+    visiting.add(statement.name);
+    validateHandler(definition.body, program, visiting, validated);
+    visiting.delete(statement.name);
+    validated.add(statement.name);
+  }
+}
+
+/** Lower AST to typed IR. Compile-time if stays folded; when keeps both branches. */
+function lowerStmts(
+  stmts: Stmt[], program: Program, env: Map<string, string>, handlers: OnHandler[],
+  runtimeBranch: boolean, expansion: Expansion, ctx?: RhoQuContext,
+): RhoProcessNode[] {
+  const out: RhoProcessNode[] = [];
+  for (const s of stmts) {
+    useExpansionStep(expansion);
+    if (s.kind === "new") {
+      for (const name of s.names) {
+        useExpansionStep(expansion);
+        out.push({ kind: "command", command: "/grant " + name });
+      }
+      continue;
+    }
+    if (s.kind === "parallel") {
+      out.push(...lowerStmts(s.body, program, env, handlers, runtimeBranch, expansion, ctx));
+      continue;
+    }
+    if (s.kind === "concurrent") {
+      const branches = s.body.map((branch): RhoProcessNode => ({
+        kind: "sequence", steps: lowerStmts([branch], program, env, handlers, true, expansion, ctx),
+      }));
+      out.push({ kind: "parallel", branches });
+      continue;
+    }
+    if (s.kind === "cmd") {
+      out.push({ kind: "command", command: substitute(s.text, env, expansion.forRuntime), ...(s.bind ? { bind: s.bind } : {}) });
+      continue;
+    }
+    if (s.kind === "if") { out.push(...lowerStmts(truthy(evalExpr(s.cond, env, ctx)) ? s.then : s.else, program, env, handlers, runtimeBranch, expansion, ctx)); continue; }
+    if (s.kind === "when") {
+      const node: RhoRuntimeWhenNode = {
+        kind: "when", condition: s.cond, env: Object.fromEntries(env),
+        then: { kind: "sequence", steps: lowerStmts(s.then, program, env, handlers, true, expansion, ctx) },
+        ...(s.else.length ? { else: { kind: "sequence", steps: lowerStmts(s.else, program, env, handlers, true, expansion, ctx) } } : {}),
+      };
+      out.push(node); continue;
+    }
+    if (s.kind === "on") {
+      if (runtimeBranch) throw new RhoQuError("register channel handlers outside runtime branches", 0, 0);
+      validateHandler(s.body, program);
+      const capturedEnv = new Map(env);
+      const handler: OnHandler = {
+        channel: s.channel, binding: s.binding,
+        trigger(payload: string): string[] {
+          const childEnv = new Map(capturedEnv);
+          childEnv.set(s.binding, payload);
+          const handlerExpansion: Expansion = { remaining: 4096, calls: new Set(), forRuntime: false };
+          const nodes = lowerStmts(s.body, program, childEnv, [], false, handlerExpansion, ctx);
+          return nodes.map((node) => {
+            if (node.kind !== "command") throw new RhoQuError("channel handler did not lower to a command", 0, 0);
+            return node.command;
+          });
+        },
+      };
+      handlers.push(handler); continue;
+    }
+    if (s.kind === "call") {
+      if (expansion.calls.has(s.name) || expansion.calls.size >= 64) {
+        throw new RhoQuError("recursive or excessively nested process call: " + s.name, 0, 0);
+      }
+      const { definition, parameters } = getProcessCall(s, program, env);
+      expansion.calls.add(s.name);
+      try {
+        out.push(...lowerStmts(definition.body, program, parameters, handlers, runtimeBranch, expansion, ctx));
+      } finally {
+        expansion.calls.delete(s.name);
+      }
+    }
+  }
   return out;
-}
-
-function emitStmts(stmts: Stmt[], program: Program, env: Map<string, string>, out: string[], ctx?: RhoQuContext): void {
-  for (const s of stmts) emitStmt(s, program, env, out, ctx);
-}
-
-function emitStmt(s: Stmt, program: Program, env: Map<string, string>, out: string[], ctx?: RhoQuContext): void {
-  if (s.kind === "new") {
-    for (const name of s.names) out.push(`/grant ${name}`);
-    return;
-  }
-  if (s.kind === "parallel") {
-    emitStmts(s.body, program, env, out, ctx);
-    return;
-  }
-  if (s.kind === "cmd") {
-    out.push(substitute(s.text, env));
-    return;
-  }
-  if (s.kind === "if") {
-    const v = evalExpr(s.cond, env, ctx);
-    const branch = truthy(v) ? s.then : s.else;
-    emitStmts(branch, program, env, out, ctx);
-    return;
-  }
-  if (s.kind === "on") {
-    // Register an inbound channel-msg handler. The handler captures the
-    // body, program (for process lookups inside the body), and a snapshot
-    // of the env at registration time. When triggered with a payload, it
-    // re-emits the body with the binding bound to the payload string.
-    if (!ctx?.registerOnHandler) {
-      // No context: silently drop. The handler couldn't run without a
-      // runtime, and skipping a registration is safer than failing the
-      // whole transpile.
-      return;
-    }
-    const capturedEnv = new Map(env);
-    const handler: OnHandler = {
-      channel: s.channel,
-      binding: s.binding,
-      trigger(payload: string): string[] {
-        const childEnv = new Map(capturedEnv);
-        childEnv.set(s.binding, payload);
-        const cmds: string[] = [];
-        emitStmts(s.body, program, childEnv, cmds, ctx);
-        return cmds;
-      },
-    };
-    ctx.registerOnHandler(handler);
-    return;
-  }
-  if (s.kind === "call") {
-    const def = program.defs.get(s.name);
-    if (!def) throw new RhoQuError(`unknown process '${s.name}'`, 0, 0);
-    if (def.params.length !== s.args.length) {
-      throw new RhoQuError(
-        `process '${s.name}' takes ${def.params.length} args, got ${s.args.length}`, 0, 0);
-    }
-    const childEnv = new Map(env);
-    for (let k = 0; k < def.params.length; k++) {
-      const argVal = substitute(s.args[k], env);
-      const stripped = (argVal.startsWith('"') && argVal.endsWith('"'))
-                    || (argVal.startsWith("'") && argVal.endsWith("'"))
-        ? argVal.slice(1, -1)
-        : argVal;
-      childEnv.set(def.params[k], stripped);
-    }
-    emitStmts(def.body, program, childEnv, out, ctx);
-    return;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -630,4 +740,24 @@ function callBuiltin(name: string, args: Value[], ctx?: RhoQuContext): Value {
   }
 }
 
+export type RhoQuRuntimeSnapshot = {
+  readonly lemmaNames: readonly string[];
+  readonly balances: Readonly<Record<string, number>>;
+  readonly declaredCurrencies: readonly string[];
+  readonly peerCount: number;
+  readonly connected: boolean;
+  readonly currentSeq: number;
+};
+/** Evaluate a predicate against one immutable snapshot taken when the branch is reached. */
+export function evaluateRhoQuRuntimeCondition(expression: RhoRuntimeExpr, env: Readonly<Record<string, string>>, snapshot: RhoQuRuntimeSnapshot): boolean {
+  const ctx: RhoQuContext = {
+    hasLemma: (name) => snapshot.lemmaNames.includes(canonLemma(name)),
+    balance: (currency) => Object.hasOwn(snapshot.balances, currency) ? snapshot.balances[currency] : 0,
+    isCurrencyDeclared: (currency) => snapshot.declaredCurrencies.includes(currency),
+    peerCount: () => snapshot.peerCount,
+    isConnected: () => snapshot.connected,
+    myCurrentSeq: () => snapshot.currentSeq,
+  };
+  return truthy(evalExpr(expression, new Map(Object.entries(env)), ctx));
+}
 export { RhoQuError };

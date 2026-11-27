@@ -18,7 +18,10 @@ import { encryptVault, decryptVault, looksLikeVault } from "./vault.js";
 import { findDiscrepancies, losingPeersIn, normalizeValue,
          SAMPLE_SIZE, PROBE_WINDOW_MS,
          type Observation } from "./probe.js";
-import { transpile as rhoquTranspile, RhoQuError, type RhoQuContext, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
+import { transpileProcess as rhoquTranspileProcess, evaluateRhoQuRuntimeCondition, RhoQuError, type RhoQuContext, type RhoQuRuntimeSnapshot, type OnHandler as RhoQuOnHandler } from "./rhoqu.js";
+import { executeRhoProcessAsync, countRhoProcessCommands, type RhoFlatProcess } from "./rhoqu-process.js";
+import { formatRhoQuProcess, openRhoQuPackageUI } from "./rhoqu-package-ui.js";
+import { allowsRhoQuCommand, rhoquCommandProducesId } from "./rhoqu-dispatch.js";
 import { tally, liveCounts, summarizeWinners, optionId, sortedOptions,
          type Poll, type PollMethod, type PollOption } from "./polls.js";
 import { canonLemma, parseRefTokens, parseLemmaDecl, splitLemmaNameArg } from "./lemma-parse.js";
@@ -1027,13 +1030,18 @@ function qosCommandFor(ctx: RoomContext): QosCommand | null {
 
 /// Run one QOS command through the signing queue. `/qos`, `/ps`, and `/kill`
 /// share this path so they cannot race a chat broadcast for a dyncap seq.
-function runQosCommand(text: string, label = "/qos"): void {
-  if (!qpeer) { addMessage("", "not connected — connect first", "system"); return; }
-  const qos = qosCommandFor(activeRoom);
-  if (!qos) { addMessage("", "identity not ready yet — try again in a moment", "system"); return; }
-  const run = signQueue.then(() => qos.handle(text));
+function runQosCommand(text: string, label = "/qos", canDispatch?: () => boolean): Promise<string | void> {
+  const room = activeRoom;
+  if (!qpeer) { addMessage("", "not connected — connect first", "system"); return Promise.resolve(); }
+  const qos = qosCommandFor(room);
+  if (!qos) { addMessage("", "identity not ready yet — try again in a moment", "system"); return Promise.resolve(); }
+  const run = signQueue.then(() => {
+    if (canDispatch && !canDispatch()) throw new Error("RhoQu execution context changed before QOS dispatch");
+    return qos.handle(text);
+  });
   signQueue = run.then(() => undefined, () => undefined);
   void run.catch((e) => addMessage("", `⚠ ${label}: ${(e as Error)?.message ?? e}`, "system"));
+  return run;
 }
 
 /// Lazily bind the personal goal store to the current dyncap identity. A
@@ -2636,9 +2644,10 @@ interface SecureField { label: string; type: "password" | "text" | "textarea"; p
  * the app having died. It was doing that in front of a deploy, which is the
  * worst place for it: the moment someone is deciding whether to spend phlo.
  */
-function confirmDialog(title: string, body: string, okLabel = "OK"): Promise<boolean> {
+function confirmDialog(title: string, body: string, okLabel = "OK", buttonOnly = false): Promise<boolean> {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
+    overlay.dataset.confirmDialog = "true";
     overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px";
     const card = document.createElement("div");
     card.style.cssText = "background:#1b1d23;color:#e8e8ea;border:1px solid #3a3d46;border-radius:10px;max-width:440px;width:100%;padding:18px 18px 14px;box-shadow:0 8px 40px rgba(0,0,0,.5);font:14px/1.5 system-ui,sans-serif";
@@ -2647,7 +2656,7 @@ function confirmDialog(title: string, body: string, okLabel = "OK"): Promise<boo
     h.style.cssText = "font-weight:600;font-size:15px;margin-bottom:8px";
     const p = document.createElement("div");
     p.textContent = body;
-    p.style.cssText = "font-size:13px;opacity:.85;white-space:pre-wrap;margin-bottom:14px";
+    p.style.cssText = "font-size:13px;opacity:.85;white-space:pre-wrap;margin-bottom:14px;max-height:55vh;overflow:auto";
     const row = document.createElement("div");
     row.style.cssText = "display:flex;gap:8px;justify-content:flex-end";
     const cancel = document.createElement("button");
@@ -2669,15 +2678,31 @@ function confirmDialog(title: string, body: string, okLabel = "OK"): Promise<boo
       overlay.remove();
       resolve(answer);
     };
+    const isTop = (): boolean => {
+      const dialogs = document.querySelectorAll('[data-confirm-dialog="true"]');
+      return dialogs[dialogs.length - 1] === overlay;
+    };
     const onKey = (e: KeyboardEvent): void => {
+      if (!isTop()) return;
       if (e.key === "Escape") { e.preventDefault(); close(false); }
-      else if (e.key === "Enter") { e.preventDefault(); close(true); }
+      else if (e.key === "Enter") {
+        if (buttonOnly) {
+          // Let native keyboard activation of the focused button work. An
+          // unrelated Enter (including in the chat input) is not approval.
+          if (e.target !== ok && e.target !== cancel) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+          return;
+        }
+        e.preventDefault(); close(true);
+      }
     };
     document.addEventListener("keydown", onKey, true);
-    cancel.addEventListener("click", () => close(false));
-    ok.addEventListener("click", () => close(true));
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(false); });
-    setTimeout(() => ok.focus(), 0);
+    cancel.addEventListener("click", () => { if (isTop()) close(false); });
+    ok.addEventListener("click", () => { if (isTop()) close(true); });
+    overlay.addEventListener("click", (e) => { if (isTop() && e.target === overlay) close(false); });
+    setTimeout(() => { if (isTop()) (buttonOnly ? cancel : ok).focus(); }, 0);
   });
 }
 
@@ -3972,7 +3997,7 @@ function forkAgentHere(token: string, name?: string): void {
   void tp.connect().catch(() => { if (!done) { done = true; clearTimeout(timer); say("✗ couldn't connect to ask"); } });
 }
 
-function handleCommand(raw: string): string[] {
+function handleCommand(raw: string, commandOptions: { directInput?: boolean; recordId?: (id: string) => void } = {}): string[] {
   const body = raw.slice(1).trim();
   const parts = body.split(/\s+/);
   const cmd = parts[0].toLowerCase();
@@ -4135,7 +4160,8 @@ function handleCommand(raw: string): string[] {
         const question = (bar < 0 ? rest : rest.slice(0, bar)).trim();
         const options = bar < 0 ? [] : rest.slice(bar + 1).split(",").map((s) => s.trim()).filter(Boolean);
         if (!question) { sys("a poll needs a question: /poll new <question> [| seed options] [ranked]"); break; }
-        createPoll(question, options, method);
+        const poll = createPoll(question, options, method);
+        commandOptions.recordId?.(poll.id);
         sys(`poll created: "${question}" [${method}]${options.length ? ` — ${options.length} seed options` : " — open for nominations (use /poll add … or the card's add box)"}`);
         break;
       }
@@ -4981,6 +5007,7 @@ function handleCommand(raw: string): string[] {
       signedBroadcast({ kind: "lemma", name: lemmaName, twists: resolvedTwistsStr, cap: lemCap, who: lemWho, text: lemText });
       saveLemmas();
       renderLemmas();
+      commandOptions.recordId?.(lemmaRefStr(lemmaName));
       break;
     }
 
@@ -5866,6 +5893,7 @@ function handleCommand(raw: string): string[] {
           sys(`  ${note}`);
           if (gTerms) sys(`  terms: ${gTerms}`);
           if (qpeer) qpeer.broadcast({ kind: "note-grant", currency: unit, denomination: N, who });
+          commandOptions.recordId?.(note);
           break;
         }
 
@@ -5975,6 +6003,7 @@ function handleCommand(raw: string): string[] {
           renderNotes();
           sys(`merged ${h1.currency}: ${h1.denomination} + ${h2.denomination} = ${h1.denomination + h2.denomination}`);
           sys(`  ${merged}`);
+          commandOptions.recordId?.(merged);
           break;
         }
 
@@ -6120,6 +6149,7 @@ function handleCommand(raw: string): string[] {
             sys(`cannot reach ${targetName} — data channel not open`);
             break;
           }
+          commandOptions.recordId?.(id);
           sys(`· proposed rendezvous ${shortRdvId(id)} to ${targetName}`);
           sys(`  you give ${giveCur} ${giveN}, get ${getCur} ${getN}`);
           sys(`  expires in ${Math.round(RDV_TIMEOUT_MS / 1000)}s — /rdv abort ${shortRdvId(id)} to cancel`);
@@ -6799,6 +6829,7 @@ function handleCommand(raw: string): string[] {
 
     case "rhoqu": {
       const src = arg.trim();
+      if (src === "package") { openRhoQuPackageUI(dyncapState?.anchor); break; }
       // Subcommands for managing registered on-handlers.
       if (src === "list") {
         if (rhoquHandlers.length === 0) {
@@ -6810,6 +6841,10 @@ function handleCommand(raw: string): string[] {
         break;
       }
       if (src === "clear") {
+        if (!commandOptions.directInput) {
+          sys("Enter /rhoqu clear directly to remove channel handlers.");
+          break;
+        }
         const n = rhoquHandlers.length;
         rhoquHandlers.length = 0;
         activeRoom.rhoquHandlers = rhoquHandlers;   // keep RoomContext field in sync
@@ -6820,11 +6855,20 @@ function handleCommand(raw: string): string[] {
         sys("usage: /rhoqu <source>");
         sys("  /rhoqu list                          — show registered on-handlers");
         sys("  /rhoqu clear                         — drop all on-handlers in this room");
-        sys("  process P(a, b) { /grant $a; /lemma $b; } P(fork-a, alice);");
-        sys("  if has(@met-bob) { /qucalc @met-bob; } else { /lemma met-bob ^v; }");
+        sys("  /rhoqu package                       — preview, import, or export a process package");
+        sys("  process P(lemma) { /qucalc $lemma; } P(@alice);");
+        sys("  bind pid /qos start Decision; /qos status $pid;");
+        sys("  if has(@met-bob) { /qucalc @met-bob; } else { /qucalc ^v; }");
+        sys("  when peers() >= 2 { /qucalc @shared; } else { /qucalc ^v; } — runtime branch");
+        sys("  concurrent { /qucalc ^v; /qucalc <>; } — concurrent local branches");
         sys("  on forks(msg) { /qucalc @msg; }      — register a channel-msg handler");
         break;
       }
+      if (!commandOptions.directInput) {
+        sys("Enter the RhoQu program directly to review and approve it.");
+        break;
+      }
+      const pendingHandlers: RhoQuOnHandler[] = [];
       const rhoCtx: RhoQuContext = {
         hasLemma:  (name) => lemmaStore.has(canonLemma(name)),
         balance:   (currency) => {
@@ -6839,24 +6883,77 @@ function handleCommand(raw: string): string[] {
         peerCount:    () => peers.size,
         isConnected:  () => qpeer !== null,
         myCurrentSeq: () => dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
-        registerOnHandler: (h) => { rhoquHandlers.push(h); },
+        registerOnHandler: (h) => { pendingHandlers.push(h); },
       };
-      let cmds: string[];
+      let process: RhoFlatProcess;
       try {
-        cmds = rhoquTranspile(src, rhoCtx);
+        process = rhoquTranspileProcess(src, rhoCtx);
       } catch (e) {
         if (e instanceof RhoQuError) sys(`· ${e.message}`);
         else sys(`· rhoqu parse error: ${String(e)}`);
         break;
       }
-      const handlersAfter = rhoquHandlers.length;
-      sys(`· rhoqu transpiled to ${cmds.length} command${cmds.length === 1 ? "" : "s"}`);
-      let executed = 0;
-      for (const c of cmds) {
-        try { runInput(c); executed++; }
-        catch (err) { sys(`· rhoqu error on '${c}': ${String(err)}`); }
-      }
-      sys(`· rhoqu: ${executed} executed${handlersAfter > 0 ? `, ${handlersAfter} on-handler${handlersAfter === 1 ? "" : "s"} active` : ""}`);
+      const commandCount = countRhoProcessCommands(process);
+      sys("RhoQu IR contains " + commandCount + " commands; runtime branches evaluate at execution.");
+      const runtimeSnapshot = (): RhoQuRuntimeSnapshot => {
+        const balances: Record<string, number> = Object.create(null);
+        for (const note of noteStore.values()) balances[note.currency] = (balances[note.currency] ?? 0) + note.denomination;
+        return {
+          lemmaNames: [...lemmaStore.keys()].map(canonLemma),
+          balances,
+          declaredCurrencies: [...knownCurrencies.values()].map((entry) => entry.currency),
+          peerCount: peers.size,
+          connected: qpeer !== null,
+          currentSeq: dyncapState?.seqByRoom[activeRoom.roomId] ?? 0,
+        };
+      };
+      const executionRoom = activeRoom;
+      const executionAnchor = dyncapState?.anchor;
+      const executionPeer = qpeer;
+      const canDispatch = () =>
+        activeRoom === executionRoom && dyncapState?.anchor === executionAnchor && qpeer === executionPeer;
+      const report = (text: string): void => {
+        if (rooms.get(executionRoom.roomId) !== executionRoom) return;
+        const visibleRoom = activeRoom;
+        setActiveRoom(executionRoom);
+        try { addMessage("", text, "system"); } finally { setActiveRoom(visibleRoom); }
+      };
+      const run = async (): Promise<void> => {
+        const plan = formatRhoQuProcess(process);
+        const handlerSource = pendingHandlers.length ? "\n\nChannel handler source:\n" + src : "";
+        if (!(await confirmDialog("Review RhoQu program", plan + handlerSource, "Run program", true))) return;
+        if (!canDispatch()) throw new Error("RhoQu execution context changed");
+        rhoquHandlers.push(...pendingHandlers);
+        const results = await executeRhoProcessAsync(process, async (command, { binding }) => {
+          if (!canDispatch()) throw new Error("RhoQu execution context changed");
+          if (!allowsRhoQuCommand(command, "approved")) {
+            throw new Error("command requires direct entry outside RhoQu");
+          }
+          if (binding && !rhoquCommandProducesId(command)) {
+            throw new Error("this command does not return a bindable ID");
+          }
+          if (/^\/\s*qos(?:\s|$)/i.test(command)) {
+            const id = await runQosCommand(command.replace(/^\/\s*qos\s*/i, ""), "/qos", canDispatch);
+            return id ? { lines: [], id } : { lines: [] };
+          }
+          let id: string | undefined;
+          const lines = handleCommand(command.trim(), { recordId: (value) => { id = value; } });
+          return id ? { lines, id } : { lines };
+        }, {
+          strictBindings: true,
+          evaluateWhen: (condition, env) => {
+            if (!canDispatch()) throw new Error("RhoQu execution context changed");
+            return evaluateRhoQuRuntimeCondition(condition, env, runtimeSnapshot());
+          },
+        });
+        const dispatched = results.filter((result) => result.ok).length;
+        for (const result of results) {
+          if (!result.ok) report("· RhoQu: " + result.error);
+        }
+        report("· RhoQu: " + dispatched + "/" + results.length + " dispatched"
+          + (pendingHandlers.length ? ", " + pendingHandlers.length + " channel handlers registered" : ""));
+      };
+      void run().catch((error) => report("· RhoQu: " + String(error)));
       break;
     }
 
@@ -8808,13 +8905,20 @@ async function connect(): Promise<void> {
           // RhoQu `on channel(x) { … }` handlers fire on every matching
           // channel-msg regardless of subscription. Each fires once per
           // delivery; the body runs with `x` bound to the payload.
-          for (const h of rhoquHandlers) {
+          for (const h of [...rhoquHandlers]) {
             if (h.channel !== ch) continue;
             try {
               const cmds = h.trigger(payload);
               if (cmds.length === 0) continue;
               addMessage("", `  · rhoqu on ${ch}(${h.binding}=${payload}) → ${cmds.length} cmd${cmds.length === 1 ? "" : "s"}`, "system");
               for (const c of cmds) {
+                // Channel handlers are automatic/asynchronous and have no approval
+                // UI context. Never let inbound messages trigger approval-gated
+                // operations (deploys, key changes, claims, resets, sockets).
+                if (!allowsRhoQuCommand(c, "channel")) {
+                  addMessage("", `  · rhoqu on-handler blocked '${c}': requires approved local execution`, "system");
+                  continue;
+                }
                 try { handleCommand(c); }
                 catch (err) { addMessage("", `  · rhoqu trigger error: ${String(err)}`, "system"); }
               }
@@ -9624,7 +9728,7 @@ function send(): void {
     const cmd = parts[0].toLowerCase();
     const arg = parts.slice(1).join(" ");
     addMessage("", text, "self");
-    const lines = handleCommand(text);
+    const lines = handleCommand(text, { directInput: true });
     if (cmd !== "help" && cmd !== "dump") {
       sessionLog.push({ who: myName || "you", cmd, arg, summary: lines[0] ?? "" });
     }
