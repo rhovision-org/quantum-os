@@ -953,3 +953,67 @@ with an observed frontier depend on those exact receipt hashes in canonical
 order. Missing receipts fail closed. Older raw requests remain supported
 with their operation-specific version constraints; concurrent histories
 can still conflict. This is causal replay, not wall-clock finality.
+
+### `/dev` — capability devices (#283, independent slice)
+
+The logical descriptor + grant and the open handle are separate from a
+locally attached host resource. Registering a logical device grants no
+ambient hardware permission; no group UID, group role or ADMIN bit is
+required or recognized. Future verified group grants can issue the same
+attenuated device capability without changing request/observation schemas.
+
+- `/dev define <process> opfs-block 3` creates a scratch-device grant.
+- `/dev grant <process> <grant> <recipient-pid> <mask>` attenuates a grant.
+- `/dev open <process> <grant> <mask>` creates a logical open session;
+  `/dev bind <process> <session>` explicitly attaches the local adapter.
+- `/dev list <process>`, `/dev read <process> <session> <limit>`,
+  `/dev write <process> <session> | 00ff`, `/dev ioctl <process> <session> status`,
+  `/dev ioctl <process> <session> zfa | 0001`, `/dev close <process> <session>`.
+- `/dev abandon <process> <pending-ticket>` records EINTR/unknown after
+  loss of the executing host. It never retries an external operation.
+
+Rights: READ=1, WRITE=2, EXEC=4 (ZFA ioctl). A grant cannot be widened;
+open sessions do not grant additional handles. User commands require an
+owned process and a live explicit grant. A successful request receipt
+allocates one pending ticket. Its observation is a separate canonical
+receipt with strict request-bound byte count, bounded hex, optional opaque
+timestamp, or errno plus effect uncertainty. The pure replay engine never
+imports the host module or contacts a device. Observations are attributed
+claims under the existing dyncap trust model, not hardware attestations.
+The scheduler never consults device timestamps.
+
+A local broker dispatches only a newly committed request from the explicit
+command path; generic raw syscalls and replay cannot dispatch. Revocation,
+close, suspend, and process exit release live leases when the local
+client reconciles. Authority is checked before and after I/O; external
+effects already performed cannot be undone. Timeout/lost execution means
+unknown, not exactly-once delivery. Binding is not persisted.
+
+Built-in browser bindings: OPFS scratch block (room-scoped fixed file name,
+not arbitrary host paths; max 4 KiB), ZFA pairwise wrapper (WASM if loaded,
+TS fallback), and explicitly bound read-only Rholo status RPC. Donated
+dedicated RTC data channels, media tracks (metadata only, no capture), and
+existing mesh sockets have adapter constructors; automatic adoption of
+active application resources is deliberately not implemented. Native
+external POSIX sockets, full media capture and arbitrary RPC methods
+remain separate. No device operations are dispatched by journal replay,
+including a pending request after reload. Source/output bytes are room
+journal data; never pass secrets.
+
+This is not full #283 acceptance until actual browser/adapter and resource
+release witnesses are green. It does not resolve #103 or expand #107.
+
+
+Explicit host-resource adoption: an embedding host may call
+`QosCommand.attachDevice(process, session, kind, factory)` after obtaining a
+dedicated pre-authorized resource. The factory is not invoked for an
+invalid, foreign, closed, already-bound, or wrong-kind session.
+`/socket device <connection-id> <process> <open-mesh-session>` surrenders an
+existing user-created mesh connection to the device lease and removes it
+from the legacy socket command map. No active chat channel or physical
+capture is acquired implicitly. Disconnect, room close and identity
+replacement release live leases; journal state remains intact.
+Browser CI uses real dedicated RTC channels, PosixNet over a separate RTC
+channel, and a synthetic canvas MediaStreamTrack (metadata and stop only).
+Rholo device CI uses an owned disposable bundled node and GET /api/status
+only; replay is verified in a separate process forbidden to perform RPC.

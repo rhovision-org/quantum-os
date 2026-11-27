@@ -14,9 +14,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def main():
     kind=sys.argv[1] if len(sys.argv)==2 else "vfs" if len(sys.argv)==1 else ""
-    if kind not in ("vfs","shell"):
-        raise SystemExit("expected vfs or shell")
-    issue=280 if kind=="vfs" else 281
+    if kind not in ("vfs","shell","device"):
+        raise SystemExit("expected vfs, shell or device")
+    issue={"vfs":280,"shell":281,"device":283}[kind]
     if os.environ.get("GITHUB_ACTIONS") != "true":
         raise SystemExit("CI-only")
     for port in (4444, 5173):

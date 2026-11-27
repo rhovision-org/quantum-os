@@ -18,9 +18,9 @@ def main():
     if os.environ.get("GITHUB_ACTIONS") != "true":
         raise SystemExit("CI-only disposable witness")
     kind = sys.argv[1] if len(sys.argv) == 2 else "memory" if len(sys.argv) == 1 else ""
-    if kind not in ("memory", "vfs"):
-        raise SystemExit("expected memory or vfs")
-    issue = 279 if kind == "memory" else 280
+    if kind not in ("memory", "vfs", "device"):
+        raise SystemExit("expected memory, vfs or device")
+    issue = {"memory":279,"vfs":280,"device":283}[kind]
     temp = Path(os.environ["RUNNER_TEMP"])
     witness = Path(tempfile.mkdtemp(prefix=f"qos{issue}-", dir=temp))
     for port in (40401, 40402, 40403, 40405):

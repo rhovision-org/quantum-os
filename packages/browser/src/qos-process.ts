@@ -629,7 +629,7 @@ export function compareEvents(a: QosEvent, b: QosEvent): number {
     compareStrings(a.hash, b.hash);
 }
 
-export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier" | "memory-frontier" | "vfs-version" | "shell-version" | "proxy-version" | "observed-receipt";
+export type QosDependencyKind = "prev" | "grant" | "request" | "handle-version" | "process-version" | "scheduler-frontier" | "memory-frontier" | "vfs-version" | "shell-version" | "proxy-version" | "observed-receipt" | "device-ticket";
 export interface QosDependency { hash: string; kind: QosDependencyKind }
 /** Only schema-defined references are causal, never arbitrary payload strings. */
 export function eventDependencies(event: QosEvent): QosDependency[] {
@@ -696,6 +696,15 @@ export function eventDependencies(event: QosEvent): QosDependency[] {
   if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&
     Array.isArray(event.payload.observed)&&event.payload.observed.length<=4096){
     for(const hash of event.payload.observed)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"observed-receipt"});
+  }
+  if(event.type==="syscall-request"&&event.payload?.schema==="qos.syscall/1"&&typeof event.payload.op==="string"&&
+     ["dev_define","dev_grant","dev_open","dev_close","dev_list","dev_request","dev_observe"].includes(event.payload.op)&&isRecord(event.payload.args)){
+    const args=event.payload.args;
+    for(const key of ["handleVersion","targetVersion","ticketVersion"]){
+      const hash=args[key];if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:key==="ticketVersion"?"device-ticket":key==="targetVersion"?"process-version":"handle-version"});
+    }
+    if(Array.isArray(args.authorityFrontier)&&args.authorityFrontier.length<=4096)
+      for(const hash of args.authorityFrontier)if(typeof hash==="string"&&HEX64.test(hash))refs.push({hash,kind:"handle-version"});
   }
   return refs;
 }

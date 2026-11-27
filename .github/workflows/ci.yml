@@ -191,6 +191,8 @@ jobs:
         run: node packages/browser/test/qos-shell.test.mjs
       - name: QOS identity, attenuation and mediated proxy test
         run: node packages/browser/test/qos-identity.test.mjs
+      - name: QOS capability device and observation replay test
+        run: node packages/browser/test/qos-device.test.mjs
       - name: QOS isolated syscall trace test
         run: node packages/browser/test/qos-syscall-journal.test.mjs
 

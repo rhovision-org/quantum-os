@@ -99,3 +99,6 @@ export type {ShellOp,ShellJob,ShellContext,Pipeline} from "./qos-shell.js";
 
 export {IDENTITY_OPS,PROXY_ACTIONS,isUid,isProxyToken} from "./qos-identity.js";
 export type {IdentityOp,AuthorityProxy} from "./qos-identity.js";
+
+export * from "./qos-device.js";
+export * from "./qos-device-host.js";

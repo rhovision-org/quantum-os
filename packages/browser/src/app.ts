@@ -1,5 +1,5 @@
 import { loadZfa, generateCapability, validateCapability,
-         spectralGap, achievesZfa, isPauliClosed,
+         spectralGap, achievesZfa, achievesZfaPairwise, isPauliClosed,
          classifyCoupling, isPairwiseBalanced, signedAction,
          foldsToScalar, COUPLED_BASELINE } from "./zfa.js";
 import { QOSPeer, DEFAULT_ICE } from "./peer.js";
@@ -63,6 +63,7 @@ import { loadConfig as loadNodeConfig, saveConfig as saveNodeConfig, describeCon
 import { sha256 } from "@noble/hashes/sha2.js";
 import { QosMemoryBytes, OpfsMemoryCache, RoomByteCache, objectIdentity } from "./qos-memory-bytes.js";
 import { RholoRegistryMemory } from "./qos-memory-rholo.js";
+import { opfsBlockDriver, zfaDriver, rholoStatusDriver, meshSocketDriver } from "./qos-device-host.js";
 import { transcriptForSync, sanitizeTranscript, mergeTranscript, needsTimeMark, timeMarkText, findMentions,
          type TranscriptLine } from "./chat-view.js";
 import { qucalcSearch, qucalcSolve,
@@ -993,6 +994,13 @@ function qosCommandFor(ctx: RoomContext): QosCommand | null {
       const backend=new RholoRegistryMemory(network,config);
       return {service:new QosMemoryBytes(cache,[backend]),network};
     },
+    deviceDriver:async descriptor=>{
+      if(descriptor.kind==="opfs-block"&&typeof navigator.storage?.getDirectory==="function")return opfsBlockDriver(journalScope,descriptor.id);
+      if(descriptor.kind==="zfa")return zfaDriver(achievesZfaPairwise,"qos-zfa-pairwise-wrapper");
+      if(descriptor.kind==="rholo-status")return rholoStatusDriver(loadNodeConfig().url);
+      // Never seize an active chat data channel, media track or socket.
+      return null;
+    },
     roomId: ctx.roomId,
     identity: dyncapState,
     transport: {
@@ -1782,6 +1790,7 @@ function closeRoomTab(roomId: string): void {
   if (rooms.size <= 1) return;   // never close the last tab
   const ctx = rooms.get(roomId)!;
   // Tear down the connection if any.
+  void qosCommands.get(roomId)?.releaseDevices();
   if (ctx.qpeer) { ctx.qpeer.disconnect(); ctx.qpeer = null; }
   if (ctx.posixNet) { ctx.posixNet.close(); ctx.posixNet = null; }
   rooms.delete(roomId);
@@ -6462,6 +6471,10 @@ function handleCommand(raw: string): string[] {
       break;
     }
 
+    case "dev":
+      runQosCommand("dev "+arg,"/dev");
+      break;
+
     case "fs":
       runQosCommand("fs "+arg,"/fs");
       break;
@@ -7167,6 +7180,7 @@ function handleCommand(raw: string): string[] {
         const restored = await deserializeState(parsed.state, activeRoom.roomId);
         if (!restored) { addMessage("", "recovery string is corrupt (bad seed)", "system"); return; }
         dyncapState = restored;
+        await Promise.all([...qosCommands.values()].map(q=>q.releaseDevices()));
         qosCommands.clear();   // old controllers hold the previous identity
         goalStore = null; goalStoreAnchor = "";   // personal goals are identity-scoped
         saveDyncap();
@@ -7362,6 +7376,27 @@ function handleCommand(raw: string): string[] {
           finally { setActiveRoom(prev); }
         };
       };
+
+      // Explicitly surrender a socket already created by the user, not an
+      // active chat transport. After adoption the legacy socket surface no
+      // longer retains access to it.
+      if(ssub==="device"){
+        const [_,conn,process,handle,...extra]=sParts;
+        const socket=socketConns.get(conn),controller=qosCommandFor(cmdCtx);
+        if(!socket||!controller||!process||!handle||extra.length){sys("usage: /socket device <connection-id> <process> <open-mesh-session>");break;}
+        const report=(message:string)=>{
+          const prev=activeRoom;setActiveRoom(cmdCtx);
+          try{addMessage("",message,"system");}finally{setActiveRoom(prev);}
+        };
+        const connections=socketConns;
+        void controller.attachDevice(process,handle,"mesh-socket",()=>{
+          if(connections.get(conn)!==socket)throw Error("socket no longer available");
+          connections.delete(conn);socket.onData=null;socket.onClose=null;
+          return meshSocketDriver(socket);
+        }).then(adopted=>report(adopted?"socket transferred to device session":"device transfer refused"),
+          ()=>report("device transfer failed"));
+        break;
+      }
 
       if (ssub === "listen") {
         const port = Number(sParts[1]);
@@ -8046,6 +8081,7 @@ async function connect(): Promise<void> {
     return;
   }
   if (qpeer) {
+    await qosCommands.get(activeRoom.roomId)?.releaseDevices();
     qpeer.disconnect();
     setQpeer(null);
     posixNet?.close();
