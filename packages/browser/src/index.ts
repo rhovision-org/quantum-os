@@ -96,3 +96,6 @@ export type {VfsOp,VfsEntry,VfsNamespace} from "./qos-vfs.js";
 
 export {SHELL_OPS,splitShell,parsePipeline,stageResult} from "./qos-shell.js";
 export type {ShellOp,ShellJob,ShellContext,Pipeline} from "./qos-shell.js";
+
+export {IDENTITY_OPS,PROXY_ACTIONS,isUid,isProxyToken} from "./qos-identity.js";
+export type {IdentityOp,AuthorityProxy} from "./qos-identity.js";

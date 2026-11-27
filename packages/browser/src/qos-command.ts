@@ -9,6 +9,7 @@
 // change `/poll` or `/gov`, and does not call a chain. Every lifecycle
 // transition is the dyncap-attributed event `QosProcessRoom` already knows how to make.
 
+import { IDENTITY_OPS,PROXY_ACTIONS,type IdentityOp } from "./qos-identity.js";
 import { SHELL_OPS,CONFIG_COMMANDS,splitShell,parsePipeline,boundedText,type ShellOp } from "./qos-shell.js";
 import { VFS_OPS, type VfsOp } from "./qos-vfs.js";
 import type { QosMemoryBytes } from "./qos-memory-bytes.js";
@@ -161,6 +162,14 @@ export class QosCommand {
         await this.syscall(rest);return;
       case "fs":
         return this.fs(rest);
+      case "whoami":case "id":
+        if(!rest){this.host.say("UID "+this.host.identity.anchor+" · dyncap TOFU continuity; no superuser");return;}
+        return this.identityCommand("id_info",rest);
+      case "groups":return this.identityCommand("id_groups",rest);
+      case "cap":return this.identityCommand("id_cap",rest);
+      case "chmod":return this.identityCommand("id_chmod",rest);
+      case "chown":return this.identityCommand("id_chown",rest);
+      case "proxy":return this.proxyCommand(rest);
       case "sh": return this.shell(rest);
       case "spawn": return this.shell(rest,true);
       case "exec": case "wait": case "jobs": case "fg": case "bg":
@@ -267,6 +276,16 @@ export class QosCommand {
     const payload = { schema: "qos.syscall/1", caller: entry.id, op: operation.trim(), args };
     const current = () => replayQosKernel(this.room.log.events(), this.room.log.forkedSources);
     const before = current();
+    // The application has seen these admitted chain tips. Preserve causality
+    // across different peer/process chains instead of letting a later revoke
+    // or proxy-set retroactively precede an already-observed receipt.
+    const admitted=new Set(before.applied),tips=new Map<string,QosEvent>();
+    for(const e of this.room.log.events())if(admitted.has(e.hash)){
+      const key=e.source+"\u0000"+e.process,previous=tips.get(key);
+      if(!previous||e.seq>previous.seq)tips.set(key,e);
+    }
+    if(tips.size>4096){this.host.say("observed journal frontier exceeds limit");return;}
+    Object.assign(payload,{observed:[...new Set([...tips.values()].map(e=>e.hash))].sort()});
     if (args && typeof args === "object" && !Array.isArray(args) &&
         "handle" in args && typeof args.handle === "string" && !Object.hasOwn(args, "handleVersion")) {
       const version = before.kernel.handleVersion(entry.id, args.handle);
@@ -332,6 +351,21 @@ export class QosCommand {
           if(!Object.hasOwn(a,"targetVersion"))a.targetVersion=before.kernel.processVersion(job.pid);
         }
         if(op==="sh_finish"&&!Object.hasOwn(a,"memoryFrontier"))a.memoryFrontier=before.kernel.memoryFrontier();
+      }
+    }
+    if(args&&typeof args==="object"&&!Array.isArray(args)&&IDENTITY_OPS.includes(operation.trim() as IdentityOp)){
+      const a=args as Record<string,unknown>,op=operation.trim();
+      if(op==="id_cap"||op==="id_chmod"){
+        if(!Object.hasOwn(a,"authorityFrontier"))a.authorityFrontier=before.kernel.handleFrontier(entry.id,op==="id_chmod"?a.handle as string:undefined);
+      }
+      if(op==="proxy_set"&&typeof a.token==="string"){
+        if(!Object.hasOwn(a,"proxyVersion"))a.proxyVersion=before.kernel.proxyVersion(a.token);
+        if(!Object.hasOwn(a,"observedUses"))a.observedUses=before.kernel.proxyObservedUses(a.token);
+      }
+      if(op==="proxy_use"&&typeof a.token==="string"){
+        const observation=before.kernel.proxyObservation(entry.id,a.token);
+        if(observation)for(const [key,value] of Object.entries(observation))if(!Object.hasOwn(a,key))a[key]=value;
+        if(typeof a.dataHandle==="string"&&!Object.hasOwn(a,"dataVersion"))a.dataVersion=before.kernel.handleVersion(entry.id,a.dataHandle);
       }
     }
     if (!canonicalSyscallReady(before.kernel, payload, entry.id)) {
@@ -421,6 +455,41 @@ export class QosCommand {
     }
   }
 
+
+  private async identityCommand(op:string,rest:string):Promise<void>{
+    const [ref,handle,arg,...extra]=rest.trim().split(/\s+/),entry=this.resolve(ref);
+    if(!entry||extra.length||entry.ownerAnchor!==this.host.identity.anchor){this.host.say("usage: /qos whoami|id|groups|cap <owned-process>; /qos chmod <process> <handle> <rights>; /qos chown <process> <handle> <recipient-pid>");return;}
+    const args:Record<string,unknown>={};
+    if(op==="id_chmod"||op==="id_chown"){
+      if(!handle||!arg){this.host.say("handle and rights or recipient required");return;}
+      Object.assign(args,op==="id_chmod"?{handle,rights:Number(arg)}:{handle,target:this.resolve(arg)?.id??arg});
+    }else if(handle){this.host.say("unexpected arguments");return;}
+    await this.syscall(entry.id+" | "+op+" | "+JSON.stringify(args));
+  }
+  private async proxyCommand(rest:string):Promise<void>{
+    const [op,ref,first,second,third,fourth,...extra]=rest.trim().split(/\s+/),entry=this.resolve(ref);
+    const say=(t:string)=>this.host.say(t);
+    const usage="usage: /qos proxy create <process> <handle> <holder-uid> <rights> | set <process> <token> <handle> <rights> on|off | use <process> <token> stat|ls|read|mkdir|unlink|put|signal <path|signal> [data-handle]";
+    if(!entry||entry.ownerAnchor!==this.host.identity.anchor||extra.length){say(usage);return;}
+    const call=(operation:string,args:Record<string,unknown>)=>this.syscall(entry.id+" | "+operation+" | "+JSON.stringify(args));
+    if(op==="create"&&first&&second&&third&&!fourth){await call("proxy_create",{handle:first,holder:second,rights:Number(third)});return;}
+    // set has five arguments after op: process, token, handle, mask, state.
+    if(op==="set"&&first&&second&&third&&["on","off"].includes(fourth)){
+      await call("proxy_set",{token:first,...(fourth==="on"?{handle:second}:{}),rights:Number(third),enabled:fourth==="on"});return;
+    }
+    if(op!=="use"||!first||!PROXY_ACTIONS.includes(second as typeof PROXY_ACTIONS[number])||!third){say(usage);return;}
+    if(second==="put"?!fourth:!!fourth){say(usage);return;}
+    const args:Record<string,unknown>={token:first,action:second,...(second==="signal"?{signal:third}:{path:third}),...(second==="put"?{dataHandle:fourth}:{})};
+    const receipt=await call("proxy_use",args);
+    if(second==="read"&&receipt?.outcome.ok){
+      if(!this.host.memory){say("byte service unavailable");return;}
+      const meta=receipt.outcome.value as {id:string};
+      const {service}=await this.host.memory();
+      const bytes=await service.getProxy(()=>this.shellKernel(),entry.id,first,third,receipt.args.proxyVersion as string,meta.id);
+      if(!bytes){say("proxy read refused or bytes unavailable");return;}
+      say(new TextDecoder().decode(bytes));
+    }
+  }
 
   private shellKernel(){return replayQosKernel(this.room.log.events(),this.room.log.forkedSources).kernel;}
   private shellCall(pid:string,op:string,args:Record<string,unknown>){

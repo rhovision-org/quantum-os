@@ -189,6 +189,8 @@ jobs:
         run: node packages/browser/test/qos-vfs.test.mjs
       - name: QOS deterministic shell and job control test
         run: node packages/browser/test/qos-shell.test.mjs
+      - name: QOS identity, attenuation and mediated proxy test
+        run: node packages/browser/test/qos-identity.test.mjs
       - name: QOS isolated syscall trace test
         run: node packages/browser/test/qos-syscall-journal.test.mjs
 

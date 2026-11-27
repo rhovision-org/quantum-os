@@ -909,3 +909,47 @@ and eight semicolon segments, sixteen environment variables of at most
 256 UTF-8 bytes, 128 historical jobs per parent. **Shell source, environment,
 input observations and stage outputs are visible in room journal data.
 Do not put secrets or private file contents through this shell.**
+
+### QOS identity and capability control (#282 — individual/proxy slice)
+
+- `/whoami` reports the current dyncap anchor as UID. `/qos id <process>`
+  returns its canonical identity and trust ceiling. There is no superuser.
+- `/qos cap <process>` lists its handles. `/chmod <process> <handle> <mask>`
+  requires REVOKE and can only decrease rights, including all descendants.
+  `/chown <process> <handle> <recipient-pid>` moves a grantable non-root
+  filesystem or memory handle, not the object or the recipient's identity.
+  Existing descendants retain their own grants and ancestry.
+- `/qos proxy create <process> <handle> <holder-uid> <mask>` returns a stable
+  proxy token bound to the named UID. The holder gains no raw target handle.
+- `/qos proxy set <process> <token> <handle> <mask> on|off` changes the target,
+  narrows rights or disables the token. Off ignores the handle argument;
+  only the original caretaker process may change the table.
+- `/qos proxy use <process> <token> stat|ls|read|mkdir|unlink <path>`,
+  `... put <path> <own-memory-handle>`, or `... signal <signal>` checks
+  the currently observed proxy, caretaker, target handle and namespace/process
+  versions at the resource boundary. Read verifies bytes and rechecks after
+  asynchronous I/O. SIGKILL is never forwarded.
+
+Rights: READ=1, WRITE=2, EXEC=4, SIGNAL=8, GRANT=16, REVOKE=32. ADMIN is
+not an alternative to REVOKE. Raw kernel revocation invalidates handle
+descendants; proxy disable stops future mediated use of the unchanged token.
+Neither can retrieve bytes already delivered. Tokens and metadata appear in
+the room journal, not as confidential bearer secrets. Authorization is under
+the existing hash-only dyncap TOFU model, not asymmetric authentication.
+The proxy is enforced by clients that replay the current journal; an offline
+or noncompliant peer can have an obsolete view. This is not a global
+revocation proof or public Rholo access-control enforcement.
+
+Group ownership and group-controlled proxy transfer remain blocked on #103:
+`/qos groups <process>` returns only verified groups (none until the contract
+exists); group operations are explicitly ENOTSUP. A local roster, role,
+or a self-declared threshold is not group authority. #107's library/inbox/
+sync-consent and group-owner integration is outside this mediated OS slice.
+
+
+Permission commands preserve the causal receipts observed by the issuing
+client, including accepted tips on other process/source chains. Commands
+with an observed frontier depend on those exact receipt hashes in canonical
+order. Missing receipts fail closed. Older raw requests remain supported
+with their operation-specific version constraints; concurrent histories
+can still conflict. This is causal replay, not wall-clock finality.
