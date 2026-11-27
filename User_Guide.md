@@ -33,14 +33,33 @@ Evidence-keeper, Operator, Boundary-keeper — and a few turn-taking rules: don'
 dominate, include the silent, don't close a proposal unrefuted.
 → **[Room Best Practices](Room_Best_Practices.md)** — the roles, rules, and closure checklist.
 
+**Joining late?** The people already in the room hand you the conversation so far, and so
+does an agent that heard it. The transcript shows the time wherever the minute changes, and
+a mention of anyone in the room (you included) is highlighted.
+
 Optional **AI agents** can join as full members to help: a `facilitator` (keeps everyone
 included, surfaces dis/agreement), a `scribe` (tracks decisions, offers to record them),
 a `greeter`, a `skeptic` (surfaces unexamined assumptions before the group closes). They
-only *nudge*, and the room governs them with the same trust as anyone. Once one is
-present, **`/ask <question>`** routes to the facilitator when there is one, otherwise
-another live agent — and says so plainly if none is present. `/facil ask …` still
-addresses the facilitator directly.
-→ **[Running agents](scripts/qos-cli/README.md)** · build your own → **[Developer Guide](Developer_Guide.md)**.
+only *nudge*, and the room governs them with the same trust as anyone.
+
+- **Add one:** type `/agent add` (or `/agent add skeptic`, `/agent add --ai deepseek`). It
+  copies one line with the room in it; paste it into a terminal on any computer with git
+  and Node 18+, or use `/agent claude` to hand it to a Claude Code session instead. **The
+  agent runs on your own AI account**: the `claude` CLI logged in (your Claude plan) or your
+  own `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` on that computer. Keys never go in the room.
+- **Ask it:** **`/ask <question>`** routes to the facilitator when there is one, otherwise
+  another live agent, and says so plainly if none is present. `/facil ask …` addresses the
+  facilitator directly.
+- **Run an activity:** every agent knows the standard activities (brainstorm, debate,
+  retrospective, story-round, twenty-questions, word-chain). `/facil use brainstorm`
+  starts one, `/facil rules` shows the rules, `/facil play <move>` takes a turn. Write
+  your own as a Markdown file → **[Skills](scripts/qos-cli/skills/README.md)**.
+- **Lend it to another room:** as the agent's owner, `/agent grant` gives you a fork grant;
+  whoever you give it to runs `/agent fork <grant>` in their own room and a copy joins there.
+  It brings the role and skills, never your room's conversation, and it runs on your
+  account, so `/agent revoke <id> stop` ends it.
+
+→ **[Adding agents](docs/agents-from-claude.md)** · **[Running agents](scripts/qos-cli/README.md)** · build your own → **[Developer Guide](Developer_Guide.md)**.
 
 ## 3. Build trust
 Voting weight is **earned, not one-person-one-vote**: rate peers (`/gov trust <member> 0–5`),
@@ -96,7 +115,9 @@ governance to each other, so a lemma proven in one room becomes a lemma in the o
 | set your name | `/name <you>` | `/help` |
 | keep / recover your identity | `/password` · `/login <handle>` | [Security](SECURITY.md) |
 | run a good discussion | roles + turn-taking | [Room Best Practices](Room_Best_Practices.md) |
-| add an AI helper | `agent.mjs --role …` | [Agents](scripts/qos-cli/README.md) |
+| add an AI helper | `/agent add [role] [--ai claude\|deepseek]` | [Adding agents](docs/agents-from-claude.md) |
+| run a game or meeting format | `/facil use <activity>` · `/facil play <move>` | [Skills](scripts/qos-cli/skills/README.md) |
+| lend your agent to another room | `/agent grant` → they `/agent fork <grant>` | [/agent](docs/commands.md#agent-ai-agents-in-the-room) |
 | ask the room's AI helper | `/ask <question>` | [Agents](scripts/qos-cli/README.md) |
 | keep private personal goals | `/goal add` · `/goal review` | [Success frameworks](docs/success-frameworks.md) |
 | see or stop a room process | `/ps` · `/kill <name|id>` | [QOS processes](docs/qos-process.md) |

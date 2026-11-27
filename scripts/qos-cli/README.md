@@ -66,7 +66,7 @@ The room has no server and no history — when every browser leaves, its lemmas,
 currencies, and chat are gone. The daemon fixes that: it stays connected (with
 auto-reconnect), **persists the room's public state + transcript to disk**, and
 **re-serves that state to every peer who joins** (`name` + `sync-lemmas` +
-`sync-currencies`, all dyncap-signed). It holds a **stable signed identity**
+`sync-currencies`, all dyncap-attributed). It holds a **stable dyncap identity**
 (`cap:peer` + dyncap anchor) across restarts, so peers TOFU-pin it as one
 continuous peer.
 
@@ -116,7 +116,7 @@ accepted only when its terms hash to the series stamp (self-verifying), and a
 live `note-series` additionally requires the sender to be the currency's issuer
 (verified anchor). **Governance groups** are persisted and re-served via
 `sync-gov`: the daemon applies the same group mutation envelopes the browser sends
-(`group-open` / `group-member` admin-gated / `gov-delegate` self-signed /
+(`group-open` / `group-member` admin-gated / `gov-delegate` self-attributed /
 `group-issue` / `group-vote` / `group-meta`), and honors a creator's group
 disband (`retract` → tombstone), so groups + delegations + treasury/kudos
 currencies survive when every browser leaves. It also ingests **`gov-vault`**
@@ -197,10 +197,14 @@ node selftest.mjs        # ZFA: 200 peer caps + closure facts + parseTwists
 node dyncap.selftest.mjs # dyncap: sign→verify chain, canonicalization, fork detection, state round-trip
 node facilitator-faq.mjs --selftest          # /facil ask answers QOS/decision basics without AI
 node facilitator-advisor.selftest.mjs        # advisor failures surface (incl. a Claude session limit)
+node skills.selftest.mjs                     # activity skills parse, load by name/path, reach the advisor's prompt
+node skill-play.e2e.mjs                      # an agent with a skill answers /greeter rules and /greeter play over a relay
+node fork-host.selftest.mjs                  # fork grants: owner check, use limits, expiry, revoke + stop, restart
+node fork.e2e.mjs                            # a real fork: the owner's grant, a request from outside, a copy in room B, revoke stop
 ```
 
-The dyncap suite proves the signing port matches the browser byte-for-byte
-(so the daemon's signatures verify there). The room key and hashed room id
+The dyncap suite proves the witness port matches the browser byte-for-byte
+(so the daemon's attributions verify there). The room key and hashed room id
 are not ported at all — `qospeer.mjs` imports the browser's own
 `packages/browser/src/room-crypto.js` (plain JS, `--selftest`), so an agent
 and a browser cannot derive them differently.
@@ -229,6 +233,8 @@ and checks the replies (and, for the observer, the files it writes):
 
 ```bash
 node list-cmd.e2e.mjs    # `/scribe list N` — the room's screen history
+node history.e2e.mjs    # a joiner is handed the conversation the facilitator heard (sync-chat)
+node chat-history.mjs --selftest   # history trimming + reading it back from a --persist transcript
 node observer.e2e.mjs    # `/observer start … stop` — records a game, materializes the qos-game/1 record + index
 ```
 
@@ -274,6 +280,31 @@ optimum — the same loop a room runs collectively. No deps. See
   faithfully.
 
 ## Agents (facilitator, scribe, greeter …)
+
+**The easy way:** in the room, type `/agent add [role] [name]`. You need your own AI
+account on the computer that runs it (the `claude` CLI logged in, or your own
+`ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY`); with none, the line stops and says how to set one up. It copies one line
+with the room already in it; paste that into a terminal on any computer with git
+and Node 18+. The line runs [`add-agent.sh`](add-agent.sh), which installs
+dependencies the first time, uses the `claude` CLI if present (your Claude plan),
+else `ANTHROPIC_API_KEY`, else `DEEPSEEK_API_KEY` (`AI=<provider>` forces one, `AI=off`
+starts it without AI on purpose), keeps the room's memory (`--persist`, `NO_MEMORY=1` to skip), starts the
+agent detached, and waits until it has joined. `/agent add … --ai deepseek` (or
+`claude`, `anthropic`, `none`) picks the model provider; each is a plugin in
+[`ai-providers/`](ai-providers/README.md), and `--ai-backend ./your-plugin.mjs` loads your own.
+Every agent has the [standard skills](skills/README.md) (brainstorm, debate, retrospective,
+story-round, twenty-questions, word-chain): `/<cmd> use <skill>`, `/<cmd> rules`,
+`/<cmd> play <move>`. `--skill <name|/abs/path.md>` (`SKILL=` for the script) starts with one on
+or adds your own.
+
+**Forks.** The line `/agent add` copies carries the browser's owner capability in the
+agent's environment (`QOS_AGENT_OWNER`). The owner's `/agent grant` gets a `cap:fork:` grant;
+`/agent fork <grant>` in another room starts a detached copy there (`--fork-of`: same role,
+skills and AI; its own state under `<state>/forks/`; no room memory, no key, no owner cap).
+`/agent revoke <id> stop` ends it. [`fork-host.mjs`](fork-host.mjs) has the details.
+Keys are read from the agent machine's environment, never from the room. `bash stop-agents.sh <role>` stops
+it. Unlike `run-agents.sh` it has no default room and never turns on the faucet.
+
 
 `agent.mjs` is a sibling daemon that joins a room as a **full member** (stable
 `cap:peer` + dyncap identity) and posts **measured** nudges according to its
@@ -369,7 +400,7 @@ participant: it has no proactive duties, posts nothing unprompted, and answers o
 [hare=<option>] [predict: …; …]` and `/observer stop` it appends **every envelope it
 receives** — polls with every ballot, estimate rounds, lemmas, chat, `/qlf-action`
 proposals — to its own append-only events file, timestamped on receipt with the sender's
-dyncap signature, then materializes a structured record (`game-log.mjs`):
+dyncap attribution, then materializes a structured record (`game-log.mjs`):
 
 ```
 <state>/rooms/<room>/games/<ts>-<label>.events.jsonl   raw {t, from, msg} — the data, never edited

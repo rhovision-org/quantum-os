@@ -53,12 +53,16 @@ export type { QosCommandHost } from "./qos-command.js";
 
 // QOS/1 kernel ABI v0 — pure capability-handle/process model (docs/os-abi.md).
 export {
-  QOS_ABI_VERSION, QOS_ALL_RIGHTS, QOS_RIGHTS, QOS_SIGNALS, QOS_SYSCALLS, QosKernel,
+  QOS_ABI_VERSION, QOS_ALL_RIGHTS, QOS_RIGHTS, QOS_SIGNALS, QOS_SYSCALLS, QosKernel, replayQosKernel,
 } from "./qos-kernel.js";
 export type {
   QosErrno, QosHandle, QosHandleInfo, QosProcess, QosProcessInfo, QosProcessState,
-  QosResult, QosRightName, QosSignal, QosSyscallName,
+  QosResult, QosRightName, QosSignal, QosSyscallName, QosKernelReplayResult,
 } from "./qos-kernel.js";
+
+// Cooperative logical scheduler (#278); canonical replay owns admission.
+export { QosScheduler, SCHEDULER_OPS, MAX_PRIORITY, MAX_SLEEP_TICKS } from "./qos-scheduler.js";
+export type { ScheduleView, SchedulerOp, SchedulerLifecycle } from "./qos-scheduler.js";
 
 // Personal success-framework goals — identity-scoped, local-only by default.
 export { GoalStore, GOAL_PRIORITIES, parseGoalAdd } from "./goal-store.js";

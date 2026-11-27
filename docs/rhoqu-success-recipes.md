@@ -12,16 +12,14 @@ transpiled by `packages/browser/test/rhoqu-success-recipes.test.mjs`.
 
 | Limit | Today | Consequence |
 |---|---|---|
-| recipe coverage | recipes use simple ordered commands and handlers | runtime IR features are not demonstrated by these recipes |
-| runtime concurrency | explicit `concurrent` blocks | cross-branch mutation order is undefined |
-| runtime `when` | evaluated at execution against a fresh snapshot | not a replay of an immutable event log |
-| bindings | IDs returned by the dispatched commands | display output is never parsed to invent IDs |
+| `parallel` | sequential expansion | no concurrency; recipes rely on order or channels |
+| `$LAST_ID` / output binding | not implemented | ids must be copied manually |
+| `if` | transpile time only | no branch on state that changes during the run |
+| formal RhoProcess IR | not the runtime | Lean guarantees apply to the design, not the executed program |
 | raw pipe operator | ends a raw command | `/poll` options use `/poll add`, not pipe seeds |
-| process packages | validated JSON, canonical hash, provenance, size/depth limits | package import/export does not itself grant execution authority |
+| sharing processes | per-room/tab handlers | a new member cannot auto-receive a process package |
 
-The #290 runtime implementation is documented in
-[rhoqu-v2-runtime.md](rhoqu-v2-runtime.md). These recipes remain a compatibility
-subset, not a statement that the newer runtime features are absent.
+These are tracked in [#290](https://github.com/rhovision-org/quantum-os/issues/290).
 
 ## Weekly prioritization
 
@@ -134,8 +132,9 @@ channel is `feedback`; the payload binds to `msg`. The old illustrative form
 /rhoqu process weekly-prioritize(goal) { /goal add $goal; /goal review; } weekly-prioritize("Ship docs");
 ```
 
-Review the expanded commands and select **Run program**. The browser dispatches
-these recipes in order and registers `on` handlers after approval.
+The dispatcher prints how many commands were transpiled and executes them in
+order. A failed command does not stop later commands. `on` handlers are
+registered instead of executed.
 
 ## What these recipes do not do
 
