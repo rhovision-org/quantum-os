@@ -1080,3 +1080,47 @@ auditable. The operation budget is not a raw network-event admission limit,
 and logical bytes are not physical cache or transitive memory-graph bytes.
 No production wire-rate, governance-event or global process quotas are
 claimed. No wall-clock dependency.
+
+### Boot manifest and native runtime (#286)
+
+A public `qos.boot/1` manifest contains the versioned kernel contract and
+ABI, hashed supervisor identifier, explicit init service list, sorted
+signed package identities/publisher pins, logical device descriptors
+(explicit host binding only), state root and private snapshot content ID.
+It contains no room capability, identity seed, event payloads, package
+source, endpoints or host credentials. Content address is SHA-256 of
+canonical JSON. Discovering a manifest requires no room authority.
+Package/service names and public keys are intentionally public metadata;
+publish only a manifest (not its snapshot) after review.
+
+`/snapshot bootcut` then `/qos boot-manifest bootcut <supervisor> <service> ...`
+generates the manifest and address from an independently verified clean
+causal cut. Store its JSON as `<address>.json` in a public content-addressed
+directory. The separately protected snapshot contains private authority
+and journal evidence. The manifest alone is not a key or runnable state.
+Boot rejects a missing/mismatched package, dependency cycle, mismatched
+device set, unsupported kernel contract or snapshot digest.
+
+After `pnpm build:wasm` and `pnpm install --frozen-lockfile`, run
+`node scripts/qos-cli/qos-boot.mjs discover --store <dir> --address <hash>`.
+For headless boot, use `boot --store <dir> --address <hash> --snapshot
+<private.json> --room-file <private-file>`. Private inputs must have mode
+0600. Native boot requires actual ZFA WASM initialization; the TS kernel is
+the same module as the browser. It reports JSON dmesg and ps, no chain RPC.
+Use `--init --identity <private-current-identity> --out <new-private-dir>`
+for an explicitly isolated init continuation that creates real builtin
+service processes, fresh snapshot and manifest. This is not a takeover
+of the live room. Never reuse that fork's identity file on the live
+room, broadcast its events, or merge its journal. The original cut and
+identity files are not changed. Do not export live identity to an untrusted
+host. Optional `--observe-ms <N> --signal <ws-endpoint>` joins via existing
+Node QOSPeer with the privately supplied room capability, observes new
+events from the verified cut and prints the resulting digest/ps. It does
+not publish events or restore a fork into live history. Install the
+existing scripts/qos-cli dependencies for this optional network path.
+
+Local filesystem discovery is implemented, not a public hosting service.
+Chain anchoring, automatic current-address resolution, live failover,
+native device acquisition and agent/macro/contract execution remain
+separate. Boot relies on private verified admission evidence under dyncap
+TOFU continuity and explicitly pinned signed package manifests.

@@ -127,6 +127,7 @@ export const CMD_HELP: Record<string, string[]> = {
   dmesg: ["/dmesg — latest canonical event diagnostics"],
   trace: ["/trace [process] — latest canonical syscall and lifecycle receipts"],
   stat: ["/stat [process] — bounded kernel resource counters"],
+  "qos boot-manifest": ["/qos boot-manifest <snapshot> <supervisor> <service> [service...] — public content-addressed manifest, no room capability."],
   snapshot: ["/snapshot <name> — save a verified clean causal cut"],
   restore: ["/restore <name> — fork a verified local-only continuation"],
   branch: ["/branch <name> | <pure QOS command> — isolated continuation, no broadcast or host I/O"],

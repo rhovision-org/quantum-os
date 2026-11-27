@@ -9,6 +9,7 @@
 // change `/poll` or `/gov`, and does not call a chain. Every lifecycle
 // transition is the dyncap-attributed event `QosProcessRoom` already knows how to make.
 
+import {createBootManifest,bootAddress} from "./qos-boot.js";
 import {createSnapshot,verifySnapshot,traceRows,recoveryName,type KernelSnapshot} from "./qos-observe.js";
 import { INIT_OPS,type InitOp } from "./qos-init.js";
 import { DEVICE_OPS,DEVICE_KINDS,deviceRequest,type DeviceOp,type DeviceDescriptor } from "./qos-device.js";
@@ -179,6 +180,7 @@ export class QosCommand {
       case "pkg":case "svc":return this.initCommand(sub,rest);
       case "top":case "dmesg":case "trace":case "stat":return this.inspectKernel(sub,rest);
       case "snapshot":case "restore":case "branch":return this.recoveryCommand(sub,rest);
+      case "boot-manifest":return this.bootManifest(rest);
       case "whoami":case "id":
         if(!rest){this.host.say("UID "+this.host.identity.anchor+" · dyncap TOFU continuity; no superuser");return;}
         return this.identityCommand("id_info",rest);
@@ -500,6 +502,15 @@ export class QosCommand {
      quota:k.quotaView().filter(q=>!rest||q.pid===ref).slice(0,128),memory:k.memoryView().objects.length,
      namespaces:array("vfs").length,devices:array("devices").length,deviceTickets:array("deviceTickets").length,
      pending:r.pendingSyscalls.length,rejected:r.rejected.length}));
+  }
+  private async bootManifest(rest:string){
+    const [snapshot,ref,...services]=rest.trim().split(/\s+/);
+    const entry=this.resolve(ref);
+    if(!snapshot||!entry||!services.length||!recoveryName(snapshot)){this.host.say("usage: /qos boot-manifest <snapshot> <supervisor> <service> [service...]");return;}
+    try{
+      const manifest=await createBootManifest(this.snapshots.get(snapshot)??this.host.loadSnapshot?.(snapshot),this.host.roomId,entry.id,services);
+      this.host.say("boot manifest "+await bootAddress(manifest)+" "+JSON.stringify(manifest));
+    }catch(e){this.host.say("boot manifest refused: "+(e as Error).message);}
   }
   private async recoveryCommand(op:string,rest:string){
     const say=(s:string)=>this.host.say(s);
