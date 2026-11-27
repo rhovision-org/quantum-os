@@ -27,10 +27,13 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { QOSPeer } from "./qospeer.mjs";
 import { openRoomMemory, MEMORY_SIGNED_KINDS } from "./room-memory.mjs";
+import { historyForSync, loadPersistedChat } from "./chat-history.mjs";
 import { generateCapability, validateCapability, parseTwists,
          achievesZfa, achievesZfaPairwise, signedAction, CENSUS_ADMITTED } from "./zfa.mjs";
 import { newDynCapState, signEnvelope, serializeState, deserializeState } from "./dyncap.mjs";
 import { makeAdvisor } from "./facilitator-advisor.mjs";
+import { loadProvider } from "./ai-providers/index.mjs";
+import { loadSkill, listSkills, standardSkills } from "./skills.mjs";
 import { answerFromKnowledge } from "./facilitator-faq.mjs";
 import { createGameRecorder, compactForPrompt, trustWeightsFromGroups } from "./game-log.mjs";
 import { ROLES, DEFAULT_ROLE, resolveRole, dutiesOf } from "./agent-roles.mjs";
@@ -38,13 +41,15 @@ import { trustLevels, discreditedMembers, isMember, groupHasRatings, normalizeGr
 import { MACROS } from "./rholang-macros.mjs";
 import { DEFAULT_CONFIG as REV_DEFAULT_CONFIG, revAddressOf, deployTerm as revDeployTerm } from "./rholang-client.mjs";
 import { createFaucetServer } from "./faucet-http.mjs";
+import { createForkHost } from "./fork-host.mjs";
+import { spawn } from "node:child_process";
 
 const DEFAULT_SIGNAL = "wss://quantum-os-signaling.onrender.com";
 // "name" is always signed. When this agent carries the room's memory
 // (--persist), the state it re-serves must be signed too or receiving peers
 // will not trust it — see MEMORY_SIGNED_KINDS in room-memory.mjs.
-const SIGNED_KINDS = new Set(["name"]);
-const PERSIST_SIGNED_KINDS = new Set(["name", ...MEMORY_SIGNED_KINDS]);
+const SIGNED_KINDS = new Set(["name", "sync-chat"]);
+const PERSIST_SIGNED_KINDS = new Set(["name", "sync-chat", ...MEMORY_SIGNED_KINDS]);
 
 const USAGE = `qos agent — measured, trust-governable room-agent daemon
 
@@ -69,17 +74,29 @@ Options:
   --quiet            Less assertive (halves budget, longer cooldowns).
   --active           More assertive (raises budget, shorter cooldowns).
   --ai               Enable the AI advisor (stimulate + disagreement-synthesis + ask).
-  --ai-backend <b>   api (default; needs ANTHROPIC_API_KEY, pay-as-you-go credits) or
-                     claude-code (shells out to the local \`claude\` CLI = your Claude
-                     subscription, no API credits — must be installed + logged in).
+  --ai-backend <b>   The AI provider plugin (ai-providers/README.md):
+                     anthropic (default; alias api) — ANTHROPIC_API_KEY, pay as you go;
+                     claude-code (alias claude) — the local \`claude\` CLI, your Claude
+                       plan, no API key (must be installed + logged in);
+                     deepseek — DEEPSEEK_API_KEY;
+                     or a path to your own provider plugin (.mjs).
+                     Keys are read from this machine's environment only.
   --about <url>      Link to the room's about page, shown in intro/help
                      (default: the QuantumOS MyRoom page).
   --turn             Fetch a TURN relay (GET /turn). Off by default — the agent
                      is data-only and reaches peers over the flood relay, so a
                      relay only adds ICE-candidate traffic through signaling.
                      Turn on only if this agent must span a NAT boundary itself.
-  --ai-model <m>     Model. api default: claude-haiku-4-5-20251001;
-                     claude-code default: the CLI's configured model.
+  --skill <s>        An activity skill (a game, a format): the rules and context the
+                     AI follows, as a Markdown file — a built-in name (${listSkills().join(", ") || "none"})
+                     or a path to your own .md (skills/README.md). Repeatable or
+                     comma-separated. Players use \`/<cmd> play <move>\`. Needs --ai.
+  --fork-of <id>     Set by a fork grant when this agent is a copy started for
+                     another room (fork-host.mjs). A copy gives no grants itself.
+                     The owner capability comes from QOS_AGENT_OWNER (env), set by
+                     the line /agent add copies — never on the command line.
+  --ai-model <m>     Model. Defaults: anthropic claude-haiku-4-5-20251001;
+                     claude-code the CLI's configured model; deepseek deepseek-chat.
   --key <hex>        TEST-SYSTEM ONLY: a secp256k1 REV deploy key (64 hex
                      chars). Activates \`/<role> faucet [address]\`, which
                      sends a fixed amount of TEST REV to a REV address on
@@ -128,15 +145,27 @@ export function parseArgs(argv) {
     else if (x === "--ai") a.ai = true;
     else if (x === "--ai-backend") a.aiBackend = argv[++i];
     else if (x === "--ai-model") a.aiModel = argv[++i];
+    else if (x === "--skill") (a.skills ??= []).push(...String(argv[++i] ?? "").split(",").map((v) => v.trim()).filter(Boolean));
     else if (x === "--about") a.about = argv[++i];
     else if (x === "--turn") a.turn = true;
     else if (x === "--key") a.key = argv[++i];
     else if (x === "--faucet-http") a.faucetHttp = Number(argv[++i]);
     else if (x === "--rnode") a.rnode = argv[++i];
+    else if (x === "--fork-of") a.forkOf = argv[++i];
     else if (x === "--verbose") a.verbose = true;
     else if (x === "--help" || x === "-h") a.help = true;
   }
   return a;
+}
+
+/** Split the model's play reply into what is posted and its private NOTE: lines. */
+export function splitNotes(text) {
+  const said = [], notes = [];
+  for (const line of String(text ?? "").split("\n")) {
+    const m = /^\s*\**NOTE\**\s*:\s*\**\s*(.*)$/i.exec(line);
+    if (m) { if (m[1].trim()) notes.push(m[1].trim().slice(0, 400)); } else said.push(line);
+  }
+  return { said: said.join("\n").trim(), notes };
 }
 
 function extractRoomCap(s) {
@@ -182,6 +211,9 @@ export async function run(args) {
   const optStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+(?:optimize|opt)\\b\\s*`, "i");
   const chairStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+(?:chair|deliberate)\\b\\s*`, "i");
   const gameStartStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+(?:start|record|begin)\\b\\s*`, "i");
+  const playStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+(?:play|move)\\b\\s*`, "i");
+  const useStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+(?:use|activity)\\b\\s*`, "i");
+  const rulesStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+rules\\b\\s*`, "i");
   const faucetStripRe = new RegExp(`^/{1,2}(?:${aliasAlt})\\s+faucet\\b\\s*`, "i");
   const bareNameRe = new RegExp(`^(?:${aliasAlt})\\??$`, "i");
   const anyoneHereRe = new RegExp(`\\b(any\\s?(one|body)|${aliasAlt})\\b[^?]*\\b(here|there|around|online|present|listening)\\b\\??`, "i");
@@ -312,7 +344,27 @@ export async function run(args) {
     if (!facilKey) { console.error(`${TAG} --faucet-http needs --key — there is no faucet to serve without one`); process.exit(1); }
   }
 
-  const advisor = makeAdvisor({ ai: args.ai, backend: args.aiBackend, model: args.aiModel, persona: role.persona, roleName: role.name, cmd: CMD, faucetActive: !!facilKey, log: console.log });
+  let aiProvider = null;
+  if (args.ai) {
+    try { aiProvider = await loadProvider(args.aiBackend || "anthropic"); }
+    catch (e) { console.error(`${TAG} ${e?.message ?? e}`); process.exit(1); return; }
+  }
+  // Skills: every agent has the standard set (skills/*.md) available; --skill
+  // adds your own and makes it the active activity. Only active skills' rules
+  // ride in the prompt — the rest are named, so the room can pick one with
+  // `/<cmd> use <name>`. Both arrays are mutated in place (the advisor reads them live).
+  const availableSkills = standardSkills();
+  const skills = [];   // active
+  for (const spec of args.skills ?? []) {
+    let k;
+    try { k = loadSkill(spec); }
+    catch (e) { console.error(`${TAG} ${e?.message ?? e}`); process.exit(1); return; }
+    const at = availableSkills.findIndex((x) => x.name === k.name);
+    if (at >= 0) availableSkills[at] = k; else availableSkills.push(k);
+    if (!skills.some((x) => x.name === k.name)) skills.push(k);
+  }
+  if (skills.length && !args.ai) console.log(`${TAG} --skill ${skills.map((k) => k.name).join(",")} loaded, but without --ai I can only post the rules (\`/${CMD} rules\`), not play.`);
+  const advisor = makeAdvisor({ ai: args.ai, backend: args.aiBackend, provider: aiProvider, skills, skillIndex: availableSkills, model: args.aiModel, persona: role.persona, roleName: role.name, cmd: CMD, faucetActive: !!facilKey, log: console.log });
   const aiFailure = () => advisor.lastError
     ? `The AI backend did not answer — ${advisor.lastError.slice(0, 240)}.`
     : "The AI backend did not answer.";
@@ -368,6 +420,19 @@ export async function run(args) {
     if (cmdRe.test(t)) return;
     transcript.push({ name, text: t.slice(0, 400), at: Date.now() });
     if (transcript.length > TRANSCRIPT_MAX) transcript.shift();
+  };
+  // The room's conversation as this agent heard it, verbatim, for a joiner
+  // (`sync-chat`, the browser's own join handshake kind). A browser hands a
+  // joiner only what it saw while it was there; an agent that has been in the
+  // room longer — or that carries the room's memory on disk (--persist) — holds
+  // what no browser present still has. The browser merges by author, text and
+  // time, so this overlapping a browser's copy adds nothing twice.
+  const HISTORY_MAX = 300;
+  const chatHistory = [];          // {from, label, text, at}
+  const heard = (from, label, text, at = Date.now()) => {
+    if (typeof text !== "string" || !text || text.length > 8000) return;
+    chatHistory.push({ from, label: label || undefined, text, at });
+    if (chatHistory.length > HISTORY_MAX) chatHistory.shift();
   };
   const realName = (n) => (typeof n === "string" && n.trim()) ? n.trim() : null;   // "" / blank ⇒ no name
   const nameOf = (id) => realName(peerNames.get(id)) ?? realName(known[id]?.name) ?? short(id);
@@ -491,6 +556,7 @@ export async function run(args) {
     if (key && !cooled(key, cooldownMs)) return false;
     if (overFairShare())             { if (args.verbose) console.log(`${TAG} · held (fair-share): ${text}`); return false; }
     peer.broadcast({ kind: "chat", text });
+    heard(identity.peerId, myName, text);
     postLog.push(now); lastPostAt = now; if (key) cooldown.set(key, now);
     remember(myName, text);
     console.log(`${TAG} → ${text}`);
@@ -502,6 +568,7 @@ export async function run(args) {
   function reply(text, key, cooldownMs = 30_000) {
     if (key && !cooled(key, cooldownMs)) return false;
     peer.broadcast({ kind: "chat", text });
+    heard(identity.peerId, myName, text);
     postLog.push(Date.now()); lastPostAt = Date.now(); if (key) cooldown.set(key, Date.now());
     // `ag*` keys are the fixed control replies (presence/help/trust/health/list/
     // mute) — pure lookup chatter, kept out of the room record. Substantive
@@ -529,9 +596,10 @@ export async function run(args) {
     ? " (QOS/decision basics or open-ended)"
     : " (QOS/decision basics; open-ended needs --ai)";
   const faucetHint = facilKey ? ` · \`/${CMD} faucet\` (sends ${FAUCET_REV} TEST REV to your own address, which your browser fills in; pass one to override — test systems only)` : "";
-  const helpText = () => `I'm ${myName}, ${role.blurb} Commands: \`/${CMD}\` (am I here?) · \`/${CMD} help\` · \`/${CMD} ask <question>\`${askHint} · \`/${CMD} optimize <problem>\`${aiHint} (facilitate an annealing-style optimization round) · \`/${CMD} chair <topic>\`${aiHint} (chair a structured deliberation → define · alternatives · evaluate · disagreements · agreements · closure, then record the decision; \`/${CMD} next\`/\`back\`/\`close\`/\`cancel\` to steer) · \`/${CMD} start <label> [payoffs a,b,c,d] [stag=…] [hare=…] [predict: …]\` / \`/${CMD} stop\` (record a live game: every poll, estimate, lemma and message, timestamped and signed → a structured record; \`/${CMD} games\`, \`/${CMD} summarize\`${aiHint}, \`/${CMD} publish\`) · \`/${CMD} list [n]\` (the room's screen history, oldest→newest — default 25, max 500) · \`/${CMD} trust\` (my standing) · \`/${CMD} health\` (uptime, peers, budget, CPU) · \`/${CMD} off\` / \`/${CMD} on\` (mute/unmute)${faucetHint}. I'm a full member — \`/gov trust\` me up or \`/gov censure\` me down. About this room (and how to make your own): ${ABOUT_URL}`;
+  const helpText = () => `I'm ${myName}, ${role.blurb} Commands: \`/${CMD}\` (am I here?) · \`/${CMD} help\` · \`/${CMD} ask <question>\`${askHint} · \`/${CMD} optimize <problem>\`${aiHint} (facilitate an annealing-style optimization round) · \`/${CMD} chair <topic>\`${aiHint} (chair a structured deliberation → define · alternatives · evaluate · disagreements · agreements · closure, then record the decision; \`/${CMD} next\`/\`back\`/\`close\`/\`cancel\` to steer) · \`/${CMD} start <label> [payoffs a,b,c,d] [stag=…] [hare=…] [predict: …]\` / \`/${CMD} stop\` (record a live game: every poll, estimate, lemma and message, timestamped and signed → a structured record; \`/${CMD} games\`, \`/${CMD} summarize\`${aiHint}, \`/${CMD} publish\`) · ${availableSkills.length ? `\`/${CMD} skills\` · \`/${CMD} use <activity>\` · \`/${CMD} rules\` · \`/${CMD} play <move>\` (activities: ${availableSkills.map((k) => k.name).join(", ")}) · ` : ""}\`/${CMD} list [n]\` (the room's screen history, oldest→newest — default 25, max 500) · \`/${CMD} trust\` (my standing) · \`/${CMD} health\` (uptime, peers, budget, CPU) · \`/${CMD} off\` / \`/${CMD} on\` (mute/unmute)${faucetHint}. I'm a full member — \`/gov trust\` me up or \`/gov censure\` me down. About this room (and how to make your own): ${ABOUT_URL}`;
   const statusText = () => `👋 Yes, I'm here — ${myName} (${role.name})${muted ? ` — currently muted (\`/${CMD} on\` to wake me)` : ""}.${standing.governed ? ` Trust ${standing.level}${standing.discredited ? " — stood down" : ` (≤${standing.budget}/5min)`}.` : ""} \`/${CMD} help\` · \`/${CMD} trust\`.`;
-  const introText = () => `Hi — I'm ${myName}, ${role.blurb} Say \`/${CMD}\` or \`/${CMD} help\` to reach me, or \`/${CMD} ask <q>\` for QuantumOS/decision basics${advisor.enabled ? " or anything else" : " (open-ended questions need `--ai`)"}. I'm a full room member — \`/gov trust\`/\`/gov censure\` me; \`/${CMD} trust\` shows my standing. About this room: ${ABOUT_URL}`;
+  const forkNote = args.forkOf ? " I'm a copy of an agent from another room, started with its owner's permission; I bring its skills, not that room's memory." : "";
+  const introText = () => `Hi — I'm ${myName}, ${role.blurb}${forkNote} Say \`/${CMD}\` or \`/${CMD} help\` to reach me, or \`/${CMD} ask <q>\` for QuantumOS/decision basics${advisor.enabled ? " or anything else" : " (open-ended questions need `--ai`)"}. I'm a full room member — \`/gov trust\`/\`/gov censure\` me; \`/${CMD} trust\` shows my standing. About this room: ${ABOUT_URL}`;
   // Self-introduce to a newly-identified human peer, once per peer per run (direct
   // message, so existing members aren't re-pinged each time someone joins).
   function introduceTo(id) {
@@ -588,6 +656,73 @@ export async function run(args) {
   // is pulled out the same way the dedicated command takes one.
   const FAUCET_INTENT_RE = /\b(test\s*rev|some\s+rev|free\s+rev|rev\s+faucet|faucet)\b/i;
   const REV_ADDR_IN_TEXT_RE = /\b[1-9A-HJ-NP-Za-km-z]{20,60}\b/;
+  // Activity skills (skills.mjs): `/<cmd> play <move>` runs a move under the
+  // loaded skills' rules. The game's own record is kept here (moves + this
+  // agent's rulings) because `/<cmd> …` lines are kept out of `transcript`,
+  // and the model's only memory of the game is what it is shown.
+  const PLAY_LOG_MAX = 80;
+  const playLog = [];   // {name, text}
+  const PLAY_NOTES_MAX = 12;
+  const playNotes = [];   // the agent's own NOTE: lines — its private game memory, never posted
+  const playRemember = (name, text) => { playLog.push({ name, text: String(text).slice(0, 600) }); if (playLog.length > PLAY_LOG_MAX) playLog.shift(); };
+  const skillsText = () => availableSkills.length
+    ? `Activities I know: ${availableSkills.map((k) => `**${k.name}**${skills.some((a) => a.name === k.name) ? " (on)" : ""} — ${k.description}${k.players ? ` (${k.players} players)` : ""}`).join(" · ")}. `
+      + `\`/${CMD} use <name>\` picks one, \`/${CMD} rules [name]\` shows its rules, \`/${CMD} play <move>\` plays.`
+    : `I have no activity skills. Whoever runs me can add one with \`--skill <name|path>\`.`;
+  function handleUse(which) {
+    const w = String(which || "").trim().toLowerCase();
+    if (!w) { reply(skillsText(), "agskills", 5_000); return; }
+    if (w === "none" || w === "off" || w === "stop") {
+      skills.length = 0; playLog.length = 0; playNotes.length = 0;
+      reply(`No activity now. \`/${CMD} use <name>\` to start one.`, "aguse", 3_000); return;
+    }
+    const k = availableSkills.find((x) => x.name === w);
+    if (!k) { reply(`I don't know "${which}". ${skillsText()}`, "agskills", 5_000); return; }
+    // One activity at a time from the room: switching starts a fresh game.
+    skills.length = 0; skills.push(k); playLog.length = 0; playNotes.length = 0;
+    reply(`▶ **${k.name}** — ${k.description}. \`/${CMD} rules\` for the rules, \`/${CMD} play <move>\` to play.`, null, 0);
+  }
+  function handleRules(which) {
+    if (!availableSkills.length) { reply(skillsText(), "agskills", 5_000); return; }
+    const k = which ? availableSkills.find((x) => x.name === which.toLowerCase()) : skills[0];
+    if (!k) { reply(which ? `I don't know "${which}". ${skillsText()}` : `No activity is on. ${skillsText()}`, "agskills", 5_000); return; }
+    reply(`📜 **${k.name}** — ${k.description}\n${k.body.slice(0, 3500)}${k.body.length > 3500 ? "\n…(trimmed)" : ""}`, `agrules:${k.name}`, 20_000);
+  }
+  // Moves are ruled one at a time, in arrival order: two quick moves must not
+  // both be ruled against the same board. And each player waits a moment
+  // between moves, since every ruling is spent from the agent owner's AI account.
+  let playQueue = Promise.resolve();
+  const lastPlayBy = new Map();
+  const PLAY_COOLDOWN_MS = 3_000;
+  function handlePlay(move, fromId) {
+    const who = fromId || "?";
+    const now = Date.now();
+    if (move && now - (lastPlayBy.get(who) ?? 0) < PLAY_COOLDOWN_MS) {
+      reply(`One move at a time — give it a few seconds.`, `playslow:${who}`, PLAY_COOLDOWN_MS);
+      return Promise.resolve();
+    }
+    if (move) lastPlayBy.set(who, now);
+    const run = playQueue.then(() => playOne(move, fromId));
+    playQueue = run.catch(() => {});
+    return run;
+  }
+  async function playOne(move, fromId) {
+    if (!skills.length) { reply(`No activity is on — pick one first. ${skillsText()}`, "agskills", 5_000); return; }
+    if (!move) { reply(`What's your move? \`/${CMD} play <move>\` — ${skillsText()}`, "playhelp", 8_000); return; }
+    if (!advisor.enabled) { reply(`Playing needs AI mode — whoever runs me should start me with \`--ai\` and their own provider key or Claude plan. \`/${CMD} rules\` still posts the rules.`, "playnoai", 20_000); return; }
+    const player = fromId ? nameOf(fromId) : "someone";
+    playRemember(player, move);
+    const out = await advisor.advise("play", { player, move, transcript: playLog.slice(0, -1), notes: playNotes });
+    if (out) {
+      const { said, notes } = splitNotes(out);
+      for (const n of notes) { playNotes.push(n); if (playNotes.length > PLAY_NOTES_MAX) playNotes.shift(); }
+      if (said) { playRemember(myName, said); reply(said, null, 0); }
+      else reply("(noted)", null, 0);
+      return;
+    }
+    reply(`${aiFailure()} Your move is noted; try again in a moment.`, null, 0);
+  }
+
   async function handleAsk(q, fromId) {
     if (!q) { reply(`Ask me anything about the room, my role, or decisions — \`/${CMD} ask <question>\`.`, "askhelp", 12_000); return; }
     if (FAUCET_INTENT_RE.test(q)) {
@@ -603,7 +738,7 @@ export async function run(args) {
     const known = answerFromKnowledge(q, { cmd: CMD });
     if (known) { reply(known, null, 0); return; }
     if (!advisor.enabled) {
-      reply(`I can answer basics about QuantumOS and group decisions without AI, but that one needs AI mode — start me with \`--ai\` (\`--ai-backend claude-code\` for a Claude subscription, or set \`ANTHROPIC_API_KEY\`). Try \`/${CMD} ask what is /poll\` or \`/${CMD} help\` for commands.`, "asknoai", 20_000);
+      reply(`I can answer basics about QuantumOS and group decisions without AI, but that one needs AI mode — start me with \`--ai\` and a provider (\`--ai-backend claude-code\` for a Claude plan, \`deepseek\` with \`DEEPSEEK_API_KEY\`, or \`ANTHROPIC_API_KEY\`). Try \`/${CMD} ask what is /poll\` or \`/${CMD} help\` for commands.`, "asknoai", 20_000);
       return;
     }
     const text = await advisor.advise("ask", { question: q, transcript: recentMsgs.slice(-12).map((mm) => ({ name: mm.name, text: mm.text })) });
@@ -619,7 +754,7 @@ export async function run(args) {
   // /poll → /probe → /lemma). See Collective_Optimization.md.
   async function handleOptimize(problem) {
     if (!problem) { reply(`Give me something to optimize — \`/${CMD} optimize <objective + constraints>\` (e.g. "pick a sprint plan: ship auth in 2 weeks, 2 engineers"). I'll propose candidates and a way to score them.`, "opthelp", 12_000); return; }
-    if (!advisor.enabled) { reply(`I'd need AI mode for that — start me with \`--ai\` (\`--ai-backend claude-code\` for a Claude subscription, or set \`ANTHROPIC_API_KEY\`). For now, \`/${CMD} help\`.`, "optnoai", 20_000); return; }
+    if (!advisor.enabled) { reply(`I'd need AI mode for that — start me with \`--ai\` and a provider (\`--ai-backend claude-code\` for a Claude plan, \`deepseek\` with \`DEEPSEEK_API_KEY\`, or \`ANTHROPIC_API_KEY\`). For now, \`/${CMD} help\`.`, "optnoai", 20_000); return; }
     if (!cooled("optimize", 6_000)) return;
     cooldown.set("optimize", Date.now());
     const text = await advisor.advise("optimize", { problem, transcript: recentMsgs.slice(-16).map((mm) => ({ name: mm.name, text: mm.text })) });
@@ -671,7 +806,7 @@ export async function run(args) {
     if (games.current) { reply(`Still recording **${games.current.spec.label}** — \`/${CMD} stop\` first, then summarize.`, "gamesumbusy", 8_000); return; }
     const latest = games.loadLatest();
     if (!latest) { reply(`No recorded game to summarize yet.`, "gamesumnone", 8_000); return; }
-    if (!advisor.enabled) { reply(`I'd need AI mode to write the summary — start me with \`--ai\` (\`--ai-backend claude-code\` for a Claude subscription). The structured record is already on disk: \`${latest.entry.file}\`.`, "gamesumnoai", 20_000); return; }
+    if (!advisor.enabled) { reply(`I'd need AI mode to write the summary — start me with \`--ai\` and a provider (\`--ai-backend claude-code\` for a Claude plan, or \`deepseek\`). The structured record is already on disk: \`${latest.entry.file}\`.`, "gamesumnoai", 20_000); return; }
     if (!cooled("gamesummary", 10_000)) return;
     cooldown.set("gamesummary", Date.now());
     reply(`✍️ Summarizing **${latest.record.label}** (${latest.record.events} events)…`, null, 0);
@@ -694,7 +829,7 @@ export async function run(args) {
   async function handleChair(topic) {
     if (chair) { reply(`A deliberation is already in progress: **${chair.topic}** (phase *${chair.phase}*). \`/${CMD} status\`, \`/${CMD} next\`, \`/${CMD} close\`, or \`/${CMD} cancel\`.`, "chairbusy", 8_000); return; }
     if (!topic) { reply(`Start a facilitated deliberation — \`/${CMD} chair <topic or question>\`. I'll chair it through define → alternatives → evaluate → disagreements → agreements → closure, then record the decision. One leader (best practice): I chair, you all deliberate; \`/${CMD} next\` to move on.`, "chairhelp", 12_000); return; }
-    if (!advisor.enabled) { reply(`I'd need AI mode to chair — start me with \`--ai\` (\`--ai-backend claude-code\` for a Claude subscription, or set \`ANTHROPIC_API_KEY\`).`, "chairnoai", 20_000); return; }
+    if (!advisor.enabled) { reply(`I'd need AI mode to chair — start me with \`--ai\` and a provider (\`--ai-backend claude-code\` for a Claude plan, \`deepseek\` with \`DEEPSEEK_API_KEY\`, or \`ANTHROPIC_API_KEY\`).`, "chairnoai", 20_000); return; }
     chair = { topic: topic.slice(0, 200), phaseIdx: 0, phase: PHASES[0], startedAt: Date.now(), phaseStartedAt: Date.now(), collected: Object.fromEntries(COLLECT_PHASES.map((p) => [p, []])), synthesis: {}, busy: false };
     console.log(`${TAG} chair: started "${chair.topic}"`);
     reply(PHASE_PROMPT.define(chair.topic), null, 0);
@@ -884,6 +1019,10 @@ export async function run(args) {
       if (sub === "health" || sub === "diag" || sub === "diagnostics") { reply(healthText(), "aghealth", 15_000); return true; }
       if (sub === "list" || sub === "log" || sub === "history" || sub === "transcript") { listReply(); return true; }
       if (sub === "ask") { bg(handleAsk(raw.replace(askStripRe, "").trim(), fromId), "ask"); return true; }
+      if (sub === "play" || sub === "move") { bg(handlePlay(raw.replace(playStripRe, "").trim(), fromId), "play"); return true; }
+      if (sub === "skills" || sub === "skill") { reply(skillsText(), "agskills", 5_000); return true; }
+      if (sub === "use" || sub === "activity") { handleUse(raw.replace(useStripRe, "").trim()); return true; }
+      if (sub === "rules") { handleRules(raw.replace(rulesStripRe, "").trim()); return true; }
       if (sub === "faucet" || sub === "testrev") { bg(handleFaucet(raw.replace(faucetStripRe, "").trim(), fromId), "faucet"); return true; }
       if (sub === "optimize" || sub === "opt") { bg(handleOptimize(raw.replace(optStripRe, "").trim()), "optimize"); return true; }
       if (sub === "chair" || sub === "deliberate") { bg(handleChair(raw.replace(chairStripRe, "").trim()), "chair"); return true; }
@@ -918,6 +1057,8 @@ export async function run(args) {
   // so N agents don't all greet at once, but state must be served by whoever
   // holds it, every time, or a joiner gets nothing.
   const memDir = args.persist === "" ? stateDir : args.persist;
+  // A memory carrier starts with what the room said before this process did.
+  if (memDir) for (const l of loadPersistedChat(path.join(memDir, "rooms", roomHex, "transcript.jsonl"), HISTORY_MAX)) chatHistory.push(l);
   let mem = null;
   const signedKinds = memDir ? PERSIST_SIGNED_KINDS : SIGNED_KINDS;
 
@@ -938,6 +1079,41 @@ export async function run(args) {
     onError: (e) => noteError("peer", e),
     onChannelOpen: (id) => { onChannelOpen(id); mem?.serveStateTo(id); },
     onMessage: (from, d) => { onMessage(from, d); void mem?.ingest(from, d); },
+  });
+
+  // ---- fork grants (fork-host.mjs): the owner lets another room have a copy ----
+  // A copy (args.forkOf) gives no grants; it never sees the owner capability.
+  const AGENT_FILE = fileURLToPath(import.meta.url);
+  const asPath = (s) => (/[\\/]/.test(s) || /\.m?js$|\.md$/.test(s) ? path.resolve(s) : s);
+  const forkHost = args.forkOf ? null : createForkHost({
+    stateDir, ownerToken: process.env.QOS_AGENT_OWNER || null, signal: args.signal,
+    log: (m) => console.log(`${TAG} ${m}`),
+    makePeer: (inboxRoom, onMsg) => new QOSPeer({
+      signalingUrl: args.signal, roomId: inboxRoom, peerId: generateCapability("peer"), noAutoTurn: true,
+      onMessage: onMsg, onError: (e) => noteError("fork-inbox", e),
+    }),
+    // A copy: same role, skills and AI provider; its own state directory, no
+    // room memory, no faucet key, no owner capability. Detached, so it outlives
+    // this process until revoked with stop.
+    spawnFork: async ({ room, name, grant }) => {
+      const dir = path.join(path.resolve(stateDir), "forks", `${grant.id}-${Date.now().toString(36)}`);
+      fs.mkdirSync(dir, { recursive: true });
+      const logFd = fs.openSync(path.join(dir, "agent.log"), "a");
+      const argv = [AGENT_FILE, "--room", room, "--role", roleKey, "--signal", args.signal, "--state", dir, "--fork-of", grant.id, "--name", name ?? myName];
+      if (args.ai) argv.push("--ai", "--ai-backend", asPath(args.aiBackend || "anthropic"));
+      if (args.aiModel) argv.push("--ai-model", args.aiModel);
+      for (const sk of args.skills ?? []) argv.push("--skill", asPath(sk));   // the standard skills come with every agent anyway
+      if (args.about) argv.push("--about", args.about);
+      const env = { ...process.env };
+      delete env.QOS_AGENT_OWNER;
+      const child = spawn(process.execPath, argv, { detached: true, stdio: ["ignore", logFd, logFd], env });
+      fs.closeSync(logFd);
+      await new Promise((res, rej) => { child.once("spawn", res); child.once("error", rej); });
+      child.unref();
+      return { pid: child.pid, dir };
+    },
+    alive: (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } },
+    kill: (pid) => process.kill(pid, "SIGTERM"),
   });
 
   let signQueue = Promise.resolve();
@@ -977,6 +1153,23 @@ export async function run(args) {
     }
   }
 
+  // Hand a joiner the conversation so far. Lead-gated among agents with the
+  // `history` duty (facilitator, scribe) so a room of several agents sends it
+  // once; a duplicate would be harmless (the browser dedupes) but is wasted.
+  // A short cooldown keeps a flapping channel from re-sending it.
+  const historyServedAt = new Map();
+  function serveHistoryTo(id) {
+    if (!leadGate("history") || !chatHistory.length) return;
+    if (isAgentPeer(id)) return;
+    const now = Date.now();
+    if (now - (historyServedAt.get(id) ?? 0) < 60_000) return;
+    historyServedAt.set(id, now);
+    const lines = historyForSync(chatHistory);
+    if (!lines.length) return;
+    bg(signedSend(id, { kind: "sync-chat", lines }), "history");
+    console.log(`${TAG} ↪ ${lines.length} history line${lines.length === 1 ? "" : "s"} → ${short(id)}`);
+  }
+
   function onChannelOpen(id) {
     if (id === identity.peerId) return;
     present.add(id);
@@ -984,6 +1177,7 @@ export async function run(args) {
     // announce name + our agent role so other agents recognize us (self-heals via
     // reannounceStale if this delivery is lost to a signaling flap)
     bg(announceName(id), "announce");
+    serveHistoryTo(id);
     // Self-introduction is delivered per-peer when a human identifies (see introduceTo,
     // called from onMessage) — NOT a one-time startup broadcast — so a browser that joins
     // later, or whose channel opens after a co-agent's, still reliably gets it.
@@ -1035,6 +1229,7 @@ export async function run(args) {
         chatLog.push({ peer: from, at: Date.now() });
         recentMsgs.push({ name: nameOf(from), text: String(d.text ?? "").slice(0, 280), at: Date.now() });
         remember(nameOf(from), d.text);
+        heard(from, hasName(from) ? nameOf(from) : undefined, String(d.text ?? ""));
         if (args.verbose) console.log(`[${nameOf(from)}] ${String(d.text).slice(0, 120)}`);
         introduceTo(from);   // covers a human who chats before announcing a name
         if (handleCommand(d.text, from)) break;
@@ -1090,6 +1285,14 @@ export async function run(args) {
           if (d.on) g.censures[d.censurer][d.target] = 1; else delete g.censures[d.censurer][d.target];
           updateStanding();
         }
+        break;
+      }
+      case "agent-ctl": {
+        // Owner commands (fork grants) arrive as a DIRECT envelope carrying the
+        // owner capability — never as chat, which every peer would see.
+        const out = forkHost ? forkHost.handleCtl(d)
+          : { kind: "agent-ctl-reply", op: d.op ?? "?", ok: false, text: "I'm a copy started for this room; only the original agent gives fork grants. Ask its owner." };
+        if (out) peer.send(from, out);
         break;
       }
       case "sync-gov":
@@ -1199,6 +1402,7 @@ export async function run(args) {
   }
 
   peer.connect();
+  forkHost?.start();
   console.log(`${TAG} running as "${myName}" [role=${role.name}]  budget=${MAX_POSTS}/5min  min-gap=${Math.round(MIN_GAP_MS / 1000)}s  silent=${Math.round(SILENT_MS / 60000)}min  AI=${advisor.enabled ? advisor.model : "off"}  ask=faq+diagnostics. Ctrl-C to stop.`);
 
   let faucetHttp = null;
@@ -1207,7 +1411,7 @@ export async function run(args) {
     faucetHttp.listen(args.faucetHttp, () => console.log(`${TAG} faucet HTTP on :${args.faucetHttp} — POST /faucet {"address"} · GET /health`));
     faucetHttp.on("error", (e) => { console.error(`${TAG} faucet HTTP failed: ${e?.message ?? e}`); process.exit(1); });
   }
-  const shutdown = () => { console.log(`\n${TAG} shutting down…`); try { faucetHttp?.close(); } catch {} try { if (games?.current) games.stop(); } catch {} try { clearInterval(timer); saveIdentity(); saveKnown(); mem?.flush(); } catch {} try { peer.disconnect(); } catch {} setTimeout(() => process.exit(0), 200); };
+  const shutdown = () => { console.log(`\n${TAG} shutting down…`); try { faucetHttp?.close(); } catch {} try { if (games?.current) games.stop(); } catch {} try { clearInterval(timer); saveIdentity(); saveKnown(); mem?.flush(); } catch {} try { forkHost?.stop(); } catch {} try { peer.disconnect(); } catch {} setTimeout(() => process.exit(0), 200); };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 }
