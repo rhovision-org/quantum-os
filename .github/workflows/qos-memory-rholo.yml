@@ -1,9 +1,6 @@
 name: QOS real Rholo memory readback (#279)
 on:
-  push:
-    branches: [feat/qos-kernel-memory-279]
   pull_request:
-    branches: [main, work, feat/qos-kernel-scheduler-278]
     paths:
       - "packages/browser/src/qos-memory*.ts"
       - "packages/browser/test/qos-memory-rholo-ci.mjs"

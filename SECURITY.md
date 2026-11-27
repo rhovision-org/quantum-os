@@ -372,6 +372,34 @@ What remains the user's responsibility (cross-room is by design **explicit**):
 
 This is not a *threat* mitigated — it's a *design choice* that the threat model articulates: cross-room continuity is deliberately absent. The Markov-blanket framing makes the absence explicit and turns the previously-vague "out of scope" cross-room rows in this document into a coherent invariant: *the algebra cannot reach across blankets without an explicit bridge peer.*
 
+### Room agents: owner and fork grants (`/agent grant` · `/agent fork`)
+
+An AI agent runs on its owner's computer and AI account, so who may make it do
+more is a capability question. Two bearer capabilities, both ZFA tokens from
+`getRandomValues` like every other ([`fork-host.mjs`](scripts/qos-cli/fork-host.mjs)):
+
+- **`cap:owner:…`** is minted once per browser (`qos-agent-owner`) and put in the
+  agent's *environment* (`QOS_AGENT_OWNER`) by the line `/agent add` copies, never
+  on its command line, where `ps` would show it. The agent keeps only its SHA-256
+  (`owner.json`) and compares in constant time. It travels to the agent in a
+  **direct** `agent-ctl` envelope, never chat, and is masked on screen. Holding it
+  means being able to grant forks of every agent added from that browser.
+- **`cap:fork:…`** is a grant with a use limit (≤ 20) and an expiry (≤ 30 days).
+  It is itself a room capability: the agent listens in the room the grant names,
+  so only a holder can reach it, and the signaling server sees only its hash.
+  The holder sends their own room link; the agent starts a **copy** there with the
+  same role, skills and AI provider, and nothing else: no room memory, no
+  transcript, no faucet key, no owner capability, and it cannot grant forks.
+  The request must name the agent's own signaling server, so a grant holder cannot
+  make the owner's computer open a socket to an address of their choosing.
+
+What is not defended: a grant is a bearer token, so whoever it is passed on to
+can use it, spending the owner's AI account until it is used up, expires or is
+revoked (`/agent revoke <id> stop` also ends the running copies). The copy's
+owner can read the requester's room through it, exactly as any member can. Grant
+tokens are stored in plaintext in the agent's state directory (`fork-grants.json`,
+mode 0600), since the agent must join the rooms they name.
+
 ### The shared root: no consensus
 
 Several of the limits above are facets of the same architectural choice. quantum-os is a peer-to-peer per-room system **with no consensus mechanism**, so it cannot provide global consistency over the room's history. Specifically:
