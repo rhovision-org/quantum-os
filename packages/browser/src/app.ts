@@ -7260,7 +7260,6 @@ function handleCommand(raw: string, commandOptions: { directInput?: boolean; rec
         if (!parsed.state) { addMessage("", "recovery string is missing identity data", "system"); return; }
         const restored = await deserializeState(parsed.state, activeRoom.roomId);
         if (!restored) { addMessage("", "recovery string is corrupt (bad seed)", "system"); return; }
-        dyncapState = restored;
         clearPrivateGoalOutput();
         inputHistory.length = 0;
         histIdx = -1;
@@ -7268,6 +7267,7 @@ function handleCommand(raw: string, commandOptions: { directInput?: boolean; rec
         discardPending();
         msgInput.value = "";
         palette.hide();
+        dyncapState = restored;
         qosCommands.clear();   // old controllers hold the previous identity
         goalStore = null; goalStoreAnchor = "";   // personal goals are identity-scoped
         refreshSuccessPanel();
