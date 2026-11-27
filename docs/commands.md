@@ -6,6 +6,17 @@ route readers instead of listing everything (quantum-os#116). The short version 
 `packages/browser/src/app.ts` `handleCommand`, and [CLAUDE.md](../CLAUDE.md#slash-commands-appts-handlecommand)
 maps each command family to its module.
 
+
+
+**Rholo integration (#601):** To install and use the browser, Signaling, and
+facilitator with a Rholo node, follow the
+[Rholo operator guide](https://github.com/rhovision-org/rholo/blob/dev/docs/src/developer/quantum-os.md)
+and the [QOS harness](../scripts/localnet/README.md#quantumos--rholo-one-command-integration-601).
+The `/rholang` browser endpoint should use the harness's HTTPS
+`/rnode` proxy. A room capability must not be committed or logged.
+A `/gov` off-chain result is not evidence for the on-chain `#291` handoff.
+Measured #601 PASS/INCOMPLETE/BLOCKED results and CI artifacts: [Rholo acceptance matrix](audit/qos-rholo-601-validation-20261117.md).
+
 Type these in the chat input after connecting. The `/help` list is shown automatically at
 startup. Commands marked **shared** broadcast their output to all peers in the room;
 **[direct]** ones address one peer.

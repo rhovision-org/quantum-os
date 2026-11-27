@@ -1,0 +1,152 @@
+name: QOS × Rholo integration harness (#601)
+
+on:
+  pull_request:
+    branches: [main, work]
+    paths:
+      - "scripts/localnet/qos-devnet.*"
+      - "scripts/localnet/qos-existing-node-smoke.py"
+      - "scripts/localnet/qos-signed-smoke.mjs"
+      - "scripts/localnet/qos-browser-smoke.mjs"
+      - "scripts/qos-cli/signal-smoke.mjs"
+      - "scripts/qos-cli/agent.mjs"
+      - "scripts/qos-cli/package-lock.json"
+      - "packages/signaling/src/server.ts"
+      - "packages/browser/vite.config.ts"
+      - "tests/test_qos_devnet.py"
+      - ".github/workflows/qos-rholo-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  disposable-node-smoke:
+    name: Real bundled rnode + QOS lifecycle (NOT public #584)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - name: Rust WASM toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - name: Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Harness source contract
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/localnet/qos-devnet.py scripts/localnet/qos-existing-node-smoke.py
+          bash -n scripts/localnet/qos-devnet.sh
+          node --check scripts/qos-cli/agent.mjs
+          node --check scripts/localnet/qos-signed-smoke.mjs
+          node --check scripts/localnet/qos-browser-smoke.mjs
+          node --check scripts/qos-cli/signal-smoke.mjs
+          python3 -m unittest discover -s tests -p test_qos_devnet.py -v
+      - name: Install Playwright Chromium for two-browser acceptance
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/qos601-playwright" --no-save --no-package-lock playwright@1.65.1
+          "$RUNNER_TEMP/qos601-playwright/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Start actual bundled Rholo node, QOS browser, signaling, facilitator
+        env:
+          QOS_RUN_DIR: ${{ runner.temp }}/qos601
+        run: |
+          set -euo pipefail
+          trap 'bash scripts/localnet/qos-devnet.sh down || true; rm -f "$RUNNER_TEMP/qos601-start.txt"' EXIT
+          # Keep the one-time bearer URL in a mode-0600 runner-temp file. It is
+          # read into this step process only and is never printed or uploaded.
+          bash scripts/localnet/qos-devnet.sh up --no-ai > "$RUNNER_TEMP/qos601-start.txt"
+          chmod 600 "$RUNNER_TEMP/qos601-start.txt"
+          bash scripts/localnet/qos-devnet.sh status > qos601-status.txt
+          cat qos601-status.txt
+          grep -q 'signaling_health=True' qos601-status.txt
+          grep -q 'agent: pid=.*alive=True' qos601-status.txt
+          grep -q 'node: pid=.*alive=True' qos601-status.txt
+          grep -q 'shardId' qos601-status.txt
+          curl --silent --show-error --fail --max-time 10 http://127.0.0.1:40403/api/status |
+            python3 -c 'import json,sys; assert json.load(sys.stdin)["shardId"]'
+          curl --insecure --silent --show-error --fail --max-time 10 https://127.0.0.1:5173/rnode/api/status |
+            python3 -c 'import json,sys; assert json.load(sys.stdin)["shardId"]'
+          curl --insecure --silent --show-error --fail --max-time 10 --output /dev/null             https://127.0.0.1:5173/quantum-os/
+          # Actual isolated CI node: a known disposable key signs one small
+          # deploy; no validator/testnet key or room cap is logged.
+          node scripts/qos-cli/signal-smoke.mjs
+          node scripts/localnet/qos-signed-smoke.mjs
+          BROWSER_URL="$(python3 -c 'from pathlib import Path; import os; lines=Path(os.environ["RUNNER_TEMP"]).joinpath("qos601-start.txt").read_text().splitlines(); print(next((x.removeprefix("Browser: ") for x in lines if x.startswith("Browser: ")), ""))')"
+          test -n "$BROWSER_URL"
+          QOS_BROWSER_URL="$BROWSER_URL" \
+            QOS_PLAYWRIGHT_MODULE="$RUNNER_TEMP/qos601-playwright/node_modules/playwright/index.mjs" \
+            node scripts/localnet/qos-browser-smoke.mjs
+          rm -f "$RUNNER_TEMP/qos601-start.txt"
+          bash scripts/localnet/qos-devnet.sh down
+          bash scripts/localnet/qos-devnet.sh status | grep -q 'STOPPED'
+          sha256sum qos601-status.txt qos601-signaling.json qos601-signed-deploy.json > qos601-status.SHA256SUMS
+      - name: Upload sanitized evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qos-rholo-601-status
+          path: |
+            qos601-status.txt
+            qos601-signaling.json
+            qos601-signed-deploy.json
+            qos601-status.SHA256SUMS
+          if-no-files-found: ignore
+
+
+  existing-node-smoke:
+    name: Independent disposable rnode lifecycle (fresh runner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - name: Rust WASM toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - name: Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Harness source contract
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/localnet/qos-devnet.py scripts/localnet/qos-existing-node-smoke.py
+          bash -n scripts/localnet/qos-devnet.sh
+          node --check scripts/qos-cli/agent.mjs
+          node --check scripts/localnet/qos-signed-smoke.mjs
+          node --check scripts/localnet/qos-browser-smoke.mjs
+          node --check scripts/qos-cli/signal-smoke.mjs
+          python3 -m unittest discover -s tests -p test_qos_devnet.py -v
+      - name: Independent disposable node lifecycle witness
+        run: python3 scripts/localnet/qos-existing-node-smoke.py
+      - name: Upload independent lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: qos-rholo-601-existing-node
+          path: |
+            qos601-existing-node.json
+            qos601-existing-node.SHA256SUMS
+          if-no-files-found: ignore
+
+# The smoke proves lifecycle + HTTP routing of a real disposable bundled node
+# on an isolated GitHub runner, a separate real signed disposable deploy,
+# two independent Chromium sessions with direct WebRTC data channels, chat,
+# /goal and /qos browser commands. It does NOT prove finalized settlement,
+# RhoGov chain handoff, or public G1–G6 acceptance.

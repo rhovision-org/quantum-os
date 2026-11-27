@@ -7283,6 +7283,17 @@ function handleCommand(raw: string): string[] {
       // cannot be crossed and one that simply has not finished.
       const p = qpeer;
       if (!p) { sys("not connected to a room"); break; }
+      const connArgs = arg.trim().split(/\s+/).filter(Boolean);
+      if (connArgs[0]?.toLowerCase() === "connect") {
+        const target = connArgs.slice(1).join(" ");
+        if (!target) { sys("usage: /conn connect <peer name or id>"); break; }
+        const peerId = peers.has(target) ? target : findPeerByName(target);
+        if (!peerId) { sys(`peer not found: ${target}`); break; }
+        if (peerId === p.peerId) { sys("cannot connect to yourself"); break; }
+        p.ensureConnected(peerId);
+        sys(`· direct connection requested to ${peerLabel(peerId)}; run /conn to inspect`);
+        break;
+      }
       const rows = p.connectionReport();
       if (!rows.length) { sys("no peer connections yet"); break; }
       sys(`connections (${rows.length}):`);
