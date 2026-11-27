@@ -1,9 +1,6 @@
 name: QOS real Rholo VFS readback (#280)
 on:
-  push:
-    branches: [feat/qos-kernel-vfs-280]
   pull_request:
-    branches: [main, work, feat/qos-kernel-memory-279]
     paths:
       - "packages/browser/src/qos-*.ts"
       - "packages/browser/src/app.ts"
@@ -11,6 +8,7 @@ on:
       - "scripts/localnet/qos-memory-ci.py"
       - "bin/rnode"
       - ".github/workflows/qos-vfs-rholo.yml"
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
