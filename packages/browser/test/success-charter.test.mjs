@@ -118,6 +118,12 @@ await rejects("build rejects a roomCap field name", async () => {
 const capResult = await validateSuccessCharter({ ...draft, group: { ...draft.group, name: "cap:room:secret" } });
 ok("validate rejects a tampered artifact carrying a room cap", !capResult.ok && capResult.errors.some((e) => e.includes("room capability")), capResult.errors.join("; "));
 
+await rejects("dyncap attribution cannot masquerade as member signature", async () => {
+  const bad = base(); bad.members[0].signature = "fake"; await buildSuccessCharter(bad);
+});
+const fakeMemberSig = await validateSuccessCharter({ ...draft, members: [{...draft.members[0], signature:"fake"}] });
+ok("reject member signature claim", !fakeMemberSig.ok && fakeMemberSig.errors.some(e=>e.includes("hash-only TOFU")));
+
 // --- shape validation ------------------------------------------------------
 await rejects("empty objectives are rejected", async () => {
   const bad = base(); bad.objectives = []; await buildSuccessCharter(bad);
@@ -147,5 +153,11 @@ ok("goal share shape has no createdAt", !("createdAt" in sharedGoalShape));
 const json = JSON.stringify(draft);
 ok("artifact has no personal goal store", !json.includes("qos-goals:") && !json.includes("completedAt"));
 
+// A canonical wire artifact must bind all exported fields, not a normalized
+// projection that silently drops extensions.
+const extra = {...signed, objectives: signed.objectives.map((o,i)=>i===0?{...o,unboundExtension:"synthetic"}:o)};
+ok("reject unbound extension under unchanged hash", !(await validateSuccessCharter(extra)).ok);
+const padded = {...signed, group:{...signed.group,name:" "+signed.group.name}};
+ok("reject raw content differing from hashed normalization", !(await validateSuccessCharter(padded)).ok);
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"}: success-charter.test.mjs — ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
