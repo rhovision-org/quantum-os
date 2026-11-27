@@ -1,9 +1,6 @@
 name: QOS browser recovery acceptance (#285)
 on:
-  push:
-    branches: [feat/qos-kernel-recovery-285]
   pull_request:
-    branches: [main, work, feat/qos-kernel-init-284]
     paths:
       - "packages/browser/src/qos-*.ts"
       - "packages/browser/src/app.ts"
@@ -11,6 +8,7 @@ on:
       - "packages/browser/test/qos-observe-opfs-ci.mjs"
       - "scripts/localnet/qos-vfs-opfs-ci.py"
       - ".github/workflows/qos-observe-browser.yml"
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
