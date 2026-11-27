@@ -197,6 +197,10 @@ node selftest.mjs        # ZFA: 200 peer caps + closure facts + parseTwists
 node dyncap.selftest.mjs # dyncap: sign→verify chain, canonicalization, fork detection, state round-trip
 node facilitator-faq.mjs --selftest          # /facil ask answers QOS/decision basics without AI
 node facilitator-advisor.selftest.mjs        # advisor failures surface (incl. a Claude session limit)
+node skills.selftest.mjs                     # activity skills parse, load by name/path, reach the advisor's prompt
+node skill-play.e2e.mjs                      # an agent with a skill answers /greeter rules and /greeter play over a relay
+node fork-host.selftest.mjs                  # fork grants: owner check, use limits, expiry, revoke + stop, restart
+node fork.e2e.mjs                            # a real fork: the owner's grant, a request from outside, a copy in room B, revoke stop
 ```
 
 The dyncap suite proves the witness port matches the browser byte-for-byte
@@ -229,6 +233,8 @@ and checks the replies (and, for the observer, the files it writes):
 
 ```bash
 node list-cmd.e2e.mjs    # `/scribe list N` — the room's screen history
+node history.e2e.mjs    # a joiner is handed the conversation the facilitator heard (sync-chat)
+node chat-history.mjs --selftest   # history trimming + reading it back from a --persist transcript
 node observer.e2e.mjs    # `/observer start … stop` — records a game, materializes the qos-game/1 record + index
 ```
 
@@ -275,6 +281,31 @@ optimum — the same loop a room runs collectively. No deps. See
 
 ## Agents (facilitator, scribe, greeter …)
 
+**The easy way:** in the room, type `/agent add [role] [name]`. You need your own AI
+account on the computer that runs it (the `claude` CLI logged in, or your own
+`ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY`); with none, the line stops and says how to set one up. It copies one line
+with the room already in it; paste that into a terminal on any computer with git
+and Node 18+. The line runs [`add-agent.sh`](add-agent.sh), which installs
+dependencies the first time, uses the `claude` CLI if present (your Claude plan),
+else `ANTHROPIC_API_KEY`, else `DEEPSEEK_API_KEY` (`AI=<provider>` forces one, `AI=off`
+starts it without AI on purpose), keeps the room's memory (`--persist`, `NO_MEMORY=1` to skip), starts the
+agent detached, and waits until it has joined. `/agent add … --ai deepseek` (or
+`claude`, `anthropic`, `none`) picks the model provider; each is a plugin in
+[`ai-providers/`](ai-providers/README.md), and `--ai-backend ./your-plugin.mjs` loads your own.
+Every agent has the [standard skills](skills/README.md) (brainstorm, debate, retrospective,
+story-round, twenty-questions, word-chain): `/<cmd> use <skill>`, `/<cmd> rules`,
+`/<cmd> play <move>`. `--skill <name|/abs/path.md>` (`SKILL=` for the script) starts with one on
+or adds your own.
+
+**Forks.** The line `/agent add` copies carries the browser's owner capability in the
+agent's environment (`QOS_AGENT_OWNER`). The owner's `/agent grant` gets a `cap:fork:` grant;
+`/agent fork <grant>` in another room starts a detached copy there (`--fork-of`: same role,
+skills and AI; its own state under `<state>/forks/`; no room memory, no key, no owner cap).
+`/agent revoke <id> stop` ends it. [`fork-host.mjs`](fork-host.mjs) has the details.
+Keys are read from the agent machine's environment, never from the room. `bash stop-agents.sh <role>` stops
+it. Unlike `run-agents.sh` it has no default room and never turns on the faucet.
+
+
 `agent.mjs` is a sibling daemon that joins a room as a **full member** (stable
 `cap:peer` + dyncap identity) and posts **measured** nudges according to its
 `--role` — effectively the runtime of
@@ -286,7 +317,7 @@ the room, not hard-coded.
 ```bash
 node agent.mjs --room <cap:room:… | room-URL> [--role facilitator] [--name <s>] \
   [--budget 4] [--silent-min 6] [--quiet | --active] \
-  [--ai] [--ai-backend api|claude-code|openai|ollama|URL] [--state ./.qos-agent] [--key <hex>]
+  [--ai] [--ai-backend api|claude-code] [--state ./.qos-agent] [--key <hex>]
 ```
 
 **Run the persistent room** (detached, on a Claude subscription): `bash run-agents.sh`
@@ -561,7 +592,7 @@ agreement* (name the crux + a path forward) — plus the `/facil ask`, `/facil o
 and `/facil chair` flows. It is
 **advisory only**: it proposes a nudge that the same throttle gates, and is called
 *only when a post would be allowed*, so usage stays bounded. The daemon is fully
-functional without it. Provider-neutral adapters (`--ai-backend`):
+functional without it. Two backends (`--ai-backend`):
 
 - **`api`** (default) — Anthropic Messages API via `fetch` (no SDK dep), key from
   `ANTHROPIC_API_KEY`; pay-as-you-go API credits.
@@ -569,23 +600,6 @@ functional without it. Provider-neutral adapters (`--ai-backend`):
   **Claude subscription** (Pro/Max) instead of API credits. Requires the `claude` CLI
   installed and logged in (`claude` once interactively to authenticate). No key needed:
   `node facilitator.mjs --room <…> --ai --ai-backend claude-code`.
-- **OpenAI-compatible API:** select --ai-backend openai and set OPENAI_API_KEY,
-  optionally --ai-model or QOS_AI_MODEL. The model can only propose text.
-- **Local Ollama / llama.cpp:** --ai-backend ollama; optionally set OLLAMA_BASE_URL
-  (default localhost:11434/v1) and --ai-model for an installed local model.
-  No remote key is required.
-- **Custom endpoint:** --ai-backend https://example.com/v1 with QOS_AI_API_KEY
-  (optional if auth is not required), plus a model name. Non-loopback HTTP
-  is rejected; OPENAI_API_KEY is never sent to custom servers.
-- **MCP:** callers can inject an ask(system,messages) adapter through
-  makeAdvisor. The stock CLI does NOT bundle an MCP connection or expose
-  tools; selecting mcp without a connected adapter disables AI.
-
-All adapters remain advisory-only. Browser-side command authorization and
-human approval are unchanged. Error bodies are not reflected into the chat.
-For run-agents.sh, override AI_BACKEND=openai or ollama rather than default
-claude-code and set credentials in the operator environment.
-
 
 `/facil ask` basics about QuantumOS and group decisions are answered by
 [`facilitator-faq.mjs`](facilitator-faq.mjs) without either backend. When the

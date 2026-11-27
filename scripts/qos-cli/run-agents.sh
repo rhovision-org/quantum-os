@@ -65,9 +65,11 @@ FACIL_KEY="${FACIL_KEY-$(grep '^deployer=' ../localnet/pk.txt 2>/dev/null | cut 
 command -v node >/dev/null || { echo "node not found — install Node 18+."; exit 1; }
 [ -d node_modules ] || { echo "Run 'npm install' in scripts/qos-cli first."; exit 1; }
 AI_BACKEND="${AI_BACKEND:-claude-code}"
-if [ "$AI_BACKEND" = "claude-code" ]; then
-  command -v claude >/dev/null || echo "warning: claude CLI missing — advisor may be unavailable (deterministic behaviour remains)."
-fi
+case "$AI_BACKEND" in
+  claude-code|claude|cli)
+    command -v claude >/dev/null || echo "warning: 'claude' CLI not on PATH — the claude-code AI backend needs it (agents still run, deterministically)."
+    ;;
+esac
 
 mkdir -p .agents
 for role in "${ROLES[@]}"; do

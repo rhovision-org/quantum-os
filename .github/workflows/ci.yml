@@ -6,7 +6,7 @@ on:
     # checked, so a merge to main is never the first time anything is run.
     branches: [main, work]
   pull_request:
-    branches: [main, work]
+  workflow_dispatch:
 
 jobs:
   rust:
@@ -89,8 +89,16 @@ jobs:
       - name: Facilitator advisor error selftest
         run: node scripts/qos-cli/facilitator-advisor.selftest.mjs
 
-      - name: Provider-neutral advisor integration selftest
-        run: node scripts/qos-cli/ai-provider.selftest.mjs
+      # Every AI provider plugin keeps the contract; DeepSeek and Anthropic are
+      # reached correctly through a stub fetch; a plugin loads by path.
+      - name: AI provider plugins selftest
+        run: node scripts/qos-cli/ai-providers.selftest.mjs
+
+      - name: Agent skills selftest
+        run: node scripts/qos-cli/skills.selftest.mjs
+
+      - name: Agent fork grants selftest
+        run: node scripts/qos-cli/fork-host.selftest.mjs
 
       # The faucet's HTTP face (faucet-http.mjs) against a stub send — the
       # per-address cooldown, the per-client hourly cap, X-Forwarded-For as
@@ -98,6 +106,11 @@ jobs:
       # free, so it runs here without scripts/qos-cli's npm install.
       - name: Faucet HTTP selftest
         run: node scripts/qos-cli/faucet-http.selftest.mjs
+
+      # An agent hands a joiner the conversation it heard (sync-chat); with
+      # --persist it reads it back from the room memory's transcript. No deps.
+      - name: Agent chat history selftest
+        run: node scripts/qos-cli/chat-history.mjs --selftest
 
       - name: Locker selftest
         run: node packages/browser/src/locker.js --selftest
@@ -151,6 +164,9 @@ jobs:
       # The cross-shard trade recovery decision table (exchange-2pc.ts) —
       # pure, so this is exhaustive over every reachable (local, remote)
       # status pair, not shape-only.
+      - name: Note closure and split regression test
+        run: node packages/browser/test/notes.test.mjs
+
       - name: Exchange 2PC recovery test
         run: node packages/browser/test/exchange-2pc.test.mjs
 
@@ -165,6 +181,10 @@ jobs:
       # and two independent kernels replaying the same operations to one digest.
       - name: QOS kernel ABI test
         run: node packages/browser/test/qos-kernel.test.mjs
+      - name: QOS deterministic scheduler test
+        run: node packages/browser/test/qos-scheduler.test.mjs
+      - name: QOS isolated syscall trace test
+        run: node packages/browser/test/qos-syscall-journal.test.mjs
 
       # The `/qos` command surface over that contract: two independent peers
       # reach the same state digest after start / suspend / resume / terminate,
@@ -176,6 +196,21 @@ jobs:
       # no agent means a clear refusal rather than a fake answer.
       - name: Ask agent routing test
         run: node packages/browser/test/agent-ask.test.mjs
+
+      # `/agent add` builds a shell line that parses, passes the room/role/name
+      # as add-agent.sh expects, and offers exactly add-agent.sh's roles.
+      - name: Agent invite test
+        run: node packages/browser/test/agent-invite.test.mjs
+
+      # A joiner is handed the room's conversation by the peers present: lines
+      # merge in by time without duplicates; minute marks; mentions of names.
+      - name: Chat view test
+        run: node packages/browser/test/chat-view.test.mjs
+
+      # Room tab names: per-browser uniqueness (with a suggested alternative),
+      # the #/slug address, and invite links that carry the name.
+      - name: Room names test
+        run: node packages/browser/test/room-names.test.mjs
 
       # `/goal` is identity-scoped and local-only; corrupt storage is tolerated,
       # and only the explicit share snapshot leaves the store.
