@@ -151,20 +151,22 @@ export class QosCommand {
 
   /** Handle the argument after `/qos` (no leading command). */
   async handle(raw: string): Promise<string | void> {
-    const text = raw.trim();
-    const run = this.commandQueue.then(async () => {
-      await this.restored;
-      try {
-        return await this.dispatch(text);
-      } finally {
-        await this.reconcileDevices();
-      }
-    });
+    const run = this.commandQueue.then(() => this.dispatch(raw));
     this.commandQueue = run.then(() => undefined, () => undefined);
     return run;
   }
 
-  private async dispatch(text: string): Promise<string | void> {
+  private async dispatch(raw: string): Promise<string | void> {
+    const text = raw.trim();
+    await this.restored;
+    try {
+      return await this.dispatchCommand(text);
+    } finally {
+      await this.reconcileDevices();
+    }
+  }
+
+  private async dispatchCommand(text: string): Promise<string | void> {
     const sub = (text.split(/\s+/, 1)[0] || "status").toLowerCase();
     const rest = text.slice(sub.length).trim();
 
