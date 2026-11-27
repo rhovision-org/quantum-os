@@ -218,12 +218,12 @@ export function makeAdvisor({ ai = false, backend = "anthropic", provider = null
     if (mode === "play") return who;
     return `${who}\n\n${NUDGE_NORMS}`;
   };
-  const useModel = model || prov?.defaultModel || null;
+  const useModel = model || penv.QOS_AI_MODEL || prov?.defaultModel || null;
   let enabled, label;
   if (!ai) { enabled = false; label = "off"; }
   else if (!prov) { enabled = false; label = "off"; log(`[facil] --ai: unknown AI provider "${backend}" — running deterministic only`); }
   else {
-    const why = prov.unavailable ? prov.unavailable(penv) : null;
+    const why = prov.unavailable ? prov.unavailable(penv, useModel) : null;
     enabled = !why;
     label = enabled ? `${prov.name}${useModel ? " " + useModel : ""}` : "off";
     if (why) log(`[facil] --ai (${prov.name}) set but ${why} — running deterministic only`);

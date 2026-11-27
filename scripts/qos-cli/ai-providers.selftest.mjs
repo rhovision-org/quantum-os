@@ -31,7 +31,7 @@ ok("DeepSeek with a key is usable", BUILTIN.deepseek.unavailable({ DEEPSEEK_API_
 function stub(reply, status = 200) {
   const calls = [];
   const fetchImpl = async (url, init) => {
-    calls.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+    calls.push({ url, headers: init.headers, redirect: init.redirect, body: JSON.parse(init.body) });
     return { ok: status < 400, status, json: async () => reply, text: async () => JSON.stringify(reply) };
   };
   return { calls, fetchImpl };
@@ -67,6 +67,39 @@ function stub(reply, status = 200) {
   const text = await adv.advise("ask", { question: "q", transcript: [] });
   ok("anthropic still answers through its plugin", text === "Try /estimate.", String(text));
   ok("anthropic: key header and chosen model", s.calls[0]?.headers?.["x-api-key"] === "a-key" && s.calls[0]?.body?.model === "claude-x");
+}
+
+{
+  const s = stub({ choices: [{ message: { content: " Use /poll. " } }] });
+  const env = { OPENAI_API_KEY: "openai-test", OPENAI_BASE_URL: "https://other.example/v1",
+    QOS_AI_BASE_URL: "https://custom.example/v1/", QOS_AI_MODEL: "configured-model" };
+  const ask = (backend, options = {}) => makeAdvisor({ ai: true, backend, env, fetchImpl: s.fetchImpl, ...options })
+    .advise("ask", { question: "q", transcript: [] });
+  ok("OpenAI through the advisor", await ask("openai") === "Use /poll.");
+  ok("OpenAI key reaches only the official endpoint", s.calls[0]?.url === "https://api.openai.com/v1/chat/completions" &&
+    s.calls[0]?.headers?.authorization === "Bearer openai-test" && s.calls[0]?.redirect === "error");
+  ok("Ollama through the localhost alias", await ask("localhost", { model: "local-model" }) === "Use /poll.");
+  ok("Ollama uses loopback without a key", s.calls[1]?.url === "http://127.0.0.1:11434/v1/chat/completions" &&
+    !s.calls[1]?.headers?.authorization && s.calls[1]?.body?.model === "local-model");
+  ok("custom can run anonymously", await ask("custom") === "Use /poll." && !s.calls[2]?.headers?.authorization);
+  const configured = { ...env, QOS_AI_API_KEY: "custom-test" };
+  ok("custom uses its own URL, key and model", await ask("custom", { env: configured }) === "Use /poll." &&
+    s.calls[3]?.url === "https://custom.example/v1/chat/completions" &&
+    s.calls[3]?.headers?.authorization === "Bearer custom-test" && s.calls[3]?.body?.model === "configured-model");
+  for (const base of ["http://models.example/v1", "https://user:pass@models.example/v1",
+    "https://models.example/v1?key=value", "https://models.example/v1#fragment"]) {
+    ok(`custom rejects ${new URL(base).origin} with insecure URL configuration`,
+      !(await ask("custom", { env: { ...configured, QOS_AI_BASE_URL: base } })));
+  }
+  ok("no request uses a refused URL or an absent model", !(await ask("custom", {
+    env: { QOS_AI_BASE_URL: env.QOS_AI_BASE_URL },
+  })) && s.calls.length === 4);
+}
+{
+  const s = stub({ error: "reflected private material" }, 403);
+  const adv = makeAdvisor({ ai: true, backend: "ollama", env: {}, fetchImpl: s.fetchImpl });
+  const text = await adv.advise("ask", { question: "q", transcript: [] });
+  ok("configured provider does not report remote error bodies", text === null && adv.lastError === "ollama HTTP 403");
 }
 
 // A plugin of your own, by path.

@@ -75,6 +75,8 @@ Options:
   --active           More assertive (raises budget, shorter cooldowns).
   --ai               Enable the AI advisor (stimulate + disagreement-synthesis + ask).
   --ai-backend <b>   The AI provider plugin (ai-providers/README.md):
+                     openai (OPENAI_API_KEY), ollama (OLLAMA_BASE_URL), or
+                     custom (QOS_AI_BASE_URL and optional QOS_AI_API_KEY).
                      anthropic (default; alias api) — ANTHROPIC_API_KEY, pay as you go;
                      claude-code (alias claude) — the local \`claude\` CLI, your Claude
                        plan, no API key (must be installed + logged in);

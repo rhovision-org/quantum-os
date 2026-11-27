@@ -5,9 +5,12 @@ import { pathToFileURL } from "node:url";
 import anthropic from "./anthropic.mjs";
 import claudeCode from "./claude-code.mjs";
 import deepseek from "./deepseek.mjs";
+import openai from "./openai.mjs";
+import ollama from "./ollama.mjs";
+import custom from "./custom.mjs";
 
-export const BUILTIN = { anthropic, "claude-code": claudeCode, deepseek };
-const ALIASES = { api: "anthropic", claude: "claude-code", cli: "claude-code" };
+export const BUILTIN = { anthropic, "claude-code": claudeCode, deepseek, openai, ollama, custom };
+const ALIASES = { api: "anthropic", claude: "claude-code", cli: "claude-code", localhost: "ollama" };
 
 /** Canonical built-in name for a spec, or null if it is not a built-in. */
 export function builtinName(spec) {

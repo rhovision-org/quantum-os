@@ -14,6 +14,15 @@ node agent.mjs --room <cap> --ai --ai-backend ./my-provider.mjs # your own, by p
 | `anthropic` (alias `api`) | [anthropic.mjs](anthropic.mjs) | `ANTHROPIC_API_KEY` | `claude-haiku-4-5-20251001` |
 | `claude-code` (alias `claude`, `cli`) | [claude-code.mjs](claude-code.mjs) | none — the logged-in `claude` CLI, your Claude plan | the CLI's own |
 | `deepseek` | [deepseek.mjs](deepseek.mjs) | `DEEPSEEK_API_KEY` | `deepseek-chat` |
+| `openai` | [openai.mjs](openai.mjs) | `OPENAI_API_KEY` | `gpt-4.1-mini` |
+| `ollama` (alias `localhost`) | [ollama.mjs](ollama.mjs) | none | `llama3.2` |
+| `custom` | [custom.mjs](custom.mjs) | optional `QOS_AI_API_KEY` | choose with `--ai-model` or `QOS_AI_MODEL` |
+
+`openai` uses the official OpenAI endpoint. `ollama` defaults to
+`http://127.0.0.1:11434/v1` and accepts `OLLAMA_BASE_URL`. Set
+`QOS_AI_BASE_URL` for `custom`, for example `https://models.example/v1`.
+Configured URLs use HTTPS or loopback HTTP. Set the model with `--ai-model`
+or `QOS_AI_MODEL`. The detached launcher accepts `AI_BACKEND`.
 
 **Keys never go through the room.** A provider reads its key from the
 environment of the machine running the agent. The browser's `/agent add … --ai
