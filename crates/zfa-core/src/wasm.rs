@@ -75,16 +75,14 @@ pub fn wasm_capability_from_entropy(bytes: &[u8], label: &str) -> String {
 /// Verify that a hex-encoded capability string is ZFA-balanced.
 #[wasm_bindgen]
 pub fn wasm_capability_valid(hex: &str) -> bool {
-    // Parse cap:label:hextwists format
-    let parts: Vec<&str> = hex.splitn(3, ':').collect();
-    if parts.len() != 3 || parts[0] != "cap" {
+    let mut parts = hex.split(':');
+    let (Some("cap"), Some(_label), Some(raw), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next()) else { return false; };
+    if raw.is_empty() || !raw.bytes().all(|b| (b'0'..=b'7').contains(&b)) {
         return false;
     }
-    let twist_bytes: Vec<u8> = parts[2]
-        .chars()
-        .filter_map(|c| c.to_digit(16).map(|d| d as u8))
-        .collect();
-    achieves_zfa(&parse_twists(&twist_bytes))
+    let twists: Vec<Twist> = raw.bytes().map(|b| Twist::from_u8(b - b'0').expect("checked range")).collect();
+    achieves_zfa(&twists)
 }
 
 /// Lint a rholang source string; true when it has no findings.

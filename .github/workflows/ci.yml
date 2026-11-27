@@ -70,6 +70,9 @@ jobs:
       - name: Typecheck browser
         run: pnpm --filter @quantum-os/browser typecheck
 
+      - name: Capability wire parity
+        run: node packages/browser/test/capability-wire.test.mjs
+
       # The macro language is plain JS so it runs under node with no build,
       # which is the whole reason it is plain JS: its tests are the only ones
       # covering the two lexers and the expander.
