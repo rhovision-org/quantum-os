@@ -57,7 +57,7 @@ creation; it says nothing about another room or another process's handles.
 | `name` | human label |
 | `owner` | dyncap anchor that created/owns the process |
 | `parent` | creating process, or null for init |
-| `state` | `running` · `exited` · `reaped` |
+| `state` | `running` · `suspended` · `exited` · `reaped` |
 | `exitCode` | set on exit; negative signal number for a signal kill |
 | `root` | handle id of the process's namespace root |
 | `handles` | live handle ids |
@@ -337,3 +337,15 @@ published to a public registry.
 `QOS_ABI_VERSION = 0` for this model. A breaking change to object semantics, a syscall's
 arguments, or the error set bumps the version and updates this page in the same PR.
 Adding a reserved syscall implementation does not bump it.
+
+
+### Integrated process control (#325 / #276)
+
+`proc_suspend` and `proc_resume` are canonical embedded syscall operations
+with explicit target SIGNAL handle, its current version and target process
+version. A running caller may transition another running/suspended
+process respectively; self-control, missing capability and invalid states
+are refused. The ordinary owner-attributed lifecycle events remain supported.
+Queued shell jobs require their own sh_control boundary. Scheduler,
+services and device leases reconcile from the same kernel state.
+Suspended children remain active for wait; termination clears handles.

@@ -67,10 +67,12 @@ const alice = await peer("Alice");
 const bob = await peer("Bob");
 
 // --- start -----------------------------------------------------------------
-await alice.cmd.handle("start Alpha | Should we ship?");
+const startReceipt = await alice.cmd.handle("start Alpha | Should we ship?");
 ok("start announces the process", alice.said.some((l) => l.includes("started") && l.includes("Alpha")));
 const id = alice.cmd.list()[0]?.id;
 ok("start tracks a process id", typeof id === "string" && id.startsWith("qos:proc:"), String(id));
+
+ok("the queued command returns the exact process ID", startReceipt === id && typeof startReceipt === "string");
 
 await drain(alice, bob);
 ok("the peer sees the start", bob.said.some((l) => l.includes("started") && l.includes("Alpha")));

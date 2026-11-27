@@ -69,6 +69,11 @@ jobs:
 
       - name: Typecheck browser
         run: pnpm --filter @quantum-os/browser typecheck
+      - name: Parse CI witness scripts
+        run: |
+          for script in packages/browser/test/qos-*.mjs scripts/qos-cli/qos-boot.mjs; do
+            node --check "$script" || exit 1
+          done
 
       # The macro language is plain JS so it runs under node with no build,
       # which is the whole reason it is plain JS: its tests are the only ones
