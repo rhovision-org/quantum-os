@@ -18,6 +18,8 @@ Peer-to-peer QuantumOS running in the browser. ZFA kernel in Rust/WASM, WebRTC d
 
 **Group processes:** **[User Guide →](User_Guide.md)** · **[Developer Guide (build agents) →](Developer_Guide.md)** · **[MacRhoLang — write your own commands →](MacRhoLang.md)** · **[Group Decisions →](Group_Decisions.md)** · **[QOS process orchestration (gate #264) →](docs/qos-process.md)** · **[Quantum Problem Solver →](Collective_Optimization.md)** · **[Governance (liquid democracy) →](Governance.md)** · **[Room Best Practices →](Room_Best_Practices.md)** · **[Live Testing (2+ people) →](Live_Testing.md)** · **[RhoQuCalc Macros — protocols as verified ρ-processes →](RhoQuCalc_Macros.md)**
 
+**Capability research:** **[Candidate capability issuance profile →](docs/capability-issuance-profile.md)**
+
 **Case studies:** **[Multi-Stakeholder Governance →](GovernanceCaseStudy.md)** · **[Collaborative Learning →](CollaborativeLearningCaseStudy.md)** · **[Specialist Closure Room →](SpecialistRoomCaseStudy.md)** · **[Framework Self-Inquiry (draft) →](SelfInquiryCaseStudy.md)**
 
 ## Choose your path

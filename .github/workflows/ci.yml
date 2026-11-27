@@ -167,6 +167,9 @@ jobs:
       - name: Note closure and split regression test
         run: node packages/browser/test/notes.test.mjs
 
+      - name: Candidate capability profile compatibility
+        run: node packages/browser/test/capability-profile.test.mjs
+
       - name: Exchange 2PC recovery test
         run: node packages/browser/test/exchange-2pc.test.mjs
 

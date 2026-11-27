@@ -17,6 +17,15 @@ pub struct Capability {
 }
 
 impl Capability {
+    /// Candidate issuance profile: 34 independent random bytes per initial
+    /// sample, existing alternating twist grammar, scalar-return rejection.
+    /// Not the default issuer; existing room identities are not migrated.
+    pub fn generate_v2_candidate(label: impl Into<String>) -> Self {
+        let mut bytes = [0u8; 34];
+        getrandom::getrandom(&mut bytes).expect("getrandom failed");
+        Self::from_entropy(&bytes, label)
+    }
+
     /// Generate a new capability from raw bytes (e.g., from getrandom).
     ///
     /// Maps each byte to a twist pair `[pos, neg]` (count-balanced by construction)

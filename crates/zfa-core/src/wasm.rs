@@ -72,6 +72,12 @@ pub fn wasm_capability_from_entropy(bytes: &[u8], label: &str) -> String {
     Capability::from_entropy(bytes, label).to_string()
 }
 
+/// Opt-in research candidate; not used by deployed room issuance.
+#[wasm_bindgen]
+pub fn wasm_capability_v2_candidate(label: &str) -> String {
+    Capability::generate_v2_candidate(label).to_string()
+}
+
 /// Verify that a hex-encoded capability string is ZFA-balanced.
 #[wasm_bindgen]
 pub fn wasm_capability_valid(hex: &str) -> bool {

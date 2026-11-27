@@ -124,7 +124,16 @@ const formatCap = (label, tw) => {
 
 // Rejection-sample fresh entropy until Pauli closure holds (~4 iterations).
 export function generateCapability(label) {
-  const bytes = new Uint8Array(16);
+  return generateCapabilityProfile(label, 16);
+}
+
+// Research candidate; no existing caller opts in automatically.
+export function generateCapabilityV2Candidate(label) {
+  return generateCapabilityProfile(label, 34);
+}
+
+function generateCapabilityProfile(label, size) {
+  const bytes = new Uint8Array(size);
   globalThis.crypto.getRandomValues(bytes);
   let tw = bytesToTwists(bytes);
   if (isPauliClosed(tw)) return formatCap(label, tw);
