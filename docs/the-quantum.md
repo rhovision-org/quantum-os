@@ -12,7 +12,10 @@ find agreement without a server, without trusting anyone, and without guessing.
 4. **History selection.** Only the histories that close become events.
 
 This page states each idea once, says where QLF proves or explains it, and names the code in each
-repository that carries it. rhogov and rholo link here rather than restating it.
+repository that carries it. rhogov and rholo link here rather than restating it. Each claim carries
+the label QLF's [Framing.md](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Framing.md)
+asks for: **theorem** (proved in Lean), **fact** (known outside QLF), **bridge** (a connection that is
+still open) or **reading** (an interpretation). ZFA itself remains the one conjecture.
 
 ---
 
@@ -36,14 +39,17 @@ multiplicity in the census ([Information_Physics.md](https://github.com/rhovisio
 
 ## 2. Native active inference
 
-In QLF, active inference is the substrate's own rule, not a model added on top. Every closure is a
-Markov-blanket agent resolving one binary distinction. Its two orderings, `t·t†` and `t†·t`, are
+In QLF's reading, active inference is the substrate's own rule rather than a model added on top: every
+closure is a Markov-blanket agent resolving one binary distinction. Its two orderings, `t·t†` and `t†·t`, are
 equally many, so the prior is fair with nothing to set it. The closure realises one ordering, so the
 outcome is decisive. Two Lean results meet at that point:
 
-- **Free energy.** `zfa_closure_minimizes_free_energy` gives ΔF = −log 2 per half-spin closure
-  ([`QLF_FreeEnergy.lean`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_FreeEnergy.lean)).
-- **Bayesian inference.** One binary observation is worth at most log 2 on average (`eig_le_log_two`),
+- **The one-bit quantum (theorem).** `zfa_closure_minimizes_free_energy` gives ΔF = −log 2 per half-spin
+  closure ([`QLF_FreeEnergy.lean`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_FreeEnergy.lean)).
+  That this log 2 *is* Friston's variational free energy is an **open bridge** (CC5): the match is in
+  magnitude at the uniform point, and no identity is claimed
+  ([Cooperative_Intelligence.md §5b](https://github.com/rhovision-org/quantum-logical-framework/blob/main/Cooperative_Intelligence.md)).
+- **Bayesian inference (theorem).** One binary observation is worth at most log 2 on average (`eig_le_log_two`),
   and exactly log 2 only when the prior is fair and the outcome decisive (`eig_eq_log_two_iff`). That is
   the closure's case, so the closure is the *optimal* Bayesian update, not merely one of them
   ([`QLF_MrEUpdate.lean`](https://github.com/rhovision-org/quantum-logical-framework/blob/main/lean/QLF_MrEUpdate.lean),
@@ -56,6 +62,10 @@ most information a single distinction can carry
 **In quantum-os.**
 - Every capability token, lemma cap and room id is a closure, checked by `achieves_zfa` in
   `crates/zfa-core` and `zfa.ts`.
+- The exact Bayesian step is proposed as `crates/mre-core` ([#260](https://github.com/rhovision-org/quantum-os/issues/260);
+  first slice in PR #318), with a native `rho:mre:*` in rholo
+  ([rholo#562](https://github.com/rhovision-org/rholo/issues/562)) and opt-in calibrated trust weights in rhogov
+  ([rhogov#119](https://github.com/rhovision-org/rhogov/issues/119)). None of these is shipped yet.
 - A room is one distributed synthesis whose peers are Markov-blanket sub-agents
   ([QLF_as_Intelligence.md §8](https://github.com/rhovision-org/quantum-logical-framework/blob/main/QLF_as_Intelligence.md)).
 - **For people, the bit is a ceiling to aim for, not a guarantee.** A yes/no question settled in a room
@@ -99,6 +109,13 @@ ZFA is the sole selection principle.
   history with no service and nothing to trust.
 - A room selects its own history with `/poll`, the consensus probe, `/lemma` and a chaired closure. Each
   is deterministic and joiner-local: every peer recomputes the same selection from the same signed inputs.
+- **Keep the kinds of closure apart** ([#354](https://github.com/rhovision-org/quantum-os/issues/354)).
+  A shared `/solve` is *logical* closure. A `/poll` or probe result is *social* closure. Neither is
+  *empirical* closure: by CC0, agreement with no observation in its record carries no information, however
+  many peers agree. A room's selected history is what it decided, not evidence that it is true.
+- Until QLF's CC4 bridge (an encoding of a cooperative history into a QLF history, fixed in advance) is
+  closed, a room's verdicts are **QLF-inspired verification, not QLF-derived closure**. The ZFA check on a
+  token is QLF's own predicate. The claim that a group decision *is* a ZFA closure is a reading.
 
 ---
 
@@ -107,8 +124,13 @@ ZFA is the sole selection principle.
 The database holds every possibility. Selection keeps the ones that close. Each closure is an optimal
 one-bit inference. Reflection lets a room read what it selected and build on it, and every loop
 returns to a record anyone can recheck. That is the whole trick, and none of it is mysterious: QLF
-calls it "the end of quantum magic", because probability becomes counting ways and agreement becomes
-closure.
+calls it "the end of quantum magic", because probability becomes counting ways. For a group, the
+substrate's guarantees become design goals: ask evenly open questions, keep each source's provenance
+(relays and copies add no origin, CC3), and put an observation in the record before calling a result
+true.
+
+The same ideas appear at every layer, and each layer can stand alone
+([#359](https://github.com/rhovision-org/quantum-os/issues/359)):
 
 | Idea | QLF source | quantum-os | rhogov | rholo |
 |---|---|---|---|---|
