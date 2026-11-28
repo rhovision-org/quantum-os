@@ -382,7 +382,7 @@ Names a logical claim so peers can reference it by `@name` in any command. Lemma
 - `/lemma <claim>` — write the claim as a sentence and mark one word as the handle with `@`: `/lemma All men are @mortal` registers `@mortal`, keeps the sentence as the shown text, and auto-allocates twists deterministically from the handle (every peer gets the same twists — no server)
 - `/lemma <claim> | <twists>` — supply twists explicitly after a pipe (symbolic `^v<>/\+-`, hex `0-7`, `cap:token`, or `@ref1 @ref2` to compose)
 - Also works: a bare multi-word name (`/lemma socrates is a man` → `@[socrates is a man]`), a leading handle (`/lemma @concl Socrates is mortal | @mortal @man`), and the older forms `/lemma name twists` and `/lemma [name with spaces] twists`
-- `@name` anywhere in `/qucalc` args — expand and compose named lemmas
+- `@name` anywhere in `/qucalc` args — expand and compose named lemmas. In a slash command `@name` is always a lemma; only plain chat reads `@name` as a mention of a person or agent (see `/ask` below)
 
 When the twist sequence is ZFA-balanced, a `cap:name:hex` capability token is auto-minted and shown. The Lemmas panel in the sidebar lists each handle (with its claim text) as a clickable item — click `@name` to prefill `/qucalc @name`.
 
@@ -565,6 +565,8 @@ See [MultisigDemo.md](../MultisigDemo.md) for a worked example combining `/dynca
 Finds a **live** AI agent in the room and relays `/<role> ask <question>` as chat. Preference is the **facilitator** (`/facil ask …`) when one is present; otherwise the lowest-peer-id other present agent. The agent badge cache is filtered by the live peer roster, so a departed agent is not chosen. If no agent is present, it says so and sends nothing — it never pretends to have an answer locally. The chosen agent is addressed by its role prefix; the line is still room chat, so every peer sees it. The browser only picks the agent; it does not vouch for it, and the agent answers for itself.
 
 Direct addressing is not limited to the built-in roles. If a live peer announced a custom role such as `heckler`, `/heckler help` (or any `/heckler …` line) is relayed exactly like `/skeptic …`. If `heckler` is the agent's display name but its role is `skeptic`, the browser relays `/skeptic …` to that agent instead. The lookup uses the live `peers` roster, not the sticky badge cache, so a departed agent does not become a phantom command.
+
+**`@mentions` in plain chat** are the other way to reach an agent, and they are not a command. `@skeptic, is this correct?` goes out as ordinary chat, unchanged. Each agent matches `@name` against who is in the room now (its display name, role or command prefix) and decides for itself what being named means: the facilitator, scribe and skeptic answer the rest of the line in their role's voice, the greeter answers only the basics, and an observer only says it is there. A name two participants share is ambiguous and addresses nobody, and a name nobody here holds stays text. A mention never moves funds or starts anything: the faucet and the other actions stay explicit commands. Agents never answer another agent's mention, so two agents cannot set each other off. A display name is a label, not authority. **`@name` inside a slash command is still a lemma** (`/lemma All men are @mortal`, `/qucalc @mortal`), and `@name` in inline code, in quotes or in an email address is not a mention. The parser is [`scripts/qos-cli/mentions.mjs`](../scripts/qos-cli/mentions.mjs) (quantum-os#341).
 
 ### `/agent`: AI agents in the room
 

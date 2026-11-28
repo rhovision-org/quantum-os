@@ -112,6 +112,9 @@ jobs:
       - name: Agent chat history selftest
         run: node scripts/qos-cli/chat-history.mjs --selftest
 
+      - name: Chat mention parser selftest
+        run: node scripts/qos-cli/mentions.mjs --selftest
+
       - name: Locker selftest
         run: node packages/browser/src/locker.js --selftest
 

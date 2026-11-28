@@ -17,6 +17,16 @@
 //   stimulate      AI: re-engage after a lull                   (lead-only)
 //   synthesize     AI: name the crux of a disagreement
 // `ask` (the `/<cmd> ask` AI answer) is always available when --ai is on.
+//
+// `attend` is the role's own reading of an `@mention` of it in plain chat
+// (quantum-os#341). A mention is attention, not a command, so each role decides:
+//   answer    treat the rest of the line as a question in this role's voice
+//   basics    answer only from the built-in knowledge (no AI call); otherwise
+//             point at `/<cmd> ask`
+//   presence  say it is here and how to address it, nothing more
+//   silent    note it and say nothing
+// Mentions from other agents are never answered (no bot-to-bot storms), and the
+// role's governance standing still applies. Absent → "answer".
 
 export const ROLES = {
   facilitator: {
@@ -31,6 +41,7 @@ export const ROLES = {
       dominator: true, discrepancy: true, stimulate: true, synthesize: true,
       verify: false, history: true,
     },
+    attend: "answer",
   },
 
   scribe: {
@@ -45,6 +56,7 @@ export const ROLES = {
       dominator: false, discrepancy: true, stimulate: false, synthesize: false,
       verify: false, history: true,
     },
+    attend: "answer",
   },
 
   greeter: {
@@ -59,6 +71,8 @@ export const ROLES = {
       dominator: false, discrepancy: false, stimulate: false, synthesize: false,
       verify: false,
     },
+    // The doorway, not the conversation: basics only, no open-ended AI answer.
+    attend: "basics",
   },
 
   skeptic: {
@@ -74,6 +88,7 @@ export const ROLES = {
       // Only the skeptic verifies: which predicate did that history actually pass?
       verify: true,
     },
+    attend: "answer",
   },
 };
 
@@ -90,6 +105,8 @@ ROLES.observer = {
     dominator: false, discrepancy: false, stimulate: false, synthesize: false,
     verify: false,
   },
+  // Addressed by name, it says it is here; it does not take part.
+  attend: "presence",
 };
 
 export const DEFAULT_ROLE = "facilitator";
@@ -99,6 +116,14 @@ export function resolveRole(name) {
   if (!name) return ROLES[DEFAULT_ROLE];
   const key = String(name).toLowerCase();
   return ROLES[key] ?? null;
+}
+
+export const ATTEND_MODES = ["answer", "basics", "presence", "silent"];
+
+/** How a role reads an `@mention` of itself (see `attend` above). */
+export function attendOf(role) {
+  const m = role?.attend;
+  return ATTEND_MODES.includes(m) ? m : "answer";
 }
 
 /** Which duties a given role name performs (empty object if unknown). */

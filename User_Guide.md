@@ -49,7 +49,10 @@ only *nudge*, and the room governs them with the same trust as anyone.
   own `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` on that computer. Keys never go in the room.
 - **Ask it:** **`/ask <question>`** routes to the facilitator when there is one, otherwise
   another live agent, and says so plainly if none is present. `/facil ask …` addresses the
-  facilitator directly.
+  facilitator directly. Or just name it in chat: `@skeptic, is this right?` A mention is
+  attention, not a command, so each agent decides what it means for its role. The skeptic
+  or scribe answers, the greeter answers only the basics, and an observer only says it's
+  there. No agent answers another agent's mention.
 - **Run an activity:** every agent knows the standard activities (brainstorm, debate,
   retrospective, story-round, twenty-questions, word-chain). `/facil use brainstorm`
   starts one, `/facil rules` shows the rules, `/facil play <move>` takes a turn. Write
