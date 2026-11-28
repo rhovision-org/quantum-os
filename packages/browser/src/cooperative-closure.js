@@ -639,6 +639,27 @@ export function runFixtures({ closes } = {}) {
     check("CC3: the same origin repeating itself is one contribution", r.repeat === true && l.status("q").origins.length === 1);
   }
 
+  // Record forgetting (QLF#350, QLF_RecordForgetting.lean / QLF_SantaClosure.lean):
+  // a record recovers a forgotten distinction iff it is not a function of the
+  // record it is joined to. Copies and reports computed from one record add no
+  // observational support (redundant_record_adds_nothing, reports_add_nothing);
+  // an independently grounded observation adds one (independent_record_decides).
+  {
+    const g = new ProvenanceGraph();
+    g.add({ id: "gift", origin: "Giver", kind: "observation", content: "gift given" });
+    const reports = ["gift"];
+    for (let i = 0; i < 1000; i++) {
+      const id = `report${i}`;
+      g.add({ id, origin: `R${i}`, kind: i % 2 ? "relay" : "derivation", cites: [reports[i]] });
+      reports.push(id);
+    }
+    check("record forgetting: 1,000 copies and reports of one record add no observation",
+      canonical([...g.observationOriginsOf(reports)]) === canonical(["Giver"]));
+    g.add({ id: "receipt", origin: "Child", kind: "observation", content: "gift received" });
+    check("record forgetting: an independently grounded observation adds one",
+      g.observationOriginsOf([...reports, "receipt"]).size === 2);
+  }
+
   // CC2/CC6 — irreducible synthesis: parity of n bits is resolved by all n
   // holders and by no proper subset; held variables matter, not member count.
   for (const n of [2, 3, 4, 5]) {

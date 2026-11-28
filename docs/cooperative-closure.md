@@ -175,6 +175,7 @@ them with its own ZFA predicate, and that predicate reproduces QLF's census at l
 |---|---|
 | CC0 | 50 relays of one assertion are one origin, stay a candidate and aren't promotable; one observation makes the claim empirically supported |
 | CC3 | relays add no origin or observation; repeating yourself is one contribution |
+| record forgetting | 1,000 copies and reports computed from one record add no observation; an independently grounded observation adds one ([QLF#350](https://github.com/rhovision-org/quantum-logical-framework/pull/350): `redundant_record_adds_nothing`, `reports_add_nothing`, `independent_record_decides`) |
 | CC2 | parity of 2–5 bits: only all holders resolve it |
 | CC6 | an echo chamber, an irrelevant member, an unheld variable, proper subsets stay blind |
 | witness | `^`×n with `v`×n closes jointly, and no proper sub-coalition closes (n = 1–4) |
