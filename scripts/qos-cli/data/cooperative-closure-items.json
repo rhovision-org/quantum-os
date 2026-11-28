@@ -1,0 +1,3237 @@
+{
+ "v": "cooperative-closure-bank/1",
+ "seed": 354,
+ "perClass": 6,
+ "items": [
+  {
+   "id": "complementary-1",
+   "class": "complementary",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "f0",
+     "f1"
+    ]
+   },
+   "world": {
+    "f0": 1,
+    "f1": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f1": 1
+       },
+       "at": 1
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "delayed-relevance-1",
+   "class": "delayed-relevance",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2"
+    ],
+    "needsWhen": {
+     "x2": {
+      "ifVar": "x0",
+      "equals": 1
+     }
+    }
+   },
+   "world": {
+    "x0": 1,
+    "x1": 1,
+    "x2": 0
+   },
+   "participants": [
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "false-analogy-1",
+   "class": "false-analogy",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "m0",
+     "m1",
+     "m2"
+    ]
+   },
+   "world": {
+    "m0": 1,
+    "m1": 1,
+    "m2": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "m2": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m2": 0
+       },
+       "at": 3
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "common-source-1",
+   "class": "common-source",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x",
+     "y"
+    ]
+   },
+   "world": {
+    "x": 1,
+    "y": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "x": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x": 1
+       },
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Eli",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "y": 0
+       },
+       "at": 4
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "majority-vs-minority-1",
+   "class": "majority-vs-minority",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "z"
+    ]
+   },
+   "world": {
+    "z": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 0
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 0
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "z": 1
+       },
+       "at": 3
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "parity-1",
+   "class": "parity",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1"
+    ]
+   },
+   "world": {
+    "x0": 0,
+    "x1": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 0
+       },
+       "at": 1
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "constructive-1",
+   "class": "constructive",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "need",
+     "offer",
+     "commitment",
+     "fulfillment",
+     "acknowledgment"
+    ]
+   },
+   "world": {
+    "need": 1,
+    "offer": 1,
+    "commitment": 1,
+    "fulfillment": 1,
+    "acknowledgment": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "need": 1
+       },
+       "at": 0
+      },
+      {
+       "kind": "observation",
+       "vars": {
+        "acknowledgment": 1
+       },
+       "at": 4
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "offer": 1
+       },
+       "at": 1
+      },
+      {
+       "kind": "assertion",
+       "vars": {
+        "commitment": 1
+       },
+       "at": 2
+      },
+      {
+       "kind": "observation",
+       "vars": {
+        "fulfillment": 1
+       },
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "commitment": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "no-holder-1",
+   "class": "no-holder",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2"
+    ]
+   },
+   "world": {
+    "x0": 1,
+    "x1": 0,
+    "x2": 1
+   },
+   "unresolvable": true,
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 0
+       },
+       "at": 1
+      }
+     ]
+    }
+   ],
+   "truth": "UNRESOLVABLE"
+  },
+  {
+   "id": "complementary-2",
+   "class": "complementary",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "f0",
+     "f1",
+     "f2"
+    ]
+   },
+   "world": {
+    "f0": 0,
+    "f1": 1,
+    "f2": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f0": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f2": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "delayed-relevance-2",
+   "class": "delayed-relevance",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2"
+    ],
+    "needsWhen": {
+     "x2": {
+      "ifVar": "x0",
+      "equals": 1
+     }
+    }
+   },
+   "world": {
+    "x0": 1,
+    "x1": 1,
+    "x2": 0
+   },
+   "participants": [
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "false-analogy-2",
+   "class": "false-analogy",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "m0",
+     "m1",
+     "m2"
+    ]
+   },
+   "world": {
+    "m0": 1,
+    "m1": 1,
+    "m2": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "m2": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m2": 0
+       },
+       "at": 4
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "common-source-2",
+   "class": "common-source",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x",
+     "y"
+    ]
+   },
+   "world": {
+    "x": 0,
+    "y": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "x": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Eli",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x": 0
+       },
+       "at": 4
+      }
+     ]
+    },
+    {
+     "name": "Fay",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "y": 0
+       },
+       "at": 5
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "majority-vs-minority-2",
+   "class": "majority-vs-minority",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "z"
+    ]
+   },
+   "world": {
+    "z": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 0
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 0
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 0
+       },
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Eli",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "z": 1
+       },
+       "at": 4
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "parity-2",
+   "class": "parity",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2"
+    ]
+   },
+   "world": {
+    "x0": 0,
+    "x1": 1,
+    "x2": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "constructive-2",
+   "class": "constructive",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "need",
+     "offer",
+     "commitment",
+     "fulfillment",
+     "acknowledgment"
+    ]
+   },
+   "world": {
+    "need": 1,
+    "offer": 1,
+    "commitment": 1,
+    "fulfillment": 0,
+    "acknowledgment": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "need": 1
+       },
+       "at": 0
+      },
+      {
+       "kind": "observation",
+       "vars": {
+        "acknowledgment": 0
+       },
+       "at": 4
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "offer": 1
+       },
+       "at": 1
+      },
+      {
+       "kind": "assertion",
+       "vars": {
+        "commitment": 1
+       },
+       "at": 2
+      },
+      {
+       "kind": "observation",
+       "vars": {
+        "fulfillment": 0
+       },
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "commitment": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "no-holder-2",
+   "class": "no-holder",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2",
+     "x3"
+    ]
+   },
+   "world": {
+    "x0": 1,
+    "x1": 1,
+    "x2": 0,
+    "x3": 0
+   },
+   "unresolvable": true,
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 0
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": "UNRESOLVABLE"
+  },
+  {
+   "id": "complementary-3",
+   "class": "complementary",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "f0",
+     "f1",
+     "f2",
+     "f3"
+    ]
+   },
+   "world": {
+    "f0": 1,
+    "f1": 1,
+    "f2": 1,
+    "f3": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f2": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f3": 1
+       },
+       "at": 3
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "delayed-relevance-3",
+   "class": "delayed-relevance",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2"
+    ],
+    "needsWhen": {
+     "x2": {
+      "ifVar": "x0",
+      "equals": 1
+     }
+    }
+   },
+   "world": {
+    "x0": 1,
+    "x1": 0,
+    "x2": 1
+   },
+   "participants": [
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 0
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "false-analogy-3",
+   "class": "false-analogy",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "m0",
+     "m1",
+     "m2"
+    ]
+   },
+   "world": {
+    "m0": 1,
+    "m1": 1,
+    "m2": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "m2": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m2": 0
+       },
+       "at": 5
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "common-source-3",
+   "class": "common-source",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x",
+     "y"
+    ]
+   },
+   "world": {
+    "x": 0,
+    "y": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "x": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Eli",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 4
+      }
+     ]
+    },
+    {
+     "name": "Fay",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x": 0
+       },
+       "at": 5
+      }
+     ]
+    },
+    {
+     "name": "Gus",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "y": 0
+       },
+       "at": 6
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "majority-vs-minority-3",
+   "class": "majority-vs-minority",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "z"
+    ]
+   },
+   "world": {
+    "z": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 0
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 0
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "z": 1
+       },
+       "at": 3
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "parity-3",
+   "class": "parity",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2",
+     "x3"
+    ]
+   },
+   "world": {
+    "x0": 1,
+    "x1": 1,
+    "x2": 1,
+    "x3": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x3": 1
+       },
+       "at": 3
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "constructive-3",
+   "class": "constructive",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "need",
+     "offer",
+     "commitment",
+     "fulfillment",
+     "acknowledgment"
+    ]
+   },
+   "world": {
+    "need": 1,
+    "offer": 1,
+    "commitment": 1,
+    "fulfillment": 1,
+    "acknowledgment": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "need": 1
+       },
+       "at": 0
+      },
+      {
+       "kind": "observation",
+       "vars": {
+        "acknowledgment": 1
+       },
+       "at": 4
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "offer": 1
+       },
+       "at": 1
+      },
+      {
+       "kind": "assertion",
+       "vars": {
+        "commitment": 1
+       },
+       "at": 2
+      },
+      {
+       "kind": "observation",
+       "vars": {
+        "fulfillment": 1
+       },
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "commitment": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "no-holder-3",
+   "class": "no-holder",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2",
+     "x3",
+     "x4"
+    ]
+   },
+   "world": {
+    "x0": 0,
+    "x1": 1,
+    "x2": 1,
+    "x3": 0,
+    "x4": 1
+   },
+   "unresolvable": true,
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x3": 0
+       },
+       "at": 3
+      }
+     ]
+    }
+   ],
+   "truth": "UNRESOLVABLE"
+  },
+  {
+   "id": "complementary-4",
+   "class": "complementary",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "f0",
+     "f1"
+    ]
+   },
+   "world": {
+    "f0": 0,
+    "f1": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f0": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f1": 1
+       },
+       "at": 1
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "delayed-relevance-4",
+   "class": "delayed-relevance",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2"
+    ],
+    "needsWhen": {
+     "x2": {
+      "ifVar": "x0",
+      "equals": 1
+     }
+    }
+   },
+   "world": {
+    "x0": 1,
+    "x1": 1,
+    "x2": 1
+   },
+   "participants": [
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "false-analogy-4",
+   "class": "false-analogy",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "m0",
+     "m1",
+     "m2"
+    ]
+   },
+   "world": {
+    "m0": 1,
+    "m1": 1,
+    "m2": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "m2": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m2": 0
+       },
+       "at": 6
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "common-source-4",
+   "class": "common-source",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x",
+     "y"
+    ]
+   },
+   "world": {
+    "x": 0,
+    "y": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "x": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x": 0
+       },
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Eli",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "y": 0
+       },
+       "at": 4
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "majority-vs-minority-4",
+   "class": "majority-vs-minority",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "z"
+    ]
+   },
+   "world": {
+    "z": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 1
+       },
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Eli",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "z": 0
+       },
+       "at": 4
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "parity-4",
+   "class": "parity",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2",
+     "x3",
+     "x4"
+    ]
+   },
+   "world": {
+    "x0": 0,
+    "x1": 1,
+    "x2": 0,
+    "x3": 0,
+    "x4": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 0
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x3": 0
+       },
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Eli",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x4": 1
+       },
+       "at": 4
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "constructive-4",
+   "class": "constructive",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "need",
+     "offer",
+     "commitment",
+     "fulfillment",
+     "acknowledgment"
+    ]
+   },
+   "world": {
+    "need": 1,
+    "offer": 1,
+    "commitment": 1,
+    "fulfillment": 0,
+    "acknowledgment": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "need": 1
+       },
+       "at": 0
+      },
+      {
+       "kind": "observation",
+       "vars": {
+        "acknowledgment": 0
+       },
+       "at": 4
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "offer": 1
+       },
+       "at": 1
+      },
+      {
+       "kind": "assertion",
+       "vars": {
+        "commitment": 1
+       },
+       "at": 2
+      },
+      {
+       "kind": "observation",
+       "vars": {
+        "fulfillment": 0
+       },
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "commitment": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "no-holder-4",
+   "class": "no-holder",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2"
+    ]
+   },
+   "world": {
+    "x0": 1,
+    "x1": 0,
+    "x2": 1
+   },
+   "unresolvable": true,
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 0
+       },
+       "at": 1
+      }
+     ]
+    }
+   ],
+   "truth": "UNRESOLVABLE"
+  },
+  {
+   "id": "complementary-5",
+   "class": "complementary",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "f0",
+     "f1",
+     "f2"
+    ]
+   },
+   "world": {
+    "f0": 1,
+    "f1": 1,
+    "f2": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f2": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "delayed-relevance-5",
+   "class": "delayed-relevance",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2"
+    ],
+    "needsWhen": {
+     "x2": {
+      "ifVar": "x0",
+      "equals": 1
+     }
+    }
+   },
+   "world": {
+    "x0": 1,
+    "x1": 1,
+    "x2": 0
+   },
+   "participants": [
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "false-analogy-5",
+   "class": "false-analogy",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "m0",
+     "m1",
+     "m2"
+    ]
+   },
+   "world": {
+    "m0": 1,
+    "m1": 1,
+    "m2": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "m2": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m2": 0
+       },
+       "at": 7
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "common-source-5",
+   "class": "common-source",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x",
+     "y"
+    ]
+   },
+   "world": {
+    "x": 1,
+    "y": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "x": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Eli",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x": 1
+       },
+       "at": 4
+      }
+     ]
+    },
+    {
+     "name": "Fay",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "y": 0
+       },
+       "at": 5
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "majority-vs-minority-5",
+   "class": "majority-vs-minority",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "z"
+    ]
+   },
+   "world": {
+    "z": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "z": 0
+       },
+       "at": 3
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "parity-5",
+   "class": "parity",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1"
+    ]
+   },
+   "world": {
+    "x0": 1,
+    "x1": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 0
+       },
+       "at": 1
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "constructive-5",
+   "class": "constructive",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "need",
+     "offer",
+     "commitment",
+     "fulfillment",
+     "acknowledgment"
+    ]
+   },
+   "world": {
+    "need": 1,
+    "offer": 1,
+    "commitment": 1,
+    "fulfillment": 1,
+    "acknowledgment": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "need": 1
+       },
+       "at": 0
+      },
+      {
+       "kind": "observation",
+       "vars": {
+        "acknowledgment": 1
+       },
+       "at": 4
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "offer": 1
+       },
+       "at": 1
+      },
+      {
+       "kind": "assertion",
+       "vars": {
+        "commitment": 1
+       },
+       "at": 2
+      },
+      {
+       "kind": "observation",
+       "vars": {
+        "fulfillment": 1
+       },
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "commitment": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "no-holder-5",
+   "class": "no-holder",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2",
+     "x3"
+    ]
+   },
+   "world": {
+    "x0": 1,
+    "x1": 1,
+    "x2": 1,
+    "x3": 0
+   },
+   "unresolvable": true,
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": "UNRESOLVABLE"
+  },
+  {
+   "id": "complementary-6",
+   "class": "complementary",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "f0",
+     "f1",
+     "f2",
+     "f3"
+    ]
+   },
+   "world": {
+    "f0": 1,
+    "f1": 0,
+    "f2": 1,
+    "f3": 1
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f1": 0
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f2": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "f3": 1
+       },
+       "at": 3
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "delayed-relevance-6",
+   "class": "delayed-relevance",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2"
+    ],
+    "needsWhen": {
+     "x2": {
+      "ifVar": "x0",
+      "equals": 1
+     }
+    }
+   },
+   "world": {
+    "x0": 1,
+    "x1": 0,
+    "x2": 1
+   },
+   "participants": [
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 0
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "false-analogy-6",
+   "class": "false-analogy",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "m0",
+     "m1",
+     "m2"
+    ]
+   },
+   "world": {
+    "m0": 1,
+    "m1": 1,
+    "m2": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m0": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "m2": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "m2": 0
+       },
+       "at": 8
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "common-source-6",
+   "class": "common-source",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x",
+     "y"
+    ]
+   },
+   "world": {
+    "x": 1,
+    "y": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "x": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Eli",
+     "statements": [
+      {
+       "kind": "relay",
+       "relayOf": "Ada",
+       "at": 4
+      }
+     ]
+    },
+    {
+     "name": "Fay",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x": 1
+       },
+       "at": 5
+      }
+     ]
+    },
+    {
+     "name": "Gus",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "y": 0
+       },
+       "at": 6
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "majority-vs-minority-6",
+   "class": "majority-vs-minority",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "z"
+    ]
+   },
+   "world": {
+    "z": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 1
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 1
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "assertion",
+       "vars": {
+        "z": 1
+       },
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Eli",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "z": 0
+       },
+       "at": 4
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "parity-6",
+   "class": "parity",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2"
+    ]
+   },
+   "world": {
+    "x0": 0,
+    "x1": 1,
+    "x2": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 0
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 1
+  },
+  {
+   "id": "constructive-6",
+   "class": "constructive",
+   "question": {
+    "kind": "all",
+    "vars": [
+     "need",
+     "offer",
+     "commitment",
+     "fulfillment",
+     "acknowledgment"
+    ]
+   },
+   "world": {
+    "need": 1,
+    "offer": 1,
+    "commitment": 1,
+    "fulfillment": 0,
+    "acknowledgment": 0
+   },
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "need": 1
+       },
+       "at": 0
+      },
+      {
+       "kind": "observation",
+       "vars": {
+        "acknowledgment": 0
+       },
+       "at": 4
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "offer": 1
+       },
+       "at": 1
+      },
+      {
+       "kind": "assertion",
+       "vars": {
+        "commitment": 1
+       },
+       "at": 2
+      },
+      {
+       "kind": "observation",
+       "vars": {
+        "fulfillment": 0
+       },
+       "at": 3
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "commitment": 1
+       },
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "truth": 0
+  },
+  {
+   "id": "no-holder-6",
+   "class": "no-holder",
+   "question": {
+    "kind": "parity",
+    "vars": [
+     "x0",
+     "x1",
+     "x2",
+     "x3",
+     "x4"
+    ]
+   },
+   "world": {
+    "x0": 0,
+    "x1": 1,
+    "x2": 0,
+    "x3": 0,
+    "x4": 1
+   },
+   "unresolvable": true,
+   "participants": [
+    {
+     "name": "Ada",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x0": 0
+       },
+       "at": 0
+      }
+     ]
+    },
+    {
+     "name": "Ben",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x1": 1
+       },
+       "at": 1
+      }
+     ]
+    },
+    {
+     "name": "Cai",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x2": 0
+       },
+       "at": 2
+      }
+     ]
+    },
+    {
+     "name": "Dee",
+     "statements": [
+      {
+       "kind": "observation",
+       "vars": {
+        "x3": 0
+       },
+       "at": 3
+      }
+     ]
+    }
+   ],
+   "truth": "UNRESOLVABLE"
+  }
+ ]
+}

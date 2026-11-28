@@ -293,6 +293,13 @@ future is un-rendered possibility; the search renders a slice of it). This is th
 possibility step of the [quantum problem solver](../Collective_Optimization.md) made
 literal.
 
+**What "truth" means here.** A closure is *logical* closure: the obligations the history
+states are met, and every peer can recompute that. It is not evidence about the world. By
+QLF's CC0, agreement with no observation in its record is the same in every world, so it
+carries no information. A room's shared `/search` or `/solve` becomes evidence only when an
+observation is in its provenance. See [cooperative-closure.md](cooperative-closure.md#what-a-shared-solve-is-and-is-not)
+for the four closures (social, logical, empirical, constructive) kept apart.
+
 ```
 /search ^<v>+-              next closures from an explicit position
 /search @plan               … from a named lemma (or  /search cap:token)
@@ -305,7 +312,7 @@ literal.
 **Discovered events are kept.** Each new closure an `events` search finds is
 registered as a room **lemma named with an integer** in discovery order (`@1`,
 `@2`, …), so a re-run finds them already known rather than anonymous — the room
-accumulates the truths it has divined. Bounded (default 32 per search, raise with
+accumulates the closures it has found (logical closures, not observations). Bounded (default 32 per search, raise with
 `--save-cap N`); `@N` works in any command (`/qucalc @7`), and they sync to peers
 like any lemma. The room's lemma store **is** the closure cache — a re-run finds
 its own past discoveries already named, with no service to hold them.
@@ -333,6 +340,10 @@ aggregate check. Core: [`packages/browser/src/qucalc-enum.ts`](../packages/brows
 The complement of `/search`. **`/search` renders every way to close (the
 experiment); `/solve` finds the solution, or the path to it** — it picks the
 *one* closure the substrate takes and hands you the continuation that reaches it.
+
+A shared `/solve` is **logical closure**: every peer computes the same path from the same
+algebra, with nobody to trust. It is not validated truth about the world. That needs an
+observation in its provenance ([cooperative-closure.md](cooperative-closure.md#what-a-shared-solve-is-and-is-not)).
 
 ```
 /solve ^</>+          the least-free-action completion of a partial position

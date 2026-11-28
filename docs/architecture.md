@@ -14,6 +14,7 @@ Detail pages hang off this one:
 | [qos-process.md](qos-process.md) | named QOS processes: the finite event contract, dyncap-attributed lifecycle, deterministic orchestration, failure modes, and the chain boundary (gate quantum-os#264) |
 | [os-roadmap.md](os-roadmap.md) · [os-abi.md](os-abi.md) | QOS/1 — the OS layer model, invariants, milestones, and the v0 handle/syscall ABI (design + first slice) |
 | [success-frameworks.md](success-frameworks.md) · [success-charter.md](success-charter.md) · [rhoqu-success-recipes.md](rhoqu-success-recipes.md) | private goals, group charters, the required RhoGov handoff artifact, and RhoQu recipes with their current limits |
+| [cooperative-closure.md](cooperative-closure.md) · [cooperative-closure-experiment.md](cooperative-closure-experiment.md) | #354: provenance graph, closure certificates and their lifecycle, anti-hysteria promotion, the cooperative listener, the shared QLF fixtures, and the pre-registered experiment (engine and harness built; no room surface yet) |
 | [../Consensus.md](../Consensus.md) | the `/probe` protocol and threat model |
 | [../SECURITY.md](../SECURITY.md) | the full threat model, known issues, reporting |
 | [../scripts/qos-cli/README.md](../scripts/qos-cli/README.md) | the headless Node peer, memory daemon, agents, bridge |
