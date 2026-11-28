@@ -48,7 +48,8 @@ reference](https://github.com/rhovision-org/quantum-logical-framework/blob/main/
 computed locally, no service). That is the generate step performed by the
 substrate rather than by proposal — *the search is the experiment*, **truth divination**: it asks
 which of the a-priori possibilities actually close from here, and in QLF truth is what closes (a
-closure receipt, not a standing proposition). `/search` with no argument co-reads every peer's
+closure receipt, not a standing proposition — logical closure, which is evidence about the world
+only with an observation in its provenance; see [cooperative closure](docs/cooperative-closure.md#what-a-shared-solve-is-and-is-not)). `/search` with no argument co-reads every peer's
 `/qlf-action` position through one set of listeners (per-phase, per-depth, and per **listening
 horizon** `capacity:R`) — a **meeting of minds**, the room reading its own possibility space, peers as
 Markov-blanket sub-agents, the listeners the room's joint reading

@@ -115,6 +115,12 @@ jobs:
       - name: Chat mention parser selftest
         run: node scripts/qos-cli/mentions.mjs --selftest
 
+      - name: Cooperative closure selftest (#354 fixtures)
+        run: node packages/browser/src/cooperative-closure.js --selftest
+
+      - name: Cooperative closure experiment harness selftest
+        run: node scripts/qos-cli/cooperative-closure-experiment.mjs --selftest
+
       - name: Locker selftest
         run: node packages/browser/src/locker.js --selftest
 
