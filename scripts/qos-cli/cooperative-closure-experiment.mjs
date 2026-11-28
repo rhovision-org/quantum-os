@@ -371,6 +371,22 @@ async function selftest() {
   return fail;
 }
 
+function cachedModel(model, file) {
+  let cache = {};
+  try { cache = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+  const key = (o) => `${model.name}\u0000${o.system}\u0000${o.prompt}`;
+  return {
+    name: model.name,
+    complete: async (o) => {
+      const k = key(o);
+      if (k in cache) return { text: cache[k] };
+      const out = await model.complete(o);
+      if (!out?.error) { cache[k] = out?.text ?? ""; fs.writeFileSync(file, JSON.stringify(cache)); }
+      return out;
+    },
+  };
+}
+
 async function main(argv) {
   if (argv.includes("--selftest")) process.exit(await selftest() ? 1 : 0);
   if (argv.includes("--build-bank")) {
@@ -390,6 +406,10 @@ async function main(argv) {
     const why = prov.unavailable?.(process.env);
     if (why) { console.error(`--ai ${prov.name}: ${why}`); process.exit(2); }
     model = { name: prov.name, complete: (o) => prov.complete({ ...o, env: process.env, model: prov.defaultModel, timeoutMs: 60_000 }) };
+    // --cache <file>: keep every answer as it arrives, so a run stopped by a usage
+    // limit resumes where it stopped instead of paying for the same calls again.
+    const c = argv.indexOf("--cache");
+    if (c >= 0) model = cachedModel(model, argv[c + 1]);
   } else if (!argv.includes("--mock")) {
     console.error("pass --mock (plumbing only) or --ai <provider> (a real run)"); process.exit(2);
   }

@@ -119,7 +119,12 @@ cd scripts/qos-cli
 node cooperative-closure-experiment.mjs --selftest              # harness checks (CI)
 node cooperative-closure-experiment.mjs --mock                  # plumbing only
 node cooperative-closure-experiment.mjs --ai claude-code --out run.json   # a real run
+node cooperative-closure-experiment.mjs --ai claude-code --cache calls.json --out run.json   # resumable
 ```
+
+`--cache` keeps each model answer as it arrives. A run stopped by a usage limit can be started
+again with the same file, and it repeats no call it already made. The cache changes no answer, so
+it does not touch the frozen design.
 
 `--ai` takes any [provider plugin](../scripts/qos-cli/ai-providers/README.md): `claude-code`,
 `anthropic` or `deepseek`. A real run makes about six model calls per item. Record the model and
