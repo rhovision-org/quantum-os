@@ -36,7 +36,8 @@ import { loadProvider } from "./ai-providers/index.mjs";
 import { loadSkill, listSkills, standardSkills } from "./skills.mjs";
 import { answerFromKnowledge } from "./facilitator-faq.mjs";
 import { createGameRecorder, compactForPrompt, trustWeightsFromGroups } from "./game-log.mjs";
-import { ROLES, DEFAULT_ROLE, resolveRole, dutiesOf } from "./agent-roles.mjs";
+import { ROLES, DEFAULT_ROLE, resolveRole, dutiesOf, attendOf } from "./agent-roles.mjs";
+import { mentionContext } from "./mentions.mjs";
 import { trustLevels, discreditedMembers, isMember, groupHasRatings, normalizeGroup, TRUST_MAX } from "./gov.mjs";
 import { MACROS } from "./rholang-macros.mjs";
 import { DEFAULT_CONFIG as REV_DEFAULT_CONFIG, revAddressOf, deployTerm as revDeployTerm } from "./rholang-client.mjs";
@@ -404,7 +405,8 @@ export async function run(args) {
   const spokeAt = new Map();
   const joinedAt = new Map();
   const chatLog = [];              // {peer, at} for all chats (rolling)
-  const recentMsgs = [];           // {name, text, at} for AI context (rolling)
+  const recentMsgs = [];           // {name, text, at, mentions?} for AI context (rolling)
+  const invitedAt = new Map();     // peerId -> when somebody @named that person (#341)
   // Screen history for `/<cmd> list [n]` — every chat line and command result the
   // agent saw, oldest first, bounded by count (NOT time, unlike recentMsgs). A
   // scribe's whole job is the record; this is the room's scrollback for a peer
@@ -519,7 +521,7 @@ export async function run(args) {
   function isLead(duty, sameRoleOnly = false) {
     if (!role.duties[duty]) return false;
     const cands = [identity.peerId];
-    for (const id of present) {
+    for (const id of new Set([...present, ...(peer?.roster ?? [])])) {
       if (id === identity.peerId) continue;
       const rk = agents.get(id);
       if (!rk) continue;                                  // not a known agent
@@ -721,6 +723,48 @@ export async function run(args) {
       return;
     }
     reply(`${aiFailure()} Your move is noted; try again in a moment.`, null, 0);
+  }
+
+  // ---- @mentions in plain chat (quantum-os#341) ------------------------------
+  // A mention is conversational context, not a command: the wire is unchanged,
+  // recognition is local (mentions.mjs), and what it means is this role's call
+  // (`attend` in agent-roles.mjs). Matched only against who is in the room now,
+  // so a stale or departed name never addresses anybody, and a display name is
+  // never authority.
+  function participants() {
+    const list = [{ id: identity.peerId, names: [myName, ...aliases] }];
+    for (const id of new Set([...present, ...(peer?.roster ?? [])])) {
+      if (id === identity.peerId) continue;
+      const names = [];
+      const n = realName(peerNames.get(id));
+      if (n) names.push(n);
+      const r = agents.get(id);
+      if (r) { names.push(r); const rr = resolveRole(r); if (rr) names.push(rr.cmd); }
+      list.push({ id, names });
+    }
+    return list;
+  }
+  const INVITED_MS = 5 * 60_000;   // someone @named a person: the facilitator lets that invitation stand
+  function attendTo(fromId, ctx) {
+    if (isAgentPeer(fromId)) return;   // never answer another agent's mention: no bot-to-bot storms
+    const mode = attendOf(role);
+    if (mode === "silent") return;
+    const key = `attend:${fromId}`;
+    if (!cooled(key, 4_000)) return;
+    cooldown.set(key, Date.now());
+    const q = /^[\s?!.,:;]*$/.test(ctx.rest) ? "" : ctx.rest;
+    if (mode === "presence" || !q) { directReply(fromId, statusText() + chairStatusSuffix()); return; }
+    // A mention never moves funds or starts anything: those stay explicit commands.
+    if (FAUCET_INTENT_RE.test(q)) {
+      reply(facilKey ? `For test REV, use \`/${CMD} faucet\` — I don't act on a mention.` : `I can't send REV here.`, `attendfaucet:${fromId}`, 10_000);
+      return;
+    }
+    if (mode === "basics") {
+      const known = answerFromKnowledge(q, { cmd: CMD });
+      reply(known ?? `That's beyond me — I'm the doorway. Try \`/ask ${q.slice(0, 80)}\` for the room's facilitator, or \`/${CMD} help\`.`, known ? null : `attendbasics:${fromId}`, known ? 0 : 15_000);
+      return;
+    }
+    bg(handleAsk(q, fromId), "attend");
   }
 
   async function handleAsk(q, fromId) {
@@ -1227,12 +1271,16 @@ export async function run(args) {
       case "chat": {
         spokeAt.set(from, Date.now());
         chatLog.push({ peer: from, at: Date.now() });
-        recentMsgs.push({ name: nameOf(from), text: String(d.text ?? "").slice(0, 280), at: Date.now() });
+        const mctx = mentionContext(d.text, { participants: participants(), selfId: identity.peerId });
+        const named = mctx.mentions.filter((mm) => !mm.ambiguous).map((mm) => mm.name);
+        recentMsgs.push({ name: nameOf(from), text: String(d.text ?? "").slice(0, 280), at: Date.now(), ...(named.length ? { mentions: named } : {}) });
         remember(nameOf(from), d.text);
         heard(from, hasName(from) ? nameOf(from) : undefined, String(d.text ?? ""));
         if (args.verbose) console.log(`[${nameOf(from)}] ${String(d.text).slice(0, 120)}`);
         introduceTo(from);   // covers a human who chats before announcing a name
         if (handleCommand(d.text, from)) break;
+        for (const id of mctx.others) if (!isAgentPeer(id)) invitedAt.set(id, Date.now());
+        if (mctx.toMe) attendTo(from, mctx);
         // collect normal chat into an active chaired deliberation (skip agents + slash-commands)
         if (chair && !isAgentPeer(from)) {
           const txt = String(d.text ?? "");
@@ -1380,7 +1428,7 @@ export async function run(args) {
     if (!role.duties.silentQuarter || !leadGate("silentQuarter")) return;
     if (humans < 2) return;
     const now = Date.now();
-    const quiet = [...present].filter((id) => !isAgentPeer(id) && (now - (joinedAt.get(id) ?? now)) > SILENT_MS && (now - (spokeAt.get(id) ?? 0)) > SILENT_MS);
+    const quiet = [...present].filter((id) => !isAgentPeer(id) && (now - (joinedAt.get(id) ?? now)) > SILENT_MS && (now - (spokeAt.get(id) ?? 0)) > SILENT_MS && (now - (invitedAt.get(id) ?? 0)) > INVITED_MS);
     if (!quiet.length) return;
     const names = quiet.slice(0, 2).map(nameOf).join(", ");
     say(`We haven't heard from everyone — ${names}, curious what you're thinking on this?`, "silent", CD.silent);

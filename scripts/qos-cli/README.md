@@ -227,12 +227,14 @@ The loopback test spins an in-process signaling relay and two peers that
 connect and exchange a chat — exercising the full handshake + data channel
 locally (needs `ws` + `werift`).
 
-Two end-to-end tests drive the **real `agent.mjs`** the same way — an
+These end-to-end tests drive the **real `agent.mjs`** the same way — an
 in-process relay, the agent in a role, and one driver peer that talks to it
 and checks the replies (and, for the observer, the files it writes):
 
 ```bash
 node list-cmd.e2e.mjs    # `/scribe list N` — the room's screen history
+node mentions.e2e.mjs    # `@skeptic` / `@scribe` in plain chat: each robot reads the mention for its own role (#341)
+node mentions.mjs --selftest   # the `@name` parser: word boundaries, ambiguity, lemmas, code, emails
 node history.e2e.mjs    # a joiner is handed the conversation the facilitator heard (sync-chat)
 node chat-history.mjs --selftest   # history trimming + reading it back from a --persist transcript
 node observer.e2e.mjs    # `/observer start … stop` — records a game, materializes the qos-game/1 record + index
